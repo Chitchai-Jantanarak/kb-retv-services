@@ -1,0 +1,49 @@
+app:
+  env: "development"
+
+server:
+  port: "8080"
+
+mysql:
+  enabled: false
+  dsn: "user:password@tcp(localhost:3306)/dbname"
+  maxOpenConns: 25
+  maxIdleConns: 5
+
+qdrant:
+  enabled: false
+  url: "http://localhost:6333"
+  apiKey: ""
+  collectionPrefix: "centric_rag"
+  tenantCollections: false
+
+memgraph:
+  enabled: false
+  uri: "bolt://localhost:7687"
+  username: ""
+  password: ""
+
+redis:
+  url: "redis://localhost:6379"
+
+logger:
+  level: "info"
+  format: "console"
+  outputPath: ""
+
+swagger:
+  enabled: true
+
+apiKeys:
+  openai: ""
+  gemini: ""
+  anthropic: ""
+  voyage: ""
+  openrouter: ""
+
+llm:
+  default_vendor: "openai"
+  embedding_provider: "auto"
+  embedding_model: ""
+  embedding_dim: 0
+  local_url: ""

@@ -1,0 +1,347 @@
+package config
+
+import (
+	"bufio"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+type Config struct {
+	App      App
+	Server   Server
+	MySQL    MySQL
+	Redis    Redis
+	Qdrant   Qdrant
+	Memgraph Memgraph
+	LLM      LLM
+	APIKeys  APIKeys
+	Logger   Logger
+	Swagger  Swagger
+	Laravel  Laravel
+}
+
+type Laravel struct {
+	BaseURL          string
+	WebhookSecret    string
+	TicketPath       string
+	Timeout          int
+	JWTSecret        string
+	JWTPublicKeyPath string
+	JWKSURL          string
+}
+
+type App struct {
+	Env string
+}
+
+func (a App) IsProduction() bool {
+	env := strings.ToLower(strings.TrimSpace(a.Env))
+	return env == "prod" || env == "production"
+}
+
+type Server struct {
+	Port string
+}
+
+type MySQL struct {
+	Enabled      bool
+	DSN          string
+	MaxOpenConns int
+	MaxIdleConns int
+}
+
+type Redis struct {
+	URL string
+}
+
+type Qdrant struct {
+	Enabled          bool
+	URL              string
+	APIKey           string
+	CollectionPrefix string
+}
+
+type Memgraph struct {
+	Enabled  bool
+	URI      string
+	URL      string
+	Username string
+	Password string
+}
+
+type LLM struct {
+	DefaultVendor     string
+	DefaultModel      string
+	EmbeddingProvider string
+	EmbeddingModel    string
+	EmbeddingDim      int
+	OpenAIKey         string
+	OpenAIBaseURL     string
+	GeminiKey         string
+	AnthropicKey      string
+	OpenRouterTitle   string
+	ReferrerURL       string
+	LocalURL          string
+	ProviderConfigKey string
+}
+
+type APIKeys struct {
+	OpenAI     string
+	Gemini     string
+	Anthropic  string
+	Voyage     string
+	OpenRouter string
+}
+
+type Logger struct {
+	Level      string
+	Format     string
+	OutputPath string
+}
+
+type Swagger struct {
+	Enabled bool
+}
+
+func (s Swagger) EnabledFor(app App) bool {
+	return s.Enabled && !app.IsProduction()
+}
+
+func Load() (Config, error) {
+	return LoadFrom("config.yaml")
+}
+
+func LoadFrom(path string) (Config, error) {
+	v := viper.New()
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	v.SetDefault("app.env", "development")
+	v.SetDefault("server.port", "8080")
+	v.SetDefault("mysql.enabled", false)
+	v.SetDefault("mysql.maxOpenConns", 25)
+	v.SetDefault("mysql.maxIdleConns", 5)
+	v.SetDefault("qdrant.enabled", false)
+	v.SetDefault("qdrant.url", "http://localhost:6333")
+	v.SetDefault("qdrant.collectionPrefix", "kb_chunks")
+	v.SetDefault("memgraph.enabled", false)
+	v.SetDefault("memgraph.uri", "bolt://localhost:7687")
+	v.SetDefault("llm.default_vendor", "openai")
+	v.SetDefault("logger.level", "info")
+	v.SetDefault("logger.format", "console")
+	v.SetDefault("swagger.enabled", true)
+
+	if path != "" {
+		v.SetConfigFile(path)
+		if err := v.ReadInConfig(); err != nil {
+			var notFound viper.ConfigFileNotFoundError
+			if !errors.As(err, &notFound) {
+				return Config{}, err
+			}
+		}
+		if err := loadDotEnv(v, filepath.Join(filepath.Dir(path), ".env")); err != nil {
+			return Config{}, err
+		}
+	}
+
+	cfg := Config{
+		App: App{
+			Env: v.GetString("app.env"),
+		},
+		Server: Server{
+			Port: v.GetString("server.port"),
+		},
+		MySQL: MySQL{
+			Enabled:      v.GetBool("mysql.enabled"),
+			DSN:          v.GetString("mysql.dsn"),
+			MaxOpenConns: v.GetInt("mysql.maxOpenConns"),
+			MaxIdleConns: v.GetInt("mysql.maxIdleConns"),
+		},
+		Redis: Redis{
+			URL: v.GetString("redis.url"),
+		},
+		Qdrant: Qdrant{
+			Enabled:          v.GetBool("qdrant.enabled"),
+			URL:              v.GetString("qdrant.url"),
+			APIKey:           firstNonEmpty(v.GetString("qdrant.api_key"), v.GetString("qdrant.apiKey")),
+			CollectionPrefix: v.GetString("qdrant.collectionPrefix"),
+		},
+		Memgraph: Memgraph{
+			Enabled:  v.GetBool("memgraph.enabled"),
+			URI:      v.GetString("memgraph.uri"),
+			URL:      firstNonEmpty(v.GetString("memgraph.url"), v.GetString("memgraph.uri")),
+			Username: v.GetString("memgraph.username"),
+			Password: v.GetString("memgraph.password"),
+		},
+		LLM: LLM{
+			DefaultVendor: v.GetString("llm.default_vendor"),
+			DefaultModel:  v.GetString("llm.default_model"),
+			EmbeddingProvider: firstNonEmpty(
+				v.GetString("llm.embedding_provider"),
+				v.GetString("llm.default_vendor"),
+			),
+			EmbeddingModel:    v.GetString("llm.embedding_model"),
+			EmbeddingDim:      v.GetInt("llm.embedding_dim"),
+			OpenAIKey:         firstNonEmpty(v.GetString("apiKeys.openai"), v.GetString("llm.openai_key")),
+			OpenAIBaseURL:     v.GetString("llm.openai_base_url"),
+			GeminiKey:         firstNonEmpty(v.GetString("apiKeys.gemini"), v.GetString("llm.gemini_key")),
+			AnthropicKey:      firstNonEmpty(v.GetString("apiKeys.anthropic"), v.GetString("llm.anthropic_key")),
+			OpenRouterTitle:   v.GetString("llm.openrouter_title"),
+			ReferrerURL:       v.GetString("llm.referrer_url"),
+			LocalURL:          v.GetString("llm.local_url"),
+			ProviderConfigKey: v.GetString("llm.provider_config_key"),
+		},
+		APIKeys: APIKeys{
+			OpenAI:     firstNonEmpty(v.GetString("apiKeys.openai"), v.GetString("llm.openai_key")),
+			Gemini:     firstNonEmpty(v.GetString("apiKeys.gemini"), v.GetString("llm.gemini_key")),
+			Anthropic:  firstNonEmpty(v.GetString("apiKeys.anthropic"), v.GetString("llm.anthropic_key")),
+			Voyage:     v.GetString("apiKeys.voyage"),
+			OpenRouter: v.GetString("apiKeys.openrouter"),
+		},
+		Logger: Logger{
+			Level:      v.GetString("logger.level"),
+			Format:     v.GetString("logger.format"),
+			OutputPath: v.GetString("logger.outputPath"),
+		},
+		Swagger: Swagger{
+			Enabled: v.GetBool("swagger.enabled"),
+		},
+		Laravel: Laravel{
+			BaseURL:          v.GetString("laravel.base_url"),
+			WebhookSecret:    v.GetString("laravel.webhook_secret"),
+			TicketPath:       firstNonEmpty(v.GetString("laravel.ticket_path"), "/api/webhooks/ai/ticket-create"),
+			Timeout:          firstNonZero(v.GetInt("laravel.timeout"), 10),
+			JWTSecret:        v.GetString("laravel.jwt_secret"),
+			JWTPublicKeyPath: v.GetString("laravel.jwt_public_key_path"),
+			JWKSURL:          v.GetString("laravel.jwks_url"),
+		},
+	}
+	return cfg, nil
+}
+
+type envBinding struct {
+	key string
+	env string
+}
+
+var envBindings = []envBinding{
+	{key: "app.env", env: "APP_ENV"},
+	{key: "server.port", env: "SERVER_PORT"},
+	{key: "mysql.enabled", env: "MYSQL_ENABLED"},
+	{key: "mysql.dsn", env: "MYSQL_DSN"},
+	{key: "mysql.maxOpenConns", env: "MYSQL_MAXOPENCONNS"},
+	{key: "mysql.maxIdleConns", env: "MYSQL_MAXIDLECONNS"},
+	{key: "qdrant.enabled", env: "QDRANT_ENABLED"},
+	{key: "qdrant.url", env: "QDRANT_URL"},
+	{key: "qdrant.apiKey", env: "QDRANT_APIKEY"},
+	{key: "qdrant.collectionPrefix", env: "QDRANT_COLLECTIONPREFIX"},
+	{key: "memgraph.enabled", env: "MEMGRAPH_ENABLED"},
+	{key: "memgraph.uri", env: "MEMGRAPH_URI"},
+	{key: "memgraph.username", env: "MEMGRAPH_USERNAME"},
+	{key: "memgraph.password", env: "MEMGRAPH_PASSWORD"},
+	{key: "redis.url", env: "REDIS_URL"},
+	{key: "logger.level", env: "LOGGER_LEVEL"},
+	{key: "logger.format", env: "LOGGER_FORMAT"},
+	{key: "logger.outputPath", env: "LOGGER_OUTPUTPATH"},
+	{key: "swagger.enabled", env: "SWAGGER_ENABLED"},
+	{key: "apiKeys.openai", env: "APIKEYS_OPENAI"},
+	{key: "apiKeys.gemini", env: "APIKEYS_GEMINI"},
+	{key: "apiKeys.anthropic", env: "APIKEYS_ANTHROPIC"},
+	{key: "apiKeys.voyage", env: "APIKEYS_VOYAGE"},
+	{key: "apiKeys.openrouter", env: "APIKEYS_OPENROUTER"},
+	{key: "llm.default_vendor", env: "LLM_DEFAULT_VENDOR"},
+	{key: "llm.default_model", env: "LLM_DEFAULT_MODEL"},
+	{key: "llm.embedding_provider", env: "LLM_EMBEDDING_PROVIDER"},
+	{key: "llm.embedding_model", env: "LLM_EMBEDDING_MODEL"},
+	{key: "llm.embedding_dim", env: "LLM_EMBEDDING_DIM"},
+	{key: "llm.openai_base_url", env: "LLM_OPENAI_BASE_URL"},
+	{key: "llm.openrouter_title", env: "LLM_OPENROUTER_TITLE"},
+	{key: "llm.referrer_url", env: "LLM_REFERRER_URL"},
+	{key: "llm.local_url", env: "LLM_LOCAL_URL"},
+	{key: "llm.provider_config_key", env: "AI_PROVIDER_KEY"},
+	{key: "laravel.base_url", env: "LARAVEL_BASE_URL"},
+	{key: "laravel.webhook_secret", env: "LARAVEL_WEBHOOK_SECRET"},
+	{key: "laravel.ticket_path", env: "LARAVEL_TICKET_PATH"},
+	{key: "laravel.timeout", env: "LARAVEL_TIMEOUT"},
+	{key: "laravel.jwt_secret", env: "AI_SERVICE_JWT_SECRET"},
+	{key: "laravel.jwt_public_key_path", env: "JWT_PUBLIC_KEY_PATH"},
+	{key: "laravel.jwks_url", env: "JWT_JWKS_URL"},
+}
+
+func loadDotEnv(v *viper.Viper, path string) error {
+	file, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	values := make(map[string]string)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		name, value, ok := parseEnvLine(scanner.Text())
+		if ok {
+			values[name] = value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	for _, binding := range envBindings {
+		value, ok := values[binding.env]
+		if !ok {
+			continue
+		}
+		if _, ok := os.LookupEnv(binding.env); ok {
+			continue
+		}
+		v.Set(binding.key, value)
+	}
+	return nil
+}
+
+func parseEnvLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+
+	name, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return "", "", false
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", false
+	}
+
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"'`)
+	return name, value, true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonZero(values ...int) int {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
+}

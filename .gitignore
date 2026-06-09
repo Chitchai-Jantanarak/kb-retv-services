@@ -1,0 +1,33 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Go build and test outputs
+*.exe
+*.test
+*.out
+coverage.out
+*.coverprofile
+bin/
+build/
+dist/
+
+# Local scratch, hot reload, and logs
+tmp/
+*.log
+
+# Editor/OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Accidental editor/formatter backup files
+*.go.*
+*.tmp
+
+
+/plan.md
+docs
+README.md

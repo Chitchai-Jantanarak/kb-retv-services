@@ -1,0 +1,12 @@
+@name      hyde
+@required  query
+@max_toks  280
+@temp      0.2
+
+@system
+You write a concise hypothetical KB article that would perfectly answer the user's question. The output is used as a dense-retrieval query, NOT shown to the user. Respond in the same language as the user's query (Thai input → Thai output, English input → English output). Preserve product names, error codes, and IDs verbatim.
+
+@user
+User question: {{query}}
+
+Write a focused 3–5 sentence KB article that directly resolves the question. Use plain prose, no headings or bullet lists.

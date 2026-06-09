@@ -1,0 +1,147 @@
+package omnichannel
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/my/app/internal/application/dto"
+)
+
+type ChannelAccount struct {
+	ID         int64
+	CompanyID  int64
+	Channel    string
+	ExternalID string
+}
+
+type AccountResolver interface {
+	ByChannelAndExternalID(ctx context.Context, channel, externalID string) (ChannelAccount, error)
+}
+
+type Conversation struct {
+	ID               int64
+	CompanyID        int64
+	ChannelAccountID int64
+	ExternalCustomer string
+}
+
+type ConversationStore interface {
+	UpsertConversation(ctx context.Context, c Conversation) (int64, error)
+}
+
+type StoredMessage struct {
+	ConversationID    int64
+	ExternalMessageID string
+	SenderExternal    string
+	Body              string
+	RawPayload        []byte
+}
+
+type MessageStore interface {
+	InsertMessage(ctx context.Context, m StoredMessage) (int64, error)
+}
+
+type TicketEnqueuer interface {
+	EnqueueTicket(ctx context.Context, companyID, conversationID, messageID int64, senderExternal string, req dto.InboundMessageRequest) error
+}
+
+type Workflow struct {
+	accounts      AccountResolver
+	conversations ConversationStore
+	messages      MessageStore
+	tickets       TicketEnqueuer
+}
+
+type Config struct {
+	Accounts      AccountResolver
+	Conversations ConversationStore
+	Messages      MessageStore
+	Tickets       TicketEnqueuer
+}
+
+func New(cfg Config) (*Workflow, error) {
+	if cfg.Accounts == nil {
+		return nil, errors.New("omnichannel: accounts resolver is required")
+	}
+	if cfg.Conversations == nil {
+		return nil, errors.New("omnichannel: conversation store is required")
+	}
+	if cfg.Messages == nil {
+		return nil, errors.New("omnichannel: message store is required")
+	}
+	return &Workflow{
+		accounts:      cfg.Accounts,
+		conversations: cfg.Conversations,
+		messages:      cfg.Messages,
+		tickets:       cfg.Tickets,
+	}, nil
+}
+
+type Result struct {
+	CompanyID      int64
+	ConversationID int64
+	MessageID      int64
+	TicketEnqueued bool
+}
+
+func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, error) {
+	req := n.Request
+	req.Normalize()
+	if err := req.Validate(); err != nil {
+		return Result{}, fmt.Errorf("omnichannel: invalid request: %w", err)
+	}
+	customer := strings.TrimSpace(n.ExternalSender)
+	if customer == "" {
+		return Result{}, errors.New("omnichannel: external sender is required")
+	}
+	accountKey := strings.TrimSpace(n.AccountExternalID)
+	if accountKey == "" {
+		accountKey = customer
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+
+	account, err := w.accounts.ByChannelAndExternalID(ctx, req.Channel, accountKey)
+	if err != nil {
+		return Result{}, fmt.Errorf("omnichannel: resolve channel account: %w", err)
+	}
+	if account.CompanyID <= 0 {
+		return Result{}, fmt.Errorf("omnichannel: channel account %s/%s has no company", req.Channel, accountKey)
+	}
+
+	convoID, err := w.conversations.UpsertConversation(ctx, Conversation{
+		CompanyID:        account.CompanyID,
+		ChannelAccountID: account.ID,
+		ExternalCustomer: customer,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("omnichannel: upsert conversation: %w", err)
+	}
+
+	msgID, err := w.messages.InsertMessage(ctx, StoredMessage{
+		ConversationID:    convoID,
+		ExternalMessageID: req.ExternalMessageID,
+		SenderExternal:    customer,
+		Body:              req.Body,
+		RawPayload:        raw,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("omnichannel: insert message: %w", err)
+	}
+
+	res := Result{
+		CompanyID:      account.CompanyID,
+		ConversationID: convoID,
+		MessageID:      msgID,
+	}
+	if w.tickets != nil {
+		if err := w.tickets.EnqueueTicket(ctx, account.CompanyID, convoID, msgID, customer, req); err != nil {
+			return res, fmt.Errorf("omnichannel: enqueue ticket: %w", err)
+		}
+		res.TicketEnqueued = true
+	}
+	return res, nil
+}

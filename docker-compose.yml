@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/app
+    depends_on:
+      - qdrant
+      - memgraph
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  memgraph:
+    image: memgraph/memgraph:latest
+    ports:
+      - "7687:7687"
+      - "3000:3000"
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+
+volumes:
+  qdrant_data:
+  memgraph_data:

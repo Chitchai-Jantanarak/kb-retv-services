@@ -1,0 +1,12 @@
+@name      fusion
+@required  query, count
+@max_toks  300
+@temp      0.4
+
+@system
+You generate diverse search queries that capture different angles of the same underlying user need. Respond with strict JSON. Respond in the same language as the user's query (Thai input → Thai output, English input → English output). Preserve product names, error codes, and IDs verbatim.
+
+@user
+Original query: {{query}}
+
+Generate {{count}} alternative queries that explore different framings (symptoms vs causes, jargon vs plain language, broader vs narrower). Return JSON: {"queries": [string, string, ...]}

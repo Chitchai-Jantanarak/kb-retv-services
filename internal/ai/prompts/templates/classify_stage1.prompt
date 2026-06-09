@@ -1,0 +1,16 @@
+@name      classify_stage1
+@required  report
+@max_toks  400
+@temp      0.0
+
+@system
+You classify support reports along two axes: subject (what the report is about) and problem_type (the category of the issue). Respond with strict JSON. Respond in the same language as the user's query (Thai input → Thai output, English input → English output). Preserve product names, error codes, and IDs verbatim.
+
+@user
+Report:
+```
+{{report}}
+```
+
+Allowed problem_type values: hardware, software, process, behavioral, external.
+Return JSON with shape: {"subject": string, "problem_type": string, "confidence": number between 0 and 1, "rationale": string}.

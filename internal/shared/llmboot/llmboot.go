@@ -1,0 +1,64 @@
+// Package llmboot wires the LLM + embedding stack from shared config.
+// It centralises what cmd/api and cmd/worker would otherwise duplicate
+// (Settings struct assembly, env-var fallbacks, AgentLookup wiring).
+package llmboot
+
+import (
+	"os"
+
+	"github.com/my/app/internal/ai/embeddings"
+	"github.com/my/app/internal/infra/llm"
+	"github.com/my/app/internal/infra/tenant"
+	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
+	"github.com/my/app/internal/shared/config"
+)
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// LLMSettings builds an llm.Settings from cfg + environment variable
+// fallbacks. Env vars always win when present (OPENAI_API_KEY etc.).
+func LLMSettings(cfg config.Config) llm.Settings {
+	return llm.Settings{
+		Vendor:          cfg.LLM.DefaultVendor,
+		Model:           cfg.LLM.DefaultModel,
+		OpenAIKey:       firstNonEmpty(os.Getenv("OPENAI_API_KEY"), cfg.APIKeys.OpenAI, cfg.LLM.OpenAIKey),
+		AnthropicKey:    firstNonEmpty(os.Getenv("ANTHROPIC_API_KEY"), cfg.APIKeys.Anthropic, cfg.LLM.AnthropicKey),
+		GeminiKey:       firstNonEmpty(os.Getenv("GEMINI_API_KEY"), cfg.APIKeys.Gemini, cfg.LLM.GeminiKey),
+		OpenRouterKey:   firstNonEmpty(os.Getenv("OPENROUTER_API_KEY"), cfg.APIKeys.OpenRouter),
+		OpenAIBaseURL:   cfg.LLM.OpenAIBaseURL,
+		OpenRouterTitle: cfg.LLM.OpenRouterTitle,
+		ReferrerURL:     cfg.LLM.ReferrerURL,
+	}
+}
+
+// EmbeddingSettings builds embeddings.ProviderSettings using the same
+// env+cfg fallback chain. Voyage is embedding-only so it lives here.
+func EmbeddingSettings(cfg config.Config) embeddings.ProviderSettings {
+	return embeddings.ProviderSettings{
+		Provider:      cfg.LLM.EmbeddingProvider,
+		Model:         cfg.LLM.EmbeddingModel,
+		Dimensions:    cfg.LLM.EmbeddingDim,
+		OpenAIKey:     firstNonEmpty(os.Getenv("OPENAI_API_KEY"), cfg.APIKeys.OpenAI, cfg.LLM.OpenAIKey),
+		GeminiKey:     firstNonEmpty(os.Getenv("GEMINI_API_KEY"), cfg.APIKeys.Gemini, cfg.LLM.GeminiKey),
+		VoyageKey:     firstNonEmpty(os.Getenv("VOYAGE_API_KEY"), cfg.APIKeys.Voyage),
+		OpenRouterKey: firstNonEmpty(os.Getenv("OPENROUTER_API_KEY"), cfg.APIKeys.OpenRouter),
+		LocalURL:      cfg.LLM.LocalURL,
+	}
+}
+
+// Resolver constructs an llm.CompanyResolver wired to a MySQL
+// AgentLookup when db is non-nil. db == nil falls back to defaults.
+func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error) {
+	var lookup llm.AgentLookup
+	if db != nil {
+		lookup = mysqlai.NewAgentLookup(db, cfg.LLM.ProviderConfigKey)
+	}
+	return llm.NewCompanyResolver(lookup, LLMSettings(cfg))
+}

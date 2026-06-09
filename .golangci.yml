@@ -1,0 +1,174 @@
+version: "2"
+
+run:
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - gofumpt
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/my/app
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dogsled
+    - dupl
+    - errcheck
+    - errorlint
+    - funlen
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nestif
+    - nilerr
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: var-naming
+        - name: indent-error-flow
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: range-val-in-closure
+        - name: time-naming
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: errorf
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: increment-decrement
+        - name: blank-imports
+        - name: package-comments
+          disabled: true
+        - name: exported
+          disabled: true
+
+    gocyclo:
+      min-complexity: 20
+
+    funlen:
+      lines: 160
+      statements: 80
+      ignore-comments: true
+
+    nestif:
+      min-complexity: 6
+
+    dupl:
+      threshold: 150
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+    gosec:
+      excludes:
+        - G306
+        - G404
+        - G115
+
+    staticcheck:
+      checks:
+        - all
+        - "-ST1000"
+        - "-ST1003"
+        - "-ST1020"
+        - "-ST1021"
+        - "-ST1022"
+        - "-QF1006"
+
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        - (*go.uber.org/zap.Logger).Sync
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+        - (*github.com/neo4j/neo4j-go-driver/v5/neo4j.SessionWithContext).Close
+
+    perfsprint:
+      strconcat: false
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocyclo
+          - dupl
+          - gosec
+          - errcheck
+          - revive
+          - perfsprint
+
+      - path: pkg/
+        linters:
+          - revive
+          - errcheck
+          - gosec
+          - staticcheck
+          - dupl
+          - funlen
+          - gocyclo
+          - perfsprint
+          - nestif
+          - nilerr
+          - errorlint
+
+      - path: cmd/
+        linters:
+          - gocyclo
+          - funlen
+          - gosec
+
+      - path: scripts/
+        linters:
+          - unused
+          - revive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-dirs:
+    - vendor
+    - bin
+    - tmp
+    - dist
+    - generated
+    - docs

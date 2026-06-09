@@ -1,0 +1,18 @@
+@name      classify_stage2
+@required  report, severity_options
+@max_toks  500
+@temp      0.0
+
+@system
+You classify support reports along two axes: severity (impact) and symptom (short canonical phrase that describes the failure mode). Respond with strict JSON. Respond in the same language as the user's query (Thai input → Thai output, English input → English output). Preserve product names, error codes, and IDs verbatim.
+
+@user
+Report:
+```
+{{report}}
+```
+
+Known severities: {{severity_options}}
+Known symptoms (may be empty if first pass): {{symptom_options}}
+
+Return JSON with shape: {"severity": string, "symptom": string, "symptom_is_new": boolean, "confidence": number between 0 and 1, "rationale": string}. If no existing symptom fits, propose a new canonical phrase under 8 words and set symptom_is_new=true.

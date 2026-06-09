@@ -1,0 +1,332 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"strings"
+
+	"github.com/labstack/echo/v5"
+	"go.uber.org/zap"
+
+	"github.com/my/app/internal/ai/embeddings"
+	"github.com/my/app/internal/ai/prompts"
+	"github.com/my/app/internal/ai/rag"
+	"github.com/my/app/internal/application/services/tickets"
+	"github.com/my/app/internal/application/workflows/omnichannel"
+	promotewf "github.com/my/app/internal/application/workflows/promote"
+	"github.com/my/app/internal/application/workflows/reply"
+	"github.com/my/app/internal/domain/kb"
+	"github.com/my/app/internal/domain/ports"
+	infraasynq "github.com/my/app/internal/infra/asynq"
+	"github.com/my/app/internal/infra/llm"
+	"github.com/my/app/internal/infra/memgraph"
+	infra_mysql "github.com/my/app/internal/infra/mysql"
+	"github.com/my/app/internal/infra/qdrant"
+	"github.com/my/app/internal/infra/tenant"
+	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
+	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
+	"github.com/my/app/internal/repositories/graph"
+	"github.com/my/app/internal/repositories/kb/memory"
+	mysqlkb "github.com/my/app/internal/repositories/kb/mysql"
+	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
+	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
+	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/shared/llmboot"
+	"github.com/my/app/internal/shared/logger"
+	"github.com/my/app/internal/transport/http/handlers"
+	"github.com/my/app/internal/transport/http/routes"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		panic("load config: " + err.Error())
+	}
+
+	if err := logger.Init(logger.Config{
+		Level:      cfg.Logger.Level,
+		Format:     cfg.Logger.Format,
+		OutputPath: cfg.Logger.OutputPath,
+	}); err != nil {
+		panic("init logger: " + err.Error())
+	}
+	defer func() { _ = logger.Get().Sync() }()
+
+	log := logger.Get()
+
+	db, err := infra_mysql.Open(cfg.MySQL)
+	if err != nil {
+		log.Fatal("open mysql", zap.Error(err))
+	}
+	var qdb tenant.Querier
+	if db != nil {
+		defer func() { _ = db.Close() }()
+		log.Info("mysql configured")
+
+		pool, perr := tenant.NewPool(db, func(name string) (*sql.DB, error) {
+			return infra_mysql.OpenForDB(cfg.MySQL, name)
+		})
+		if perr != nil {
+			log.Fatal("build tenant pool", zap.Error(perr))
+		}
+		defer pool.Close()
+		qdb = pool.Router()
+		log.Info("tenant DB-swarm router configured")
+	}
+
+	knowledge := buildKnowledge(qdb)
+	workflow := reply.NewWorkflow(knowledge, buildWorkflowOptions(cfg, qdb, log)...)
+
+	e := echo.New()
+	var reportsHandler *handlers.ReportsHandler
+	var inboundHandler *handlers.InboundHandler
+	var feedbackHandler *handlers.FeedbackHandler
+	var reviewHandler *handlers.ReviewHandler
+	if qdb != nil {
+		reportsHandler = handlers.NewReportsHandler(reportsmysql.New(qdb))
+		log.Info("reports endpoints configured")
+
+		if h, err := buildInboundHandler(cfg, qdb, log); err != nil {
+			log.Warn("inbound webhooks not configured", zap.Error(err))
+		} else {
+			inboundHandler = h
+			log.Info("inbound webhook endpoints configured", zap.Strings("channels", inboundChannels()))
+		}
+
+		feedbackHandler = handlers.NewFeedbackHandler(mysqlai.NewFeedbackRecorder(qdb))
+		log.Info("reply feedback endpoint configured")
+
+		reviewRepo := reviewmysql.NewReviewRepository(qdb)
+		if pw, err := promotewf.New(reviewRepo); err != nil {
+			log.Warn("promote workflow not configured", zap.Error(err))
+		} else {
+			reviewHandler = handlers.NewReviewHandler(pw, reviewRepo)
+			log.Info("admin review-queue endpoints configured")
+		}
+	}
+	routes.Register(e, handlers.NewReplyHandler(workflow), routes.Options{
+		Log:            log,
+		SwaggerEnabled: cfg.Swagger.EnabledFor(cfg.App),
+		JWTSecret:      serviceJWTKeyMaterial(cfg, log),
+		Reports:        reportsHandler,
+		Inbound:        inboundHandler,
+		Feedback:       feedbackHandler,
+		Review:         reviewHandler,
+	})
+
+	log.Info("starting server", zap.String("port", cfg.Server.Port))
+	if err := e.Start(":" + cfg.Server.Port); err != nil {
+		log.Fatal("start api", zap.Error(err))
+	}
+}
+
+func serviceJWTKeyMaterial(cfg config.Config, log *zap.Logger) string {
+	if path := strings.TrimSpace(cfg.Laravel.JWTPublicKeyPath); path != "" {
+		raw, err := os.ReadFile(path) //nolint:gosec
+		if err != nil {
+			log.Fatal("read service JWT public key", zap.String("path", path), zap.Error(err))
+		}
+		return string(raw)
+	}
+	if strings.TrimSpace(cfg.Laravel.JWKSURL) != "" {
+		log.Warn("service JWT JWKS URL configured but not yet fetched; falling back to inline public key material")
+	}
+	return cfg.Laravel.JWTSecret
+}
+
+func buildKnowledge(db tenant.Querier) ports.KnowledgeRepository {
+	if db != nil {
+		return mysqlkb.NewKnowledgeRepository(db)
+	}
+	return memory.NewKnowledgeRepository([]kb.Article{
+		{
+			ID:        "kb-printer-offline",
+			CompanyID: 1,
+			Title:     "Printer offline checklist",
+			Summary:   "Please check printer power, network connectivity, and queue status before escalating.",
+		},
+	})
+}
+
+func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger) []reply.Option {
+	opts := make([]reply.Option, 0, 8)
+	if db == nil {
+		return opts
+	}
+	opts = append(opts, reply.WithKnowledgeGap(mysqlkb.NewKnowledgeGapStore(db)))
+	log.Info("knowledge gap recorder configured")
+
+	resolver, err := llmboot.Resolver(cfg, db)
+	if err != nil {
+		log.Warn("llm resolver not configured", zap.Error(err))
+		return appendRetrievers(opts, cfg, db, log)
+	}
+	log.Info("llm company resolver configured",
+		zap.String("default_vendor", cfg.LLM.DefaultVendor),
+		zap.String("default_model", cfg.LLM.DefaultModel))
+
+	registry, regErr := prompts.NewRegistry()
+	if regErr != nil {
+		log.Fatal("load prompt registry", zap.Error(regErr))
+	}
+	opts = append(opts, llmStages(registry, resolver, log)...)
+	opts = append(
+		opts,
+		reply.WithThresholdFor(thresholdLookup(resolver, log)),
+		reply.WithActionRecorder(mysqlai.NewActionRecorder(db), agentIDLookup(resolver, log)),
+	)
+	log.Info("per-company confidence threshold lookup configured")
+	log.Info("ai_actions recorder configured")
+
+	return appendRetrievers(opts, cfg, db, log)
+}
+
+func llmStages(registry *prompts.Registry, resolver *llm.CompanyResolver, log *zap.Logger) []reply.Option {
+	opts := make([]reply.Option, 0, 4)
+	if crag, err := rag.NewLLMCRAG(registry, resolver.ResolveFor); err != nil {
+		log.Warn("crag not configured", zap.Error(err))
+	} else {
+		opts = append(opts, reply.WithCRAG(crag))
+		log.Info("llm-backed CRAG configured")
+	}
+	if reranker, err := rag.NewLLMReranker(registry, resolver.ResolveFor, rag.LexicalReranker{}); err != nil {
+		log.Warn("llm reranker not configured", zap.Error(err))
+	} else {
+		opts = append(opts, reply.WithReranker(reranker))
+		log.Info("llm-backed reranker configured")
+	}
+	if generator, err := rag.NewLLMGenerator(rag.LLMGeneratorConfig{
+		Registry: registry,
+		Resolve:  resolver.ResolveFor,
+	}); err != nil {
+		log.Warn("llm generator not configured", zap.Error(err))
+	} else {
+		opts = append(opts, reply.WithGenerator(generator))
+		log.Info("llm-backed generator configured")
+	}
+	if critic, err := rag.NewLLMCritic(registry, resolver.ResolveFor); err != nil {
+		log.Warn("llm critic not configured", zap.Error(err))
+	} else {
+		opts = append(opts, reply.WithCritic(critic))
+		log.Info("self-rag critic configured")
+	}
+	return opts
+}
+
+func appendRetrievers(opts []reply.Option, cfg config.Config, db tenant.Querier, log *zap.Logger) []reply.Option {
+	if r, err := rag.NewFTSRetriever(rag.NewMySQLFTSSource(db)); err != nil {
+		log.Warn("fts retriever not configured", zap.Error(err))
+	} else {
+		opts = append(opts, reply.WithRetriever(r))
+		log.Info("mysql FTS retriever configured")
+	}
+
+	if cfg.Memgraph.Enabled {
+		store, err := memgraph.NewStore(memgraph.Config{
+			URI:      cfg.Memgraph.URI,
+			Username: cfg.Memgraph.Username,
+			Password: cfg.Memgraph.Password,
+		})
+		if err != nil {
+			log.Warn("graph retriever not configured", zap.Error(err))
+		} else {
+			opts = append(opts, reply.WithGraphRetriever(rag.NewGraphAnchorRetriever(graph.NewKBGraph(store))))
+			log.Info("graph anchor retriever configured")
+		}
+	}
+
+	if !cfg.Qdrant.Enabled {
+		return opts
+	}
+	provider, model, embedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
+	if err != nil {
+		log.Fatal("build embedder", zap.Error(err))
+	}
+	collectionPrefix := cfg.Qdrant.CollectionPrefix
+	if collectionPrefix == "" {
+		collectionPrefix = "kb_chunks"
+	}
+	opts = append(opts, reply.WithRetriever(rag.NewVectorRetriever(rag.VectorRetrieverConfig{
+		Embedder:         embedder,
+		Vector:           qdrant.NewStore(qdrant.Config{URL: cfg.Qdrant.URL, APIKey: cfg.Qdrant.APIKey}),
+		Chunks:           mysqlkb.NewKnowledgeRepository(db),
+		CollectionPrefix: collectionPrefix,
+	})))
+	log.Info("vector retriever configured",
+		zap.String("provider", provider),
+		zap.String("model", model),
+		zap.String("collection_prefix", collectionPrefix))
+	return opts
+}
+
+func buildInboundHandler(cfg config.Config, db tenant.Querier, log *zap.Logger) (*handlers.InboundHandler, error) {
+	repo := channelsmysql.New(db)
+	wfCfg := omnichannel.Config{
+		Accounts:      repo,
+		Conversations: repo,
+		Messages:      repo,
+	}
+
+	if enq, err := buildTicketEnqueuer(cfg); err != nil {
+		log.Warn("ticket enqueuer not configured; inbound will not enqueue", zap.Error(err))
+	} else if enq != nil {
+		wfCfg.Tickets = enq
+		log.Info("ticket enqueuer configured")
+	}
+
+	wf, err := omnichannel.New(wfCfg)
+	if err != nil {
+		return nil, err
+	}
+	registry, err := omnichannel.NewNormalizerRegistry(
+		omnichannel.LineNormalizer{},
+		omnichannel.EmailNormalizer{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return handlers.NewInboundHandler(wf, registry, handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)), nil
+}
+
+func buildTicketEnqueuer(cfg config.Config) (omnichannel.TicketEnqueuer, error) {
+	if cfg.Redis.URL == "" {
+		return nil, nil //nolint:nilnil // queue is optional in the API process
+	}
+	q, err := infraasynq.NewQueue(infraasynq.Config{RedisURL: cfg.Redis.URL})
+	if err != nil {
+		return nil, err
+	}
+	return tickets.NewEnqueuer(q)
+}
+
+func inboundChannels() []string {
+	return []string{omnichannel.ChannelLine, omnichannel.ChannelEmail}
+}
+
+func thresholdLookup(resolver *llm.CompanyResolver, log *zap.Logger) rag.ThresholdForCompany {
+	return func(ctx context.Context, companyID int64) float64 {
+		agent, err := resolver.AgentFor(ctx, companyID)
+		if err != nil {
+			log.Warn("agent lookup failed; using pipeline default",
+				zap.Int64("company_id", companyID), zap.Error(err))
+			return 0
+		}
+		return agent.ConfidenceThreshold
+	}
+}
+
+func agentIDLookup(resolver *llm.CompanyResolver, log *zap.Logger) reply.AgentIDLookup {
+	return func(ctx context.Context, companyID int64) (int64, bool) {
+		agent, err := resolver.AgentFor(ctx, companyID)
+		if err != nil {
+			log.Warn("agent id lookup failed",
+				zap.Int64("company_id", companyID), zap.Error(err))
+			return 0, false
+		}
+		if agent.ID <= 0 {
+			return 0, false
+		}
+		return agent.ID, true
+	}
+}
