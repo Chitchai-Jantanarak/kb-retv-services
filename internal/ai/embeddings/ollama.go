@@ -1,26 +1,26 @@
 package embeddings
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 )
 
 type OllamaConfig struct {
-	BaseURL    string
-	Model      string
-	Dimensions int
+	BaseURL        string
+	Model          string
+	Dimensions     int
+	MaxRetries     int
+	RequestsPerMin float64
 }
 
 type OllamaProvider struct {
 	baseURL    string
 	model      string
 	dimensions int
-	client     *http.Client
+	retrier    *httpRetrier
 }
 
 func NewOllamaProvider(cfg OllamaConfig) *OllamaProvider {
@@ -40,7 +40,7 @@ func NewOllamaProvider(cfg OllamaConfig) *OllamaProvider {
 		baseURL:    baseURL,
 		model:      model,
 		dimensions: dimensions,
-		client:     &http.Client{Timeout: 120 * time.Second},
+		retrier:    newHTTPRetrier(cfg.MaxRetries, cfg.RequestsPerMin, 120*time.Second),
 	}
 }
 
@@ -57,18 +57,14 @@ func (p *OllamaProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		body["dimensions"] = p.dimensions
 	}
 
-	var payload bytes.Buffer
-	if err := json.NewEncoder(&payload).Encode(body); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint(), &payload)
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := p.client.Do(req)
+	resp, err := p.retrier.post(ctx, p.endpoint(), payload, map[string]string{
+		"Content-Type": "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}

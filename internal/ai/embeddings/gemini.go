@@ -1,21 +1,21 @@
 package embeddings
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 )
 
 type GeminiConfig struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Dimensions int
+	BaseURL        string
+	APIKey         string
+	Model          string
+	Dimensions     int
+	MaxRetries     int
+	RequestsPerMin float64
 }
 
 type GeminiProvider struct {
@@ -23,7 +23,7 @@ type GeminiProvider struct {
 	apiKey     string
 	model      string
 	dimensions int
-	client     *http.Client
+	retrier    *httpRetrier
 }
 
 func NewGeminiProvider(cfg GeminiConfig) *GeminiProvider {
@@ -44,7 +44,7 @@ func NewGeminiProvider(cfg GeminiConfig) *GeminiProvider {
 		apiKey:     cfg.APIKey,
 		model:      model,
 		dimensions: dimensions,
-		client:     &http.Client{Timeout: 60 * time.Second},
+		retrier:    newHTTPRetrier(cfg.MaxRetries, cfg.RequestsPerMin, 60*time.Second),
 	}
 }
 
@@ -70,20 +70,15 @@ func (p *GeminiProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		requests = append(requests, request)
 	}
 
-	body := map[string]any{"requests": requests}
-	var payload bytes.Buffer
-	if err := json.NewEncoder(&payload).Encode(body); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/models/"+p.model+":batchEmbedContents", &payload)
+	payload, err := json.Marshal(map[string]any{"requests": requests})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("x-goog-api-key", p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := p.client.Do(req)
+	resp, err := p.retrier.post(ctx, p.baseURL+"/models/"+p.model+":batchEmbedContents", payload, map[string]string{
+		"x-goog-api-key": p.apiKey,
+		"Content-Type":   "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}

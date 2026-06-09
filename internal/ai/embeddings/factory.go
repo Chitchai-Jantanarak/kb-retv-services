@@ -8,15 +8,17 @@ import (
 )
 
 type ProviderSettings struct {
-	Provider      string
-	Model         string
-	BaseURL       string
-	Dimensions    int
-	OpenAIKey     string
-	GeminiKey     string
-	VoyageKey     string
-	OpenRouterKey string
-	LocalURL      string
+	Provider       string
+	Model          string
+	BaseURL        string
+	Dimensions     int
+	OpenAIKey      string
+	GeminiKey      string
+	VoyageKey      string
+	OpenRouterKey  string
+	LocalURL       string
+	MaxRetries     int
+	RequestsPerMin float64
 }
 
 func NewProvider(settings ProviderSettings) (string, string, ports.EmbeddingProvider, error) {
@@ -25,37 +27,47 @@ func NewProvider(settings ProviderSettings) (string, string, ports.EmbeddingProv
 	switch provider {
 	case "openai":
 		return provider, model, NewOpenAIProvider(OpenAIConfig{
-			BaseURL:    settings.BaseURL,
-			APIKey:     settings.OpenAIKey,
-			Model:      model,
-			Dimensions: settings.Dimensions,
+			BaseURL:        settings.BaseURL,
+			APIKey:         settings.OpenAIKey,
+			Model:          model,
+			Dimensions:     settings.Dimensions,
+			MaxRetries:     settings.MaxRetries,
+			RequestsPerMin: settings.RequestsPerMin,
 		}), nil
 	case "gemini":
 		return provider, model, NewGeminiProvider(GeminiConfig{
-			BaseURL:    settings.BaseURL,
-			APIKey:     settings.GeminiKey,
-			Model:      model,
-			Dimensions: settings.Dimensions,
+			BaseURL:        settings.BaseURL,
+			APIKey:         settings.GeminiKey,
+			Model:          model,
+			Dimensions:     settings.Dimensions,
+			MaxRetries:     settings.MaxRetries,
+			RequestsPerMin: settings.RequestsPerMin,
 		}), nil
 	case "openrouter":
 		return provider, model, NewOpenRouterProvider(OpenRouterConfig{
-			BaseURL:    settings.BaseURL,
-			APIKey:     settings.OpenRouterKey,
-			Model:      model,
-			Dimensions: settings.Dimensions,
+			BaseURL:        settings.BaseURL,
+			APIKey:         settings.OpenRouterKey,
+			Model:          model,
+			Dimensions:     settings.Dimensions,
+			MaxRetries:     settings.MaxRetries,
+			RequestsPerMin: settings.RequestsPerMin,
 		}), nil
 	case "ollama":
 		return provider, model, NewOllamaProvider(OllamaConfig{
-			BaseURL:    firstProviderNonEmpty(settings.BaseURL, settings.LocalURL),
-			Model:      model,
-			Dimensions: settings.Dimensions,
+			BaseURL:        firstProviderNonEmpty(settings.BaseURL, settings.LocalURL),
+			Model:          model,
+			Dimensions:     settings.Dimensions,
+			MaxRetries:     settings.MaxRetries,
+			RequestsPerMin: settings.RequestsPerMin,
 		}), nil
 	case "voyage", "claude", "anthropic":
 		return provider, model, NewVoyageProvider(VoyageConfig{
-			BaseURL:    settings.BaseURL,
-			APIKey:     settings.VoyageKey,
-			Model:      model,
-			Dimensions: settings.Dimensions,
+			BaseURL:        settings.BaseURL,
+			APIKey:         settings.VoyageKey,
+			Model:          model,
+			Dimensions:     settings.Dimensions,
+			MaxRetries:     settings.MaxRetries,
+			RequestsPerMin: settings.RequestsPerMin,
 		}), nil
 	case "hash":
 		dim := settings.Dimensions

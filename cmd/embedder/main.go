@@ -28,6 +28,8 @@ func main() {
 	dim := flag.Int("dim", 0, "embedding dimensions")
 	model := flag.String("model", "", "embedding model name")
 	baseURL := flag.String("base-url", "", "OpenAI-compatible base URL")
+	embedRPM := flag.Float64("embed-rpm", 0, "throttle embedding requests per minute (0 = no client-side throttle)")
+	embedRetries := flag.Int("embed-retries", 0, "max retries on 429/5xx per batch (0 = provider default)")
 	dryRun := flag.Bool("dry-run", false, "count chunks without embedding")
 	flag.Parse()
 
@@ -58,7 +60,7 @@ func main() {
 
 	switch *task {
 	case "index-kb":
-		resolvedProvider, modelName, embedder, err := embeddings.NewProvider(embeddingSettings(*provider, *model, *dim, *baseURL, cfg))
+		resolvedProvider, modelName, embedder, err := embeddings.NewProvider(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
 		if err != nil {
 			log.Fatalf("build embedder: %v", err)
 		}
@@ -98,7 +100,7 @@ func buildTenantQuerier(cfg config.Config, db *sql.DB) (tenant.Querier, func(), 
 	return pool.Router(), pool.Close, nil
 }
 
-func embeddingSettings(provider string, model string, dim int, baseURL string, cfg config.Config) embeddings.ProviderSettings {
+func embeddingSettings(provider string, model string, dim int, baseURL string, rpm float64, retries int, cfg config.Config) embeddings.ProviderSettings {
 	if provider == "auto" && cfg.LLM.EmbeddingProvider != "" {
 		provider = cfg.LLM.EmbeddingProvider
 	}
@@ -109,15 +111,17 @@ func embeddingSettings(provider string, model string, dim int, baseURL string, c
 		dim = cfg.LLM.EmbeddingDim
 	}
 	return embeddings.ProviderSettings{
-		Provider:      provider,
-		Model:         model,
-		BaseURL:       baseURL,
-		Dimensions:    dim,
-		OpenAIKey:     firstNonEmpty(os.Getenv("OPENAI_API_KEY"), cfg.APIKeys.OpenAI, cfg.LLM.OpenAIKey),
-		GeminiKey:     firstNonEmpty(os.Getenv("GEMINI_API_KEY"), cfg.APIKeys.Gemini, cfg.LLM.GeminiKey),
-		VoyageKey:     firstNonEmpty(os.Getenv("VOYAGE_API_KEY"), cfg.APIKeys.Voyage),
-		OpenRouterKey: firstNonEmpty(os.Getenv("OPENROUTER_API_KEY"), cfg.APIKeys.OpenRouter),
-		LocalURL:      cfg.LLM.LocalURL,
+		Provider:       provider,
+		Model:          model,
+		BaseURL:        baseURL,
+		Dimensions:     dim,
+		MaxRetries:     retries,
+		RequestsPerMin: rpm,
+		OpenAIKey:      firstNonEmpty(os.Getenv("OPENAI_API_KEY"), cfg.APIKeys.OpenAI, cfg.LLM.OpenAIKey),
+		GeminiKey:      firstNonEmpty(os.Getenv("GEMINI_API_KEY"), cfg.APIKeys.Gemini, cfg.LLM.GeminiKey),
+		VoyageKey:      firstNonEmpty(os.Getenv("VOYAGE_API_KEY"), cfg.APIKeys.Voyage),
+		OpenRouterKey:  firstNonEmpty(os.Getenv("OPENROUTER_API_KEY"), cfg.APIKeys.OpenRouter),
+		LocalURL:       cfg.LLM.LocalURL,
 	}
 }
 

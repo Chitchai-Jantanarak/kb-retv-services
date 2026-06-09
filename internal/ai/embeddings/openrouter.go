@@ -1,22 +1,22 @@
 package embeddings
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
 )
 
 type OpenRouterConfig struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Dimensions int
+	BaseURL        string
+	APIKey         string
+	Model          string
+	Dimensions     int
+	MaxRetries     int
+	RequestsPerMin float64
 }
 
 type OpenRouterProvider struct {
@@ -24,7 +24,7 @@ type OpenRouterProvider struct {
 	apiKey     string
 	model      string
 	dimensions int
-	client     *http.Client
+	retrier    *httpRetrier
 }
 
 func NewOpenRouterProvider(cfg OpenRouterConfig) *OpenRouterProvider {
@@ -45,7 +45,7 @@ func NewOpenRouterProvider(cfg OpenRouterConfig) *OpenRouterProvider {
 		apiKey:     cfg.APIKey,
 		model:      model,
 		dimensions: dimensions,
-		client:     &http.Client{Timeout: 60 * time.Second},
+		retrier:    newHTTPRetrier(cfg.MaxRetries, cfg.RequestsPerMin, 60*time.Second),
 	}
 }
 
@@ -62,19 +62,15 @@ func (p *OpenRouterProvider) Embed(ctx context.Context, texts []string) ([][]flo
 		"model": p.model,
 	}
 
-	var payload bytes.Buffer
-	if err := json.NewEncoder(&payload).Encode(body); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", &payload)
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := p.client.Do(req)
+	resp, err := p.retrier.post(ctx, p.baseURL+"/embeddings", payload, map[string]string{
+		"Authorization": "Bearer " + p.apiKey,
+		"Content-Type":  "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -1,23 +1,23 @@
 package embeddings
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
 )
 
 type VoyageConfig struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Dimensions int
-	InputType  string
+	BaseURL        string
+	APIKey         string
+	Model          string
+	Dimensions     int
+	InputType      string
+	MaxRetries     int
+	RequestsPerMin float64
 }
 
 type VoyageProvider struct {
@@ -26,7 +26,7 @@ type VoyageProvider struct {
 	model      string
 	dimensions int
 	inputType  string
-	client     *http.Client
+	retrier    *httpRetrier
 }
 
 func NewVoyageProvider(cfg VoyageConfig) *VoyageProvider {
@@ -52,7 +52,7 @@ func NewVoyageProvider(cfg VoyageConfig) *VoyageProvider {
 		model:      model,
 		dimensions: dimensions,
 		inputType:  inputType,
-		client:     &http.Client{Timeout: 60 * time.Second},
+		retrier:    newHTTPRetrier(cfg.MaxRetries, cfg.RequestsPerMin, 60*time.Second),
 	}
 }
 
@@ -73,19 +73,15 @@ func (p *VoyageProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		body["output_dimension"] = p.dimensions
 	}
 
-	var payload bytes.Buffer
-	if err := json.NewEncoder(&payload).Encode(body); err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", &payload)
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := p.client.Do(req)
+	resp, err := p.retrier.post(ctx, p.baseURL+"/embeddings", payload, map[string]string{
+		"Authorization": "Bearer " + p.apiKey,
+		"Content-Type":  "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}
