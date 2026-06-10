@@ -130,6 +130,7 @@ func main() {
 		displayBase := fmt.Sprintf("kb-%s-%s-%d", resolvedProvider, batchEmbedder.Model(), time.Now().Unix())
 		jobs := chunkRequests(reqs, *maxPerJob)
 		created, submitted := 0, 0
+		var orphaned []string
 		for idx, chunk := range jobs {
 			displayName := displayBase
 			if len(jobs) > 1 {
@@ -149,7 +150,9 @@ func main() {
 				State:        "JOB_STATE_PENDING",
 				RequestCount: len(chunk),
 			}); err != nil {
-				log.Fatalf("record batch %s: %v", jobName, err)
+				orphaned = append(orphaned, jobName)
+				log.Printf("WARNING batch job %s submitted but not recorded: %v — collect or re-insert manually before it expires", jobName, err)
+				continue
 			}
 			created++
 			submitted += len(chunk)
@@ -159,6 +162,9 @@ func main() {
 			}
 		}
 		fmt.Printf("submitted %d/%d jobs, %d/%d requests, companies=%v model=%s dim=%d\n", created, len(jobs), submitted, len(reqs), companyIDs, batchEmbedder.Model(), batchEmbedder.Dim())
+		if len(orphaned) > 0 {
+			fmt.Printf("WARNING %d submitted job(s) not recorded (recover manually): %v\n", len(orphaned), orphaned)
+		}
 		fmt.Println("collect with: -task=embed-batch-collect (drains all active jobs)")
 	case "embed-batch-collect":
 		_, _, batchEmbedder, err := embeddings.NewBatchEmbedder(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
@@ -182,21 +188,27 @@ func main() {
 		for _, job := range jobs {
 			poll, err := batchEmbedder.Poll(ctx, job.BatchName)
 			if err != nil {
-				_ = repo.UpdateState(ctx, job.BatchName, poll.State, err.Error())
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), err.Error())
 				log.Printf("batch %s failed: %v", job.BatchName, err)
 				continue
 			}
 			if !poll.Done {
-				_ = repo.UpdateState(ctx, job.BatchName, poll.State, "")
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), "")
 				fmt.Printf("batch %s: %s (not ready)\n", job.BatchName, poll.State)
 				continue
 			}
 			res, err := ingestor.Ingest(ctx, vectorindex.Options{CollectionPrefix: *collection, Model: job.Model}, toKeyedVectors(poll.Results))
 			if err != nil {
-				log.Fatalf("ingest batch %s: %v", job.BatchName, err)
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), err.Error())
+				log.Printf("ingest batch %s failed; left active for retry: %v", job.BatchName, err)
+				continue
 			}
 			if err := repo.MarkIngested(ctx, job.BatchName, res.Points); err != nil {
-				log.Fatalf("mark batch %s ingested: %v", job.BatchName, err)
+				log.Printf("batch %s ingested points=%d but state not recorded (will re-collect): %v", job.BatchName, res.Points, err)
+				continue
+			}
+			if len(poll.Failed) > 0 {
+				log.Printf("batch %s: %d key(s) failed at provider, left un-embedded for re-queue", job.BatchName, len(poll.Failed))
 			}
 			fmt.Printf("batch %s ingested: points=%d companies=%d collection=%s model=%s\n", job.BatchName, res.Points, res.Batches, *collection, job.Model)
 		}
@@ -225,21 +237,27 @@ func main() {
 		for _, job := range active {
 			poll, err := batchEmbedder.Poll(ctx, job.BatchName)
 			if err != nil {
-				_ = repo.UpdateState(ctx, job.BatchName, poll.State, err.Error())
-				log.Printf("batch %s %s; its chunks return to the queue", job.BatchName, poll.State)
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), err.Error())
+				log.Printf("batch %s %s; its chunks return to the queue", job.BatchName, pollState(poll.State))
 				continue
 			}
 			if !poll.Done {
-				_ = repo.UpdateState(ctx, job.BatchName, poll.State, "")
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), "")
 				inFlight++
 				continue
 			}
 			res, err := ingestor.Ingest(ctx, vectorindex.Options{CollectionPrefix: *collection, Model: job.Model}, toKeyedVectors(poll.Results))
 			if err != nil {
-				log.Fatalf("ingest batch %s: %v", job.BatchName, err)
+				_ = repo.UpdateState(ctx, job.BatchName, pollState(poll.State), err.Error())
+				log.Printf("ingest batch %s failed; left active for retry: %v", job.BatchName, err)
+				continue
 			}
 			if err := repo.MarkIngested(ctx, job.BatchName, res.Points); err != nil {
-				log.Fatalf("mark batch %s ingested: %v", job.BatchName, err)
+				log.Printf("batch %s ingested points=%d but state not recorded (will re-collect): %v", job.BatchName, res.Points, err)
+				continue
+			}
+			if len(poll.Failed) > 0 {
+				log.Printf("batch %s: %d key(s) failed at provider, left un-embedded for re-queue", job.BatchName, len(poll.Failed))
 			}
 			fmt.Printf("ingested %s: points=%d\n", job.BatchName, res.Points)
 		}
@@ -272,7 +290,8 @@ func main() {
 			State:        "JOB_STATE_PENDING",
 			RequestCount: len(reqs),
 		}); err != nil {
-			log.Fatalf("record batch %s: %v", jobName, err)
+			log.Printf("WARNING wave %s submitted but not recorded: %v — collect or re-insert manually before it expires", jobName, err)
+			return
 		}
 		fmt.Printf("wave submitted %s: %d chunks (companies=%v model=%s). Re-run after it completes to continue.\n", jobName, len(reqs), companyIDs, batchEmbedder.Model())
 	default:
@@ -408,6 +427,13 @@ func effectiveLimit(limit, maxChunks, configMax int) int {
 		return maxChunks
 	}
 	return configMax
+}
+
+func pollState(state string) string {
+	if strings.TrimSpace(state) == "" {
+		return "POLL_ERROR"
+	}
+	return state
 }
 
 func isRemoteProvider(provider string) bool {

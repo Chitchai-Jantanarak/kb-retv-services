@@ -86,6 +86,42 @@ func TestBatchIngestorUpsertsAndMarksPerCompany(t *testing.T) {
 	}
 }
 
+func TestBatchIngestorRejectsEmptyVector(t *testing.T) {
+	meta := &fakeMetaSource{chunks: map[int64]Chunk{10: {ID: 10, CompanyID: 2}}}
+	vs := &fakeVectorStore{}
+	ing := NewBatchIngestor(meta, vs, &fakeMarker{})
+
+	_, err := ing.Ingest(context.Background(), Options{CollectionPrefix: "kb_chunks"}, []KeyedVector{
+		{Key: "2:10", Vector: nil},
+	})
+	if err == nil {
+		t.Fatal("Ingest error = nil, want error for empty vector")
+	}
+	if len(vs.points) != 0 {
+		t.Fatalf("points upserted = %d, want 0 (reject before write)", len(vs.points))
+	}
+}
+
+func TestBatchIngestorRejectsDimMismatch(t *testing.T) {
+	meta := &fakeMetaSource{chunks: map[int64]Chunk{
+		10: {ID: 10, CompanyID: 2},
+		11: {ID: 11, CompanyID: 2},
+	}}
+	vs := &fakeVectorStore{}
+	ing := NewBatchIngestor(meta, vs, &fakeMarker{})
+
+	_, err := ing.Ingest(context.Background(), Options{CollectionPrefix: "kb_chunks"}, []KeyedVector{
+		{Key: "2:10", Vector: []float32{0.1, 0.2, 0.3}},
+		{Key: "2:11", Vector: []float32{0.4, 0.5}},
+	})
+	if err == nil {
+		t.Fatal("Ingest error = nil, want error for inconsistent vector dim")
+	}
+	if len(vs.points) != 0 {
+		t.Fatalf("points upserted = %d, want 0 (reject before write)", len(vs.points))
+	}
+}
+
 func TestBatchIngestorRejectsUnknownChunk(t *testing.T) {
 	meta := &fakeMetaSource{chunks: map[int64]Chunk{10: {ID: 10, CompanyID: 2}}}
 	vs := &fakeVectorStore{}

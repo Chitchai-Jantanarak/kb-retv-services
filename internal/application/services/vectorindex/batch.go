@@ -61,10 +61,19 @@ func (b *BatchIngestor) Ingest(ctx context.Context, opts Options, vectors []Keye
 	vectorByCompanyChunk := make(map[int64]map[int64][]float32)
 	companyOrder := make([]int64, 0)
 	idsByCompany := make(map[int64][]int64)
+	dim := 0
 	for _, v := range vectors {
 		company, chunk, err := ParseBatchKey(v.Key)
 		if err != nil {
 			return Result{}, err
+		}
+		if len(v.Vector) == 0 {
+			return Result{}, fmt.Errorf("batch ingest: empty vector for key %s", v.Key)
+		}
+		if dim == 0 {
+			dim = len(v.Vector)
+		} else if len(v.Vector) != dim {
+			return Result{}, fmt.Errorf("batch ingest: inconsistent vector dim %d != %d for key %s", len(v.Vector), dim, v.Key)
 		}
 		if _, ok := vectorByCompanyChunk[company]; !ok {
 			vectorByCompanyChunk[company] = make(map[int64][]float32)
@@ -120,8 +129,11 @@ func (b *BatchIngestor) Ingest(ctx context.Context, opts Options, vectors []Keye
 			})
 		}
 
+		if len(points) == 0 {
+			continue
+		}
 		collection := fmt.Sprintf("%s__%d", opts.CollectionPrefix, company)
-		if err := b.vector.EnsureCollection(companyCtx, collection, len(points[0].Vector)); err != nil {
+		if err := b.vector.EnsureCollection(companyCtx, collection, dim); err != nil {
 			return Result{}, err
 		}
 		if err := b.vector.Upsert(companyCtx, collection, points); err != nil {

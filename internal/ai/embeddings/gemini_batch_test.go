@@ -41,9 +41,12 @@ func TestParseEmbedResultsJSONL(t *testing.T) {
 	body := `{"key":"10","response":{"embedding":{"values":[0.1,0.2,0.3]}}}
 {"key":"11","response":{"embedding":{"values":[0.4,0.5,0.6]}}}
 `
-	results, err := parseEmbedResultsJSONL([]byte(body))
+	results, failed, err := parseEmbedResultsJSONL([]byte(body))
 	if err != nil {
 		t.Fatalf("parse error = %v", err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("failed = %d, want 0", len(failed))
 	}
 	if len(results) != 2 {
 		t.Fatalf("results = %d, want 2", len(results))
@@ -58,7 +61,7 @@ func TestParseEmbedResultsJSONL(t *testing.T) {
 
 func TestParseEmbedResultsJSONLSkipsBlankLines(t *testing.T) {
 	body := "\n{\"key\":\"1\",\"response\":{\"embedding\":{\"values\":[1.0]}}}\n\n"
-	results, err := parseEmbedResultsJSONL([]byte(body))
+	results, _, err := parseEmbedResultsJSONL([]byte(body))
 	if err != nil {
 		t.Fatalf("parse error = %v", err)
 	}
@@ -67,13 +70,48 @@ func TestParseEmbedResultsJSONLSkipsBlankLines(t *testing.T) {
 	}
 }
 
-func TestParseEmbedResultsJSONLReportsErrorLine(t *testing.T) {
-	body := `{"key":"9","response":{"status":{"code":3,"message":"bad"}}}` + "\n"
-	_, err := parseEmbedResultsJSONL([]byte(body))
-	if err == nil {
-		t.Fatal("expected error for result line carrying an error status, got nil")
+func TestParseEmbedResultsReturnsPartialFailures(t *testing.T) {
+	body := `{"key":"10","response":{"embedding":{"values":[0.1,0.2,0.3]}}}
+{"key":"9","response":{"status":{"code":3,"message":"bad input"}}}
+{"key":"8","response":{"error":{"message":"quota"}}}
+{"key":"11","response":{"embedding":{"values":[0.4,0.5,0.6]}}}
+`
+	results, failed, err := parseEmbedResultsJSONL([]byte(body))
+	if err != nil {
+		t.Fatalf("parse error = %v, want nil (per-key failures are not hard errors)", err)
 	}
-	if !strings.Contains(err.Error(), "9") {
-		t.Fatalf("error %v should name the failing key 9", err)
+	if len(results) != 2 {
+		t.Fatalf("results = %d, want 2 good", len(results))
+	}
+	if len(failed) != 2 {
+		t.Fatalf("failed = %d, want 2", len(failed))
+	}
+	keys := map[string]string{failed[0].Key: failed[0].Message, failed[1].Key: failed[1].Message}
+	if _, ok := keys["9"]; !ok {
+		t.Fatalf("failed should include key 9, got %+v", failed)
+	}
+	if _, ok := keys["8"]; !ok {
+		t.Fatalf("failed should include key 8, got %+v", failed)
+	}
+}
+
+func TestParseEmbedResultsSkipsEmptyValues(t *testing.T) {
+	body := `{"key":"7","response":{"embedding":{"values":[]}}}` + "\n"
+	results, failed, err := parseEmbedResultsJSONL([]byte(body))
+	if err != nil {
+		t.Fatalf("parse error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %d, want 0 (empty values must not become a 0-dim point)", len(results))
+	}
+	if len(failed) != 1 || failed[0].Key != "7" {
+		t.Fatalf("failed = %+v, want key 7", failed)
+	}
+}
+
+func TestParseEmbedResultsHardErrorsOnMalformedJSON(t *testing.T) {
+	body := `{"key":"5","response":{` + "\n"
+	if _, _, err := parseEmbedResultsJSONL([]byte(body)); err == nil {
+		t.Fatal("expected hard error for malformed JSON line, got nil")
 	}
 }

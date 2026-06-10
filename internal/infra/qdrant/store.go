@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,15 +56,22 @@ func (s *Store) Upsert(ctx context.Context, collection string, points []ports.Ve
 	if err := validateCollectionName(collection); err != nil {
 		return err
 	}
-	reqPoints := make([]map[string]any, 0, len(points))
-	for _, point := range points {
-		reqPoints = append(reqPoints, map[string]any{
-			"id":      qdrantPointID(point.ID),
-			"vector":  point.Vector,
-			"payload": point.Metadata,
-		})
+	const upsertBatch = 200
+	for start := 0; start < len(points); start += upsertBatch {
+		end := min(start+upsertBatch, len(points))
+		reqPoints := make([]map[string]any, 0, end-start)
+		for _, point := range points[start:end] {
+			reqPoints = append(reqPoints, map[string]any{
+				"id":      qdrantPointID(point.ID),
+				"vector":  point.Vector,
+				"payload": point.Metadata,
+			})
+		}
+		if err := s.do(ctx, http.MethodPut, "/collections/"+collection+"/points", map[string]any{"points": reqPoints}, nil); err != nil {
+			return err
+		}
 	}
-	return s.do(ctx, http.MethodPut, "/collections/"+collection+"/points", map[string]any{"points": reqPoints}, nil)
+	return nil
 }
 
 func qdrantPointID(id string) any {
@@ -168,11 +176,13 @@ func (s *Store) do(ctx context.Context, method string, path string, body any, ou
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return qdrantError{
 			method:     method,
 			path:       path,
 			status:     resp.Status,
 			statusCode: resp.StatusCode,
+			body:       strings.TrimSpace(string(raw)),
 		}
 	}
 	if out == nil {
@@ -186,9 +196,13 @@ type qdrantError struct {
 	path       string
 	status     string
 	statusCode int
+	body       string
 }
 
 func (e qdrantError) Error() string {
+	if e.body != "" {
+		return fmt.Sprintf("qdrant %s %s returned %s: %s", e.method, e.path, e.status, e.body)
+	}
 	return fmt.Sprintf("qdrant %s %s returned %s", e.method, e.path, e.status)
 }
 

@@ -6,11 +6,17 @@ import (
 	"strings"
 )
 
+type BatchKeyError struct {
+	Key     string
+	Message string
+}
+
 type BatchPollResult struct {
 	State     string
 	Done      bool
 	Succeeded bool
 	Results   []BatchEmbedResult
+	Failed    []BatchKeyError
 }
 
 type BatchEmbedder interface {
@@ -79,11 +85,12 @@ func (e *GeminiBatchEmbedder) Poll(ctx context.Context, jobName string) (BatchPo
 	if err != nil {
 		return result, err
 	}
-	results, err := parseEmbedResultsJSONL(data)
+	results, failed, err := parseEmbedResultsJSONL(data)
 	if err != nil {
 		return result, err
 	}
 	result.Results = results
+	result.Failed = failed
 	return result, nil
 }
 

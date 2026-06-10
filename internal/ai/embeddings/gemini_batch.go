@@ -53,11 +53,12 @@ func buildEmbedJSONL(model string, dim int, reqs []BatchEmbedRequest) []byte {
 	return buf.Bytes()
 }
 
-func parseEmbedResultsJSONL(data []byte) ([]BatchEmbedResult, error) {
+func parseEmbedResultsJSONL(data []byte) ([]BatchEmbedResult, []BatchKeyError, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 
 	var results []BatchEmbedResult
+	var failed []BatchKeyError
 	for scanner.Scan() {
 		raw := bytes.TrimSpace(scanner.Bytes())
 		if len(raw) == 0 {
@@ -80,20 +81,22 @@ func parseEmbedResultsJSONL(data []byte) ([]BatchEmbedResult, error) {
 			} `json:"response"`
 		}
 		if err := json.Unmarshal(raw, &line); err != nil {
-			return nil, err
+			return nil, nil, fmt.Errorf("batch embedding: parse result line: %w", err)
 		}
 
-		if line.Response.Status != nil && line.Response.Status.Code != 0 {
-			return nil, fmt.Errorf("batch embedding failed for key %s: %s", line.Key, line.Response.Status.Message)
+		switch {
+		case line.Response.Status != nil && line.Response.Status.Code != 0:
+			failed = append(failed, BatchKeyError{Key: line.Key, Message: line.Response.Status.Message})
+		case line.Response.Error != nil:
+			failed = append(failed, BatchKeyError{Key: line.Key, Message: line.Response.Error.Message})
+		case len(line.Response.Embedding.Values) == 0:
+			failed = append(failed, BatchKeyError{Key: line.Key, Message: "empty embedding values"})
+		default:
+			results = append(results, BatchEmbedResult{Key: line.Key, Values: line.Response.Embedding.Values})
 		}
-		if line.Response.Error != nil {
-			return nil, fmt.Errorf("batch embedding failed for key %s: %s", line.Key, line.Response.Error.Message)
-		}
-
-		results = append(results, BatchEmbedResult{Key: line.Key, Values: line.Response.Embedding.Values})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return results, nil
+	return results, failed, nil
 }
