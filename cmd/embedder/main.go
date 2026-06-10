@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/my/app/internal/ai/embeddings"
@@ -30,6 +33,10 @@ func main() {
 	baseURL := flag.String("base-url", "", "OpenAI-compatible base URL")
 	embedRPM := flag.Float64("embed-rpm", 0, "throttle embedding requests per minute (0 = no client-side throttle)")
 	embedRetries := flag.Int("embed-retries", 0, "max retries on 429/5xx per batch (0 = provider default)")
+	companies := flag.String("companies", "", "comma-separated company ids for batch tasks (overrides -company)")
+	batchJob := flag.String("batch", "", "batch job name for embed-batch-collect (empty = all active)")
+	maxPerJob := flag.Int("max-per-job", 0, "split batch submit into jobs of at most N requests (0 = single job; use to stay under free-tier per-job cap)")
+	waveSize := flag.Int("wave-size", 1500, "embed-batch-run: chunks per wave (keep wave tokens under the batch enqueued-token pool)")
 	dryRun := flag.Bool("dry-run", false, "count chunks without embedding")
 	maxChunks := flag.Int("max-chunks", 0, "cap chunks indexed when -limit is empty (0 = use config default)")
 	allowLarge := flag.Bool("allow-large-remote-run", false, "permit a remote-provider run above the large-run threshold")
@@ -101,9 +108,261 @@ func main() {
 		} else {
 			fmt.Printf("kb index complete: chunks=%d points=%d batches=%d collection=%s model=%s provider=%s dim=%d\n", result.Chunks, result.Points, result.Batches, *collection, modelName, resolvedProvider, embedder.Dim())
 		}
+	case "embed-batch-submit":
+		resolvedProvider, _, batchEmbedder, err := embeddings.NewBatchEmbedder(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
+		if err != nil {
+			log.Fatalf("build batch embedder: %v", err)
+		}
+		companyIDs := parseCompanies(*companies, *company)
+		if len(companyIDs) == 0 {
+			log.Fatal("embed-batch-submit requires -company=<id> or -companies=<id,id> (cross-tenant data is sharded; an explicit company set is required)")
+		}
+		source := mysqlkb.NewChunkSourceForModel(qdb, batchEmbedder.Model())
+		reqs, err := collectBatchRequests(ctx, source, companyIDs, *batchSize, *limit)
+		if err != nil {
+			log.Fatalf("gather chunks: %v", err)
+		}
+		if len(reqs) == 0 {
+			fmt.Printf("nothing to embed: no un-embedded chunks for companies %v (model=%s)\n", companyIDs, batchEmbedder.Model())
+			return
+		}
+		repo := mysqlkb.NewEmbeddingBatchRepo(db)
+		displayBase := fmt.Sprintf("kb-%s-%s-%d", resolvedProvider, batchEmbedder.Model(), time.Now().Unix())
+		jobs := chunkRequests(reqs, *maxPerJob)
+		created, submitted := 0, 0
+		for idx, chunk := range jobs {
+			displayName := displayBase
+			if len(jobs) > 1 {
+				displayName = fmt.Sprintf("%s-p%d", displayBase, idx)
+			}
+			jobName, err := batchEmbedder.Submit(ctx, displayName, chunk)
+			if err != nil {
+				log.Printf("submit job %d/%d failed (%d created so far): %v", idx+1, len(jobs), created, err)
+				break
+			}
+			if err := repo.Insert(ctx, mysqlkb.EmbeddingBatch{
+				BatchName:    jobName,
+				Provider:     resolvedProvider,
+				Model:        batchEmbedder.Model(),
+				Dimensions:   batchEmbedder.Dim(),
+				DisplayName:  displayName,
+				State:        "JOB_STATE_PENDING",
+				RequestCount: len(chunk),
+			}); err != nil {
+				log.Fatalf("record batch %s: %v", jobName, err)
+			}
+			created++
+			submitted += len(chunk)
+			fmt.Printf("[%d/%d] %s (%d reqs)\n", idx+1, len(jobs), jobName, len(chunk))
+			if idx+1 < len(jobs) {
+				time.Sleep(3 * time.Second)
+			}
+		}
+		fmt.Printf("submitted %d/%d jobs, %d/%d requests, companies=%v model=%s dim=%d\n", created, len(jobs), submitted, len(reqs), companyIDs, batchEmbedder.Model(), batchEmbedder.Dim())
+		fmt.Println("collect with: -task=embed-batch-collect (drains all active jobs)")
+	case "embed-batch-collect":
+		_, _, batchEmbedder, err := embeddings.NewBatchEmbedder(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
+		if err != nil {
+			log.Fatalf("build batch embedder: %v", err)
+		}
+		repo := mysqlkb.NewEmbeddingBatchRepo(db)
+		jobs, err := loadBatchJobs(ctx, repo, *batchJob)
+		if err != nil {
+			log.Fatalf("load batches: %v", err)
+		}
+		if len(jobs) == 0 {
+			fmt.Println("no active batches to collect")
+			return
+		}
+		ingestor := vectorindex.NewBatchIngestor(
+			mysqlkb.NewChunkSourceForModel(qdb, batchEmbedder.Model()),
+			qdrant.NewStore(qdrant.Config{URL: cfg.Qdrant.URL, APIKey: cfg.Qdrant.APIKey}),
+			mysqlkb.NewEmbeddingMarker(qdb),
+		)
+		for _, job := range jobs {
+			poll, err := batchEmbedder.Poll(ctx, job.BatchName)
+			if err != nil {
+				_ = repo.UpdateState(ctx, job.BatchName, poll.State, err.Error())
+				log.Printf("batch %s failed: %v", job.BatchName, err)
+				continue
+			}
+			if !poll.Done {
+				_ = repo.UpdateState(ctx, job.BatchName, poll.State, "")
+				fmt.Printf("batch %s: %s (not ready)\n", job.BatchName, poll.State)
+				continue
+			}
+			res, err := ingestor.Ingest(ctx, vectorindex.Options{CollectionPrefix: *collection, Model: job.Model}, toKeyedVectors(poll.Results))
+			if err != nil {
+				log.Fatalf("ingest batch %s: %v", job.BatchName, err)
+			}
+			if err := repo.MarkIngested(ctx, job.BatchName, res.Points); err != nil {
+				log.Fatalf("mark batch %s ingested: %v", job.BatchName, err)
+			}
+			fmt.Printf("batch %s ingested: points=%d companies=%d collection=%s model=%s\n", job.BatchName, res.Points, res.Batches, *collection, job.Model)
+		}
+	case "embed-batch-run":
+		resolvedProvider, _, batchEmbedder, err := embeddings.NewBatchEmbedder(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
+		if err != nil {
+			log.Fatalf("build batch embedder: %v", err)
+		}
+		companyIDs := parseCompanies(*companies, *company)
+		if len(companyIDs) == 0 {
+			log.Fatal("embed-batch-run requires -company=<id> or -companies=<id,id>")
+		}
+		repo := mysqlkb.NewEmbeddingBatchRepo(db)
+		source := mysqlkb.NewChunkSourceForModel(qdb, batchEmbedder.Model())
+		ingestor := vectorindex.NewBatchIngestor(
+			source,
+			qdrant.NewStore(qdrant.Config{URL: cfg.Qdrant.URL, APIKey: cfg.Qdrant.APIKey}),
+			mysqlkb.NewEmbeddingMarker(qdb),
+		)
+
+		active, err := repo.ListActive(ctx)
+		if err != nil {
+			log.Fatalf("list active batches: %v", err)
+		}
+		inFlight := 0
+		for _, job := range active {
+			poll, err := batchEmbedder.Poll(ctx, job.BatchName)
+			if err != nil {
+				_ = repo.UpdateState(ctx, job.BatchName, poll.State, err.Error())
+				log.Printf("batch %s %s; its chunks return to the queue", job.BatchName, poll.State)
+				continue
+			}
+			if !poll.Done {
+				_ = repo.UpdateState(ctx, job.BatchName, poll.State, "")
+				inFlight++
+				continue
+			}
+			res, err := ingestor.Ingest(ctx, vectorindex.Options{CollectionPrefix: *collection, Model: job.Model}, toKeyedVectors(poll.Results))
+			if err != nil {
+				log.Fatalf("ingest batch %s: %v", job.BatchName, err)
+			}
+			if err := repo.MarkIngested(ctx, job.BatchName, res.Points); err != nil {
+				log.Fatalf("mark batch %s ingested: %v", job.BatchName, err)
+			}
+			fmt.Printf("ingested %s: points=%d\n", job.BatchName, res.Points)
+		}
+
+		if inFlight > 0 {
+			fmt.Printf("%d job(s) still in flight; pool busy — re-run after they finish\n", inFlight)
+			return
+		}
+
+		reqs, err := collectBatchRequests(ctx, source, companyIDs, *batchSize, *waveSize)
+		if err != nil {
+			log.Fatalf("gather chunks: %v", err)
+		}
+		if len(reqs) == 0 {
+			fmt.Printf("all chunks embedded for companies %v (model=%s) — nothing to do\n", companyIDs, batchEmbedder.Model())
+			return
+		}
+		displayName := fmt.Sprintf("kb-%s-%s-%d", resolvedProvider, batchEmbedder.Model(), time.Now().Unix())
+		jobName, err := batchEmbedder.Submit(ctx, displayName, reqs)
+		if err != nil {
+			fmt.Printf("wave not submitted (%d chunks pending): %v\nenqueue pool likely busy — re-run later\n", len(reqs), err)
+			return
+		}
+		if err := repo.Insert(ctx, mysqlkb.EmbeddingBatch{
+			BatchName:    jobName,
+			Provider:     resolvedProvider,
+			Model:        batchEmbedder.Model(),
+			Dimensions:   batchEmbedder.Dim(),
+			DisplayName:  displayName,
+			State:        "JOB_STATE_PENDING",
+			RequestCount: len(reqs),
+		}); err != nil {
+			log.Fatalf("record batch %s: %v", jobName, err)
+		}
+		fmt.Printf("wave submitted %s: %d chunks (companies=%v model=%s). Re-run after it completes to continue.\n", jobName, len(reqs), companyIDs, batchEmbedder.Model())
 	default:
 		log.Fatalf("unknown task %q", *task)
 	}
+}
+
+func toKeyedVectors(results []embeddings.BatchEmbedResult) []vectorindex.KeyedVector {
+	kvs := make([]vectorindex.KeyedVector, 0, len(results))
+	for _, r := range results {
+		kvs = append(kvs, vectorindex.KeyedVector{Key: r.Key, Vector: r.Values})
+	}
+	return kvs
+}
+
+func parseCompanies(csv string, single int64) []int64 {
+	if strings.TrimSpace(csv) != "" {
+		var ids []int64
+		for _, part := range strings.Split(csv, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(part, 10, 64)
+			if err == nil && id > 0 {
+				ids = append(ids, id)
+			}
+		}
+		return ids
+	}
+	if single > 0 {
+		return []int64{single}
+	}
+	return nil
+}
+
+func collectBatchRequests(ctx context.Context, source *mysqlkb.ChunkSource, companyIDs []int64, batchSize, limit int) ([]embeddings.BatchEmbedRequest, error) {
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+	var reqs []embeddings.BatchEmbedRequest
+	for _, companyID := range companyIDs {
+		var afterID int64
+		for {
+			if limit > 0 && len(reqs) >= limit {
+				return reqs[:limit], nil
+			}
+			chunks, err := source.Next(ctx, companyID, afterID, batchSize)
+			if err != nil {
+				return nil, err
+			}
+			if len(chunks) == 0 {
+				break
+			}
+			for _, chunk := range chunks {
+				reqs = append(reqs, embeddings.BatchEmbedRequest{
+					Key:  vectorindex.FormatBatchKey(companyID, chunk.ID),
+					Text: chunk.Content,
+				})
+			}
+			afterID = chunks[len(chunks)-1].ID
+		}
+	}
+	return reqs, nil
+}
+
+func chunkRequests(reqs []embeddings.BatchEmbedRequest, maxPerJob int) [][]embeddings.BatchEmbedRequest {
+	if maxPerJob <= 0 || len(reqs) <= maxPerJob {
+		return [][]embeddings.BatchEmbedRequest{reqs}
+	}
+	var jobs [][]embeddings.BatchEmbedRequest
+	for start := 0; start < len(reqs); start += maxPerJob {
+		end := min(start+maxPerJob, len(reqs))
+		jobs = append(jobs, reqs[start:end])
+	}
+	return jobs
+}
+
+func loadBatchJobs(ctx context.Context, repo *mysqlkb.EmbeddingBatchRepo, name string) ([]mysqlkb.EmbeddingBatch, error) {
+	if name != "" {
+		job, err := repo.GetByName(ctx, name)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("no batch named %q", name)
+			}
+			return nil, err
+		}
+		return []mysqlkb.EmbeddingBatch{job}, nil
+	}
+	return repo.ListActive(ctx)
 }
 
 func buildTenantQuerier(cfg config.Config, db *sql.DB) (tenant.Querier, func(), error) {

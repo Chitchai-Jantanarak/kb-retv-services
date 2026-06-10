@@ -268,9 +268,10 @@ func (e fakeEmbedder) Dim() int {
 }
 
 type fakeVectorStore struct {
-	collection string
-	dim        int
-	points     []ports.VectorPoint
+	collection  string
+	collections []string
+	dim         int
+	points      []ports.VectorPoint
 }
 
 func (s *fakeVectorStore) EnsureCollection(ctx context.Context, name string, dim int) error {
@@ -287,6 +288,7 @@ func (s *fakeVectorStore) Upsert(ctx context.Context, collection string, points 
 		return err
 	}
 	s.collection = collection
+	s.collections = append(s.collections, collection)
 	s.points = append(s.points, points...)
 	return nil
 }

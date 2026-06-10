@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/my/app/internal/application/services/vectorindex"
 	"github.com/my/app/internal/infra/tenant"
@@ -102,6 +103,42 @@ WHERE ch.id > ? AND emb.id IS NULL AND ch.chunk_kind = 'child'`
 	return scanChunks(rows, limit)
 }
 
+func (s *ChunkSource) MetaByIDs(ctx context.Context, companyID int64, ids []int64) ([]vectorindex.Chunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if companyID > 0 {
+		ctx = ctxkey.WithCompanyID(ctx, companyID)
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, companyID)
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	query := `
+SELECT
+  ch.id,
+  ch.kb_article_id,
+  a.company_id,
+  COALESCE(a.source_report_id, 0),
+  COALESCE(ch.chunk_index, 0),
+  ''
+FROM kb_chunks ch
+JOIN kb_articles a ON a.id = ch.kb_article_id
+WHERE a.company_id = ? AND ch.id IN (` + strings.Join(placeholders, ",") + `)`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanChunks(rows, len(ids))
+}
+
 func scanChunks(rows *sql.Rows, limit int) ([]vectorindex.Chunk, error) {
 	chunks := make([]vectorindex.Chunk, 0, limit)
 	for rows.Next() {
@@ -156,5 +193,6 @@ ON DUPLICATE KEY UPDATE
 
 var (
 	_ vectorindex.ChunkSource = (*ChunkSource)(nil)
+	_ vectorindex.MetaSource  = (*ChunkSource)(nil)
 	_ vectorindex.Marker      = (*EmbeddingMarker)(nil)
 )
