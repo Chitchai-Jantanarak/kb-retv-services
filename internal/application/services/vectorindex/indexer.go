@@ -44,9 +44,10 @@ type Options struct {
 }
 
 type Result struct {
-	Chunks  int
-	Points  int
-	Batches int
+	Chunks              int
+	Points              int
+	Batches             int
+	EstimatedInputRunes int
 }
 
 type Indexer struct {
@@ -101,6 +102,9 @@ func (i *Indexer) Run(ctx context.Context, opts Options) (Result, error) {
 		}
 
 		if opts.DryRun {
+			for _, chunk := range chunks {
+				result.EstimatedInputRunes += len([]rune(chunk.Content))
+			}
 			afterID = chunks[len(chunks)-1].ID
 			result.Batches++
 			result.Chunks += len(chunks)

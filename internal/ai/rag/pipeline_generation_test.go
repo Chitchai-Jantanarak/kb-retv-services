@@ -206,7 +206,73 @@ func TestPipelineCriticKeepsAutoWhenSendTrue(t *testing.T) {
 	}
 }
 
-func TestPipelineCriticErrorIsSwallowed(t *testing.T) {
+type stubBudget struct {
+	allow int
+	calls int
+}
+
+func (b *stubBudget) Begin(ctx context.Context) context.Context { return ctx }
+
+func (b *stubBudget) Acquire(_ context.Context, _ int64, _ string) (bool, error) {
+	b.calls++
+	if b.allow < 0 {
+		return true, nil
+	}
+	return b.calls <= b.allow, nil
+}
+
+func TestPipelineBudgetExhaustionDegradesToEscalate(t *testing.T) {
+	gen := &stubGenerator{draft: "draft"}
+	pipeline := NewPipeline(Config{
+		Extractor:           DefaultExtractor{},
+		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
+		Reranker:            LexicalReranker{},
+		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                fakeCRAG{verdict: VerdictRelevant},
+		Generator:           gen,
+		Budget:              &stubBudget{allow: 0},
+		ConfidenceThreshold: 0.85,
+		Workers:             1,
+	})
+	res, err := pipeline.Run(context.Background(), Query{CompanyID: 1, Text: "help"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if gen.calls != 0 {
+		t.Fatalf("generator calls = %d, want 0 when budget exhausted", gen.calls)
+	}
+	if res.Decision != DecisionEscalate {
+		t.Fatalf("Decision = %q, want escalate when no LLM budget (CRAG skipped, no draft)", res.Decision)
+	}
+}
+
+func TestPipelineBudgetDeniedCriticDowngradesToDraft(t *testing.T) {
+	critic := &stubCritic{res: CritiqueResult{Supported: true, Send: true}}
+	pipeline := NewPipeline(Config{
+		Extractor:           DefaultExtractor{},
+		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
+		Reranker:            LexicalReranker{},
+		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                fakeCRAG{verdict: VerdictRelevant},
+		Generator:           &stubGenerator{draft: "an answer"},
+		Critic:              critic,
+		Budget:              &stubBudget{allow: 3},
+		ConfidenceThreshold: 0.85,
+		Workers:             1,
+	})
+	res, err := pipeline.Run(context.Background(), Query{CompanyID: 1, Text: "help"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if critic.calls != 0 {
+		t.Fatalf("critic calls = %d, want 0 (critic over budget)", critic.calls)
+	}
+	if res.Decision != DecisionDraft {
+		t.Fatalf("Decision = %q, want draft (auto cannot stand without an in-budget critic)", res.Decision)
+	}
+}
+
+func TestPipelineCriticErrorDowngradesToDraft(t *testing.T) {
 	pipeline := NewPipeline(Config{
 		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
@@ -222,7 +288,34 @@ func TestPipelineCriticErrorIsSwallowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run err = %v, want nil", err)
 	}
-	if res.Decision != DecisionAuto {
-		t.Fatalf("Decision = %q, want auto (critic error should not change decision)", res.Decision)
+	if res.Decision != DecisionDraft {
+		t.Fatalf("Decision = %q, want draft (critic error must fail closed)", res.Decision)
+	}
+	if res.Critique.Send {
+		t.Fatal("Critique.Send = true, want false after critic error")
+	}
+}
+
+func TestPipelineSkipsGeneratorOnEscalate(t *testing.T) {
+	gen := &stubGenerator{draft: "should not appear"}
+	pipeline := NewPipeline(Config{
+		Extractor:           DefaultExtractor{},
+		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
+		Reranker:            LexicalReranker{},
+		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                fakeCRAG{result: CRAGResult{Verdict: VerdictPartial, Confidence: 0.3}},
+		Generator:           gen,
+		ConfidenceThreshold: 0.85,
+		Workers:             1,
+	})
+	res, err := pipeline.Run(context.Background(), Query{CompanyID: 1, Text: "help"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Decision != DecisionEscalate {
+		t.Fatalf("Decision = %q, want escalate (confidence 0.3)", res.Decision)
+	}
+	if gen.calls != 0 {
+		t.Fatalf("generator calls = %d, want 0 on escalate (no wasted LLM call)", gen.calls)
 	}
 }

@@ -164,6 +164,12 @@ func buildIngestHandler(cfg config.Config) taskHandler {
 		return unavailable("ingest", "mysql not configured")
 	}
 
+	qdb, err := buildTenantQuerier(cfg, db)
+	if err != nil {
+		log.Printf("ingest disabled: tenant router unavailable: %v", err)
+		return unavailable("ingest", "tenant router not configured")
+	}
+
 	provider, modelName, embedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
 	if err != nil {
 		log.Printf("ingest disabled: build embedder: %v", err)
@@ -177,14 +183,14 @@ func buildIngestHandler(cfg config.Config) taskHandler {
 
 	wf, err := ingest.New(ingest.Config{
 		Bootstrapper: kbbootstrap.NewBootstrapper(
-			mysqlkb.NewReportSource(db),
-			mysqlkb.NewArticleStore(db),
+			mysqlkb.NewReportSource(qdb),
+			mysqlkb.NewArticleStore(qdb),
 		),
 		Indexer: vectorindex.NewIndexer(
-			mysqlkb.NewChunkSourceForModel(db, modelName),
+			mysqlkb.NewChunkSourceForModel(qdb, modelName),
 			embedder,
 			qdrant.NewStore(qdrant.Config{URL: cfg.Qdrant.URL, APIKey: cfg.Qdrant.APIKey}),
-			mysqlkb.NewEmbeddingMarker(db),
+			mysqlkb.NewEmbeddingMarker(qdb),
 		),
 		CollectionPrefix: collectionPrefix,
 		Model:            modelName,
@@ -198,7 +204,7 @@ func buildIngestHandler(cfg config.Config) taskHandler {
 	log.Printf("ingest handler configured: provider=%s model=%s collection_prefix=%s",
 		provider, modelName, collectionPrefix)
 
-	graphWf := buildGraphsyncWorkflow(cfg, db)
+	graphWf := buildGraphsyncWorkflow(cfg, qdb)
 	if graphWf != nil {
 		log.Println("graphsync configured: ingest:report will sync to memgraph after successful index")
 	}
@@ -228,7 +234,7 @@ func buildIngestHandler(cfg config.Config) taskHandler {
 	}
 }
 
-func buildGraphsyncWorkflow(cfg config.Config, db *sql.DB) *graphsync.Workflow {
+func buildGraphsyncWorkflow(cfg config.Config, db tenant.Querier) *graphsync.Workflow {
 	if !cfg.Memgraph.Enabled || db == nil {
 		return nil
 	}
@@ -298,6 +304,8 @@ func buildRefreshHandler(cfg config.Config) taskHandler {
 		res, err := indexer.Run(ctx, vectorindex.Options{
 			CompanyID:        job.CompanyID,
 			CollectionPrefix: collectionPrefix,
+			BatchSize:        cfg.Embedding.RefreshBatchSize,
+			Limit:            cfg.Embedding.RefreshMaxChunks,
 			Model:            modelName,
 		})
 		if err != nil {

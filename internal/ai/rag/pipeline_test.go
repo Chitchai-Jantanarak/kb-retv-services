@@ -342,6 +342,8 @@ func TestPipelineRunAutoSendsAboveThreshold(t *testing.T) {
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.9}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                fakeCRAG{verdict: VerdictRelevant},
+		Generator:           &stubGenerator{draft: "answer"},
 		Workers:             1,
 		ConfidenceThreshold: 0.85,
 	})
@@ -355,6 +357,30 @@ func TestPipelineRunAutoSendsAboveThreshold(t *testing.T) {
 	}
 	if result.Confidence < 0.85 {
 		t.Fatalf("Confidence = %v, want >= 0.85", result.Confidence)
+	}
+}
+
+func TestPipelineUngradedCRAGNeverAutoSends(t *testing.T) {
+	pipeline := NewPipeline(Config{
+		Extractor:           DefaultExtractor{},
+		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.95}}}},
+		Reranker:            LexicalReranker{},
+		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                PassthroughCRAG{},
+		Generator:           &stubGenerator{draft: "draft"},
+		Workers:             1,
+		ConfidenceThreshold: 0.85,
+	})
+
+	result, err := pipeline.Run(context.Background(), Query{CompanyID: 1, Text: "help"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Decision == DecisionAuto {
+		t.Fatalf("Decision = auto, want draft/escalate: ungraded CRAG must never auto-send")
+	}
+	if result.CRAG.Graded {
+		t.Fatal("CRAG.Graded = true, want false for passthrough")
 	}
 }
 
@@ -492,10 +518,12 @@ type fakeCRAG struct {
 }
 
 func (f fakeCRAG) Grade(_ context.Context, _, _ string) (CRAGResult, error) {
-	if f.result.Verdict != 0 || f.result.Confidence != 0 || f.result.Missing != "" {
-		return f.result, f.err
+	res := f.result
+	if res.Verdict == 0 && res.Confidence == 0 && res.Missing == "" {
+		res = CRAGResult{Verdict: f.verdict}
 	}
-	return CRAGResult{Verdict: f.verdict}, f.err
+	res.Graded = true
+	return res, f.err
 }
 
 type recordingGap struct {

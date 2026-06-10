@@ -31,6 +31,7 @@ type Pipeline struct {
 	thresholdFor        ThresholdForCompany
 	cache               cacheConfig
 	knowledgeGap        ports.KnowledgeGapRecorder
+	budget              Budget
 	workers             int
 }
 
@@ -82,6 +83,7 @@ func NewPipeline(cfg Config) *Pipeline {
 			ttl:   cfg.CacheTTL,
 		},
 		knowledgeGap: cfg.KnowledgeGap,
+		budget:       cfg.Budget,
 		workers:      workers,
 	}
 }
@@ -95,6 +97,9 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 	}
 
 	ctx = ctxkey.WithCompanyID(ctx, query.CompanyID)
+	if p.budget != nil {
+		ctx = p.budget.Begin(ctx)
+	}
 
 	timings := newStageTimings(query)
 
@@ -115,6 +120,10 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 			return Result{}, err
 		}
 		if ok {
+			cached.Decision = decisionFor(cached.Confidence, p.threshold(ctx, plannedQuery), cached.CRAG.Graded)
+			if cached.Decision == DecisionAuto && strings.TrimSpace(cached.Draft) == "" {
+				cached.Decision = DecisionEscalate
+			}
 			return cached, nil
 		}
 	}
@@ -155,7 +164,7 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 		}
 	}
 
-	if shouldRerank(plannedQuery, candidates) {
+	if shouldRerank(plannedQuery, candidates) && p.llmAllowed(ctx, query.CompanyID, "rerank") {
 		if err := timed(timings, "rerank", func() error {
 			var err error
 			candidates, err = p.reranker.Rerank(ctx, plannedQuery, plan.Meta, candidates)
@@ -169,7 +178,7 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 	}
 
 	cragResult := CRAGResult{Verdict: VerdictIrrelevant}
-	if shouldRunCRAG(plannedQuery, candidates) {
+	if shouldRunCRAG(plannedQuery, candidates) && p.llmAllowed(ctx, query.CompanyID, "crag") {
 		if err := timed(timings, "crag", func() error {
 			var err error
 			cragResult, err = p.crag.Grade(ctx, plannedQuery.Text, topContent(candidates))
@@ -182,28 +191,37 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 
 	confidence := computeConfidence(cragResult, candidates)
 	threshold := p.threshold(ctx, plannedQuery)
-	decision := routeDecision(confidence, threshold)
+	decision := decisionFor(confidence, threshold, cragResult.Graded)
 
 	p.recordKnowledgeGap(ctx, query, verdict)
 
 	var draft string
-	if err := timed(timings, "generate", func() error {
-		draft = p.generateDraft(ctx, plannedQuery, verdict, candidates)
-		return nil
-	}); err != nil {
-		return Result{}, err
-	}
-	critique := CritiqueResult{Supported: true, Send: true}
-	criticRan := false
-	if shouldRunCritic(plannedQuery, decision, draft) {
-		if err := timed(timings, "critique", func() error {
-			criticRan = true
-			critique = p.critiqueDraft(ctx, plannedQuery, draft, candidates)
+	if p.llmAllowed(ctx, query.CompanyID, "generate") {
+		if err := timed(timings, "generate", func() error {
+			draft = p.generateDraft(ctx, plannedQuery, verdict, decision, candidates)
 			return nil
 		}); err != nil {
 			return Result{}, err
 		}
-		decision = applyCritiqueDecision(decision, critique)
+	}
+	critique := CritiqueResult{Supported: true, Send: true}
+	criticRan := false
+	if shouldRunCritic(plannedQuery, decision, draft) {
+		if p.llmAllowed(ctx, query.CompanyID, "critic") {
+			if err := timed(timings, "critique", func() error {
+				criticRan = true
+				critique = p.critiqueDraft(ctx, plannedQuery, draft, candidates)
+				return nil
+			}); err != nil {
+				return Result{}, err
+			}
+			decision = applyCritiqueDecision(decision, critique)
+		} else {
+			decision = DecisionDraft
+		}
+	}
+	if decision == DecisionAuto && strings.TrimSpace(draft) == "" {
+		decision = DecisionEscalate
 	}
 
 	result := Result{
@@ -442,6 +460,19 @@ func shouldRunCritic(query Query, decision Decision, draft string) bool {
 	return !fastDraft(query) && decision == DecisionAuto && strings.TrimSpace(draft) != ""
 }
 
+func (p *Pipeline) llmAllowed(ctx context.Context, companyID int64, stage string) bool {
+	if p.budget == nil {
+		return true
+	}
+	ok, err := p.budget.Acquire(ctx, companyID, stage)
+	if err != nil {
+		logger.FromContext(ctx).Warn("rag budget check failed; skipping llm stage",
+			zap.String("stage", stage), zap.Error(err))
+		return false
+	}
+	return ok
+}
+
 func (p *Pipeline) threshold(ctx context.Context, query Query) float64 {
 	threshold := p.confidenceThreshold
 	if p.thresholdFor != nil {
@@ -461,8 +492,8 @@ func (p *Pipeline) recordKnowledgeGap(ctx context.Context, query Query, verdict 
 	cancel()
 }
 
-func (p *Pipeline) generateDraft(ctx context.Context, query Query, verdict CRAGVerdict, candidates []Candidate) string {
-	if p.generator == nil || verdict == VerdictIrrelevant || len(candidates) == 0 {
+func (p *Pipeline) generateDraft(ctx context.Context, query Query, verdict CRAGVerdict, decision Decision, candidates []Candidate) string {
+	if p.generator == nil || decision == DecisionEscalate || verdict == VerdictIrrelevant || len(candidates) == 0 {
 		return ""
 	}
 	generated, err := p.generator.Generate(ctx, query, candidates)
@@ -480,8 +511,8 @@ func (p *Pipeline) critiqueDraft(ctx context.Context, query Query, draft string,
 	}
 	got, err := p.critic.Critique(ctx, query, draft, candidates)
 	if err != nil {
-		logger.FromContext(ctx).Warn("rag critic failed", zap.Error(err))
-		return critique
+		logger.FromContext(ctx).Warn("rag critic failed; failing closed", zap.Error(err))
+		return CritiqueResult{Supported: false, Send: false}
 	}
 	return got
 }
@@ -547,4 +578,12 @@ func routeDecision(confidence, threshold float64) Decision {
 	default:
 		return DecisionEscalate
 	}
+}
+
+func decisionFor(confidence, threshold float64, graded bool) Decision {
+	decision := routeDecision(confidence, threshold)
+	if decision == DecisionAuto && !graded {
+		return DecisionDraft
+	}
+	return decision
 }

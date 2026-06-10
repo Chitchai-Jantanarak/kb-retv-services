@@ -92,12 +92,12 @@ func TestLLMCRAGGradeMissingCompanyID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLLMCRAG: %v", err)
 	}
-	result, err := c.Grade(context.Background(), "q", "evidence")
-	if err != nil {
-		t.Fatalf("Grade: %v", err)
+	_, err = c.Grade(context.Background(), "q", "evidence")
+	if err == nil {
+		t.Fatal("Grade err = nil, want error when company_id is missing (no silent promotion)")
 	}
-	if result.Verdict != VerdictRelevant {
-		t.Fatalf("verdict = %v, want VerdictRelevant (passthrough)", result.Verdict)
+	if !strings.Contains(err.Error(), "company_id missing") {
+		t.Fatalf("err = %q, want company_id missing", err.Error())
 	}
 }
 
@@ -138,9 +138,9 @@ func TestLLMCRAGGradeHappyPath(t *testing.T) {
 		text string
 		want CRAGResult
 	}{
-		{name: "relevant", text: `{"verdict":"relevant","confidence":0.9,"missing":""}`, want: CRAGResult{Verdict: VerdictRelevant, Confidence: 0.9}},
-		{name: "partial", text: `{"verdict":"PARTIAL","confidence":0.5,"missing":"x"}`, want: CRAGResult{Verdict: VerdictPartial, Confidence: 0.5, Missing: "x"}},
-		{name: "irrelevant", text: `{"verdict":"irrelevant","confidence":0.1,"missing":"y"}`, want: CRAGResult{Verdict: VerdictIrrelevant, Confidence: 0.1, Missing: "y"}},
+		{name: "relevant", text: `{"verdict":"relevant","confidence":0.9,"missing":""}`, want: CRAGResult{Verdict: VerdictRelevant, Confidence: 0.9, Graded: true}},
+		{name: "partial", text: `{"verdict":"PARTIAL","confidence":0.5,"missing":"x"}`, want: CRAGResult{Verdict: VerdictPartial, Confidence: 0.5, Missing: "x", Graded: true}},
+		{name: "irrelevant", text: `{"verdict":"irrelevant","confidence":0.1,"missing":"y"}`, want: CRAGResult{Verdict: VerdictIrrelevant, Confidence: 0.1, Missing: "y", Graded: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

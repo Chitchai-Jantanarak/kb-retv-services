@@ -104,16 +104,22 @@ func (r *LLMReranker) Rerank(ctx context.Context, query Query, meta Meta, candid
 func formatCandidates(candidates []Candidate) string {
 	var b strings.Builder
 	for _, c := range candidates {
-		b.WriteString(c.ID)
+		b.WriteString(oneLine(c.ID))
 		b.WriteString(": ")
-		b.WriteString(truncate(c.Title, 80))
+		b.WriteString(oneLine(truncate(c.Title, 80)))
 		if c.Content != "" {
 			b.WriteString(" — ")
-			b.WriteString(truncate(c.Content, 240))
+			b.WriteString(oneLine(truncate(c.Content, 240)))
 		}
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+var lineCollapser = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
+
+func oneLine(s string) string {
+	return lineCollapser.Replace(s)
 }
 
 func truncate(s string, maxLen int) string {

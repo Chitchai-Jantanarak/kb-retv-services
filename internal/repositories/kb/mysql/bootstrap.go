@@ -6,27 +6,32 @@ import (
 	"errors"
 
 	"github.com/my/app/internal/application/services/kbbootstrap"
+	"github.com/my/app/internal/infra/tenant"
+	"github.com/my/app/internal/shared/ctxkey"
 )
 
 type ReportSource struct {
-	db *sql.DB
+	db tenant.Querier
 }
 
 type ArticleStore struct {
-	db *sql.DB
+	db tenant.Querier
 }
 
-func NewReportSource(db *sql.DB) *ReportSource {
+func NewReportSource(db tenant.Querier) *ReportSource {
 	return &ReportSource{db: db}
 }
 
-func NewArticleStore(db *sql.DB) *ArticleStore {
+func NewArticleStore(db tenant.Querier) *ArticleStore {
 	return &ArticleStore{db: db}
 }
 
 func (s *ReportSource) Reports(ctx context.Context, companyID int64, limit int) ([]kbbootstrap.ReportRecord, error) {
 	if limit < 0 {
 		limit = 0
+	}
+	if companyID > 0 {
+		ctx = ctxkey.WithCompanyID(ctx, companyID)
 	}
 
 	query := `
@@ -101,6 +106,7 @@ func (s *ArticleStore) InsertArticle(ctx context.Context, article kbbootstrap.Ar
 	if article.CompanyID == 0 {
 		return false, errors.New("company id is required")
 	}
+	ctx = ctxkey.WithCompanyID(ctx, article.CompanyID)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

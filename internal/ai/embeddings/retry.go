@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
@@ -96,6 +97,8 @@ func isRetryableStatus(status int) bool {
 }
 
 func retryAfterFromResponse(resp *http.Response) time.Duration {
+	raw, _ := io.ReadAll(resp.Body)
+
 	if header := strings.TrimSpace(resp.Header.Get("Retry-After")); header != "" {
 		if secs, err := strconv.Atoi(header); err == nil {
 			return time.Duration(secs) * time.Second
@@ -115,7 +118,7 @@ func retryAfterFromResponse(resp *http.Response) time.Duration {
 			} `json:"details"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err == nil {
+	if err := json.Unmarshal(raw, &body); err == nil {
 		for _, detail := range body.Error.Details {
 			if strings.Contains(detail.Type, "RetryInfo") && detail.RetryDelay != "" {
 				if delay, perr := time.ParseDuration(detail.RetryDelay); perr == nil {

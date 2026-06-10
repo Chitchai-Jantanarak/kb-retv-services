@@ -35,7 +35,7 @@ func (c *LLMCRAG) Grade(ctx context.Context, query, content string) (CRAGResult,
 	}
 	companyID, ok := ctxkey.CompanyID(ctx)
 	if !ok || companyID <= 0 {
-		return CRAGResult{Verdict: VerdictRelevant}, nil
+		return CRAGResult{}, errors.New("rag: llm crag: company_id missing from context")
 	}
 
 	tmpl, err := c.registry.Get(prompts.NameCRAG)
@@ -72,6 +72,7 @@ func (c *LLMCRAG) Grade(ctx context.Context, query, content string) (CRAGResult,
 	result := CRAGResult{
 		Confidence: clamp01(parsed.Confidence),
 		Missing:    strings.TrimSpace(parsed.Missing),
+		Graded:     true,
 	}
 	switch strings.ToLower(strings.TrimSpace(parsed.Verdict)) {
 	case "relevant":

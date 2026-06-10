@@ -10,6 +10,48 @@ import (
 
 var errCacheMiss = errors.New("cache miss")
 
+func TestPipelineRecomputesDecisionOnCacheHitWhenThresholdChanges(t *testing.T) {
+	cache := newMemoryCache()
+	threshold := 0.5
+	retriever := &recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.9}}}
+	pipeline := NewPipeline(Config{
+		Extractor:              DefaultExtractor{},
+		Retrievers:             []Retriever{retriever},
+		Reranker:               LexicalReranker{},
+		Compressor:             Compressor{MaxRunes: 100},
+		CRAG:                   fakeCRAG{verdict: VerdictRelevant},
+		Generator:              &stubGenerator{draft: "answer"},
+		Cache:                  cache,
+		CacheTTL:               time.Minute,
+		ConfidenceThresholdFor: func(_ context.Context, _ int64) float64 { return threshold },
+		Workers:                1,
+	})
+	q := Query{CompanyID: 1, Text: "help"}
+
+	first, err := pipeline.Run(context.Background(), q)
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	if first.Decision != DecisionAuto {
+		t.Fatalf("first Decision = %q, want auto (threshold 0.5)", first.Decision)
+	}
+
+	threshold = 0.95
+	second, err := pipeline.Run(context.Background(), q)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if !second.CacheHit {
+		t.Fatal("second CacheHit = false, want true")
+	}
+	if retriever.calls != 1 {
+		t.Fatalf("retriever calls = %d, want 1 (second served from cache)", retriever.calls)
+	}
+	if second.Decision != DecisionDraft {
+		t.Fatalf("second Decision = %q, want draft (threshold raised to 0.95 must re-route on cache hit)", second.Decision)
+	}
+}
+
 type memoryCache struct {
 	mu    sync.Mutex
 	items map[string][]byte

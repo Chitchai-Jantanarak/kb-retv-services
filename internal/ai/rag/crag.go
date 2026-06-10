@@ -14,6 +14,7 @@ type CRAGResult struct {
 	Verdict    CRAGVerdict
 	Confidence float64
 	Missing    string
+	Graded     bool
 }
 
 func (v CRAGVerdict) String() string {

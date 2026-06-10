@@ -95,6 +95,7 @@ func healthz() {}
 // @Success 200 {object} response.Envelope
 // @Failure 400 {object} response.Envelope
 // @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
 // @Failure 500 {object} response.Envelope
 // @Router /v1/reply [post]
 func createReply() {}
@@ -130,6 +131,7 @@ func receiveEmailInbound() {}
 // @Success 200 {object} response.Envelope
 // @Failure 400 {object} response.Envelope
 // @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
 // @Failure 500 {object} response.Envelope
 // @Router /v1/reply/feedback [post]
 func createFeedback() {}
@@ -144,6 +146,7 @@ func createFeedback() {}
 // @Success 200 {object} response.Envelope
 // @Failure 400 {object} response.Envelope
 // @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
 // @Failure 500 {object} response.Envelope
 // @Router /v1/admin/review-queue/{id}/reject [post]
 func rejectReviewQueueItem() {}

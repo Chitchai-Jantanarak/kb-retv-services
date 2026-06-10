@@ -11,17 +11,31 @@ import (
 )
 
 type Config struct {
-	App      App
-	Server   Server
-	MySQL    MySQL
-	Redis    Redis
-	Qdrant   Qdrant
-	Memgraph Memgraph
-	LLM      LLM
-	APIKeys  APIKeys
-	Logger   Logger
-	Swagger  Swagger
-	Laravel  Laravel
+	App       App
+	Server    Server
+	MySQL     MySQL
+	Redis     Redis
+	Qdrant    Qdrant
+	Memgraph  Memgraph
+	LLM       LLM
+	APIKeys   APIKeys
+	Logger    Logger
+	Swagger   Swagger
+	Laravel   Laravel
+	Budget    Budget
+	Embedding Embedding
+}
+
+type Budget struct {
+	MaxLLMCallsPerRequest       int
+	MaxLLMCallsPerCompanyWindow int
+	WindowSeconds               int
+}
+
+type Embedding struct {
+	RefreshMaxChunks  int
+	RefreshBatchSize  int
+	LargeRunThreshold int
 }
 
 type Laravel struct {
@@ -134,6 +148,12 @@ func LoadFrom(path string) (Config, error) {
 	v.SetDefault("logger.level", "info")
 	v.SetDefault("logger.format", "console")
 	v.SetDefault("swagger.enabled", true)
+	v.SetDefault("budget.maxLLMCallsPerRequest", 6)
+	v.SetDefault("budget.maxLLMCallsPerCompanyWindow", 0)
+	v.SetDefault("budget.windowSeconds", 60)
+	v.SetDefault("embedding.refreshMaxChunks", 512)
+	v.SetDefault("embedding.refreshBatchSize", 64)
+	v.SetDefault("embedding.largeRunThreshold", 1000)
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -219,6 +239,16 @@ func LoadFrom(path string) (Config, error) {
 			JWTPublicKeyPath: v.GetString("laravel.jwt_public_key_path"),
 			JWKSURL:          v.GetString("laravel.jwks_url"),
 		},
+		Budget: Budget{
+			MaxLLMCallsPerRequest:       v.GetInt("budget.maxLLMCallsPerRequest"),
+			MaxLLMCallsPerCompanyWindow: v.GetInt("budget.maxLLMCallsPerCompanyWindow"),
+			WindowSeconds:               v.GetInt("budget.windowSeconds"),
+		},
+		Embedding: Embedding{
+			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),
+			RefreshBatchSize:  v.GetInt("embedding.refreshBatchSize"),
+			LargeRunThreshold: v.GetInt("embedding.largeRunThreshold"),
+		},
 	}
 	return cfg, nil
 }
@@ -231,6 +261,12 @@ type envBinding struct {
 var envBindings = []envBinding{
 	{key: "app.env", env: "APP_ENV"},
 	{key: "server.port", env: "SERVER_PORT"},
+	{key: "budget.maxLLMCallsPerRequest", env: "BUDGET_MAX_LLM_CALLS_PER_REQUEST"},
+	{key: "budget.maxLLMCallsPerCompanyWindow", env: "BUDGET_MAX_LLM_CALLS_PER_COMPANY_WINDOW"},
+	{key: "budget.windowSeconds", env: "BUDGET_WINDOW_SECONDS"},
+	{key: "embedding.refreshMaxChunks", env: "EMBEDDING_REFRESH_MAXCHUNKS"},
+	{key: "embedding.refreshBatchSize", env: "EMBEDDING_REFRESH_BATCHSIZE"},
+	{key: "embedding.largeRunThreshold", env: "EMBEDDING_LARGE_RUN_THRESHOLD"},
 	{key: "mysql.enabled", env: "MYSQL_ENABLED"},
 	{key: "mysql.dsn", env: "MYSQL_DSN"},
 	{key: "mysql.maxOpenConns", env: "MYSQL_MAXOPENCONNS"},

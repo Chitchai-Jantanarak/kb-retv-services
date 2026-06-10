@@ -2,19 +2,20 @@ package mysql
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/my/app/internal/application/workflows/graphsync"
+	"github.com/my/app/internal/infra/tenant"
+	"github.com/my/app/internal/shared/ctxkey"
 )
 
 type ArticleSource struct {
-	db *sql.DB
+	db tenant.Querier
 }
 
-func NewArticleSource(db *sql.DB) *ArticleSource {
+func NewArticleSource(db tenant.Querier) *ArticleSource {
 	return &ArticleSource{db: db}
 }
 
@@ -25,6 +26,7 @@ func (s *ArticleSource) ArticlesSince(ctx context.Context, companyID int64, sinc
 	if limit <= 0 {
 		limit = 100
 	}
+	ctx = ctxkey.WithCompanyID(ctx, companyID)
 
 	query := `
 SELECT

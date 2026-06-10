@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"go.uber.org/zap"
 
+	"github.com/my/app/internal/ai/budget"
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
@@ -105,10 +108,15 @@ func main() {
 			log.Info("admin review-queue endpoints configured")
 		}
 	}
+	keyMaterial := serviceJWTKeyMaterial(cfg, log)
+	if cfg.App.IsProduction() && keyMaterial == "" {
+		log.Fatal("service JWT key material is required in production; set the Laravel public key path or PEM")
+	}
 	routes.Register(e, handlers.NewReplyHandler(workflow), routes.Options{
 		Log:            log,
 		SwaggerEnabled: cfg.Swagger.EnabledFor(cfg.App),
-		JWTSecret:      serviceJWTKeyMaterial(cfg, log),
+		JWTSecret:      keyMaterial,
+		RequireAuth:    cfg.App.IsProduction(),
 		Reports:        reportsHandler,
 		Inbound:        inboundHandler,
 		Feedback:       feedbackHandler,
@@ -151,6 +159,11 @@ func buildKnowledge(db tenant.Querier) ports.KnowledgeRepository {
 
 func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger) []reply.Option {
 	opts := make([]reply.Option, 0, 8)
+	opts = append(opts, reply.WithBudget(budget.New(budget.Config{
+		MaxCallsPerRequest:       cfg.Budget.MaxLLMCallsPerRequest,
+		MaxCallsPerCompanyWindow: cfg.Budget.MaxLLMCallsPerCompanyWindow,
+		Window:                   time.Duration(cfg.Budget.WindowSeconds) * time.Second,
+	})))
 	if db == nil {
 		return opts
 	}
@@ -261,6 +274,9 @@ func appendRetrievers(opts []reply.Option, cfg config.Config, db tenant.Querier,
 }
 
 func buildInboundHandler(cfg config.Config, db tenant.Querier, log *zap.Logger) (*handlers.InboundHandler, error) {
+	if cfg.App.IsProduction() && strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" {
+		return nil, errors.New("inbound webhook secret is required in production")
+	}
 	repo := channelsmysql.New(db)
 	wfCfg := omnichannel.Config{
 		Accounts:      repo,

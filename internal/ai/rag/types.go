@@ -151,6 +151,11 @@ type Reranker interface {
 
 type ThresholdForCompany func(ctx context.Context, companyID int64) float64
 
+type Budget interface {
+	Begin(ctx context.Context) context.Context
+	Acquire(ctx context.Context, companyID int64, stage string) (bool, error)
+}
+
 type Config struct {
 	Planner                Planner
 	Extractor              Extractor
@@ -167,5 +172,6 @@ type Config struct {
 	Cache                  ports.Cache
 	CacheTTL               time.Duration
 	KnowledgeGap           ports.KnowledgeGapRecorder
+	Budget                 Budget
 	Workers                int
 }

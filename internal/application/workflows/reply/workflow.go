@@ -30,6 +30,7 @@ type options struct {
 	generator    rag.Generator
 	critic       rag.Critic
 	thresholdFor rag.ThresholdForCompany
+	budget       rag.Budget
 	actions      ports.AIActionRecorder
 	agentIDFor   AgentIDLookup
 }
@@ -96,6 +97,14 @@ func WithThresholdFor(fn rag.ThresholdForCompany) Option {
 	}
 }
 
+func WithBudget(budget rag.Budget) Option {
+	return func(opts *options) {
+		if budget != nil {
+			opts.budget = budget
+		}
+	}
+}
+
 func WithActionRecorder(rec ports.AIActionRecorder, agentIDFor AgentIDLookup) Option {
 	return func(opts *options) {
 		if rec != nil && agentIDFor != nil {
@@ -134,6 +143,7 @@ func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow 
 			Critic:                 cfg.critic,
 			ConfidenceThresholdFor: cfg.thresholdFor,
 			KnowledgeGap:           cfg.knowledgeGap,
+			Budget:                 cfg.budget,
 			Workers:                len(retrievers),
 		}),
 		actions:    cfg.actions,

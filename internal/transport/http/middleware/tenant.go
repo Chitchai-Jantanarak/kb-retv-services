@@ -17,7 +17,7 @@ const (
 	headerAuth     = "Authorization"
 )
 
-func RequireCompany(jwtSecret string) echo.MiddlewareFunc {
+func RequireCompany(jwtSecret string, requireAuth bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req := c.Request()
@@ -46,6 +46,9 @@ func RequireCompany(jwtSecret string) echo.MiddlewareFunc {
 					Perms:     claims.Perms,
 				}
 			} else {
+				if requireAuth {
+					return response.WriteError(c, apperr.New(apperr.CodeUnauthorized, "service token verification is required but not configured"))
+				}
 				if headerErr != nil {
 					return response.WriteError(c, headerErr)
 				}

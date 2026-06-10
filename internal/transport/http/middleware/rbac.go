@@ -34,5 +34,15 @@ func can(principal ctxkey.Principal, permission string) bool {
 	if principal.Role == "super_admin" {
 		return true
 	}
-	return slices.Contains(principal.Perms, "*") || slices.Contains(principal.Perms, permission)
+	if slices.Contains(principal.Perms, "*") || slices.Contains(principal.Perms, permission) {
+		return true
+	}
+	return slices.Contains(defaultRolePerms[principal.Role], permission)
+}
+
+var defaultRolePerms = map[string][]string{
+	"tenant_admin": {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
+	"agent_lead":   {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
+	"agent":        {"ai:reply:create", "ai:feedback:create", "ai:reports:read"},
+	"customer":     {"ai:feedback:create"},
 }

@@ -16,6 +16,7 @@ type Options struct {
 	Log            *zap.Logger
 	SwaggerEnabled bool
 	JWTSecret      string
+	RequireAuth    bool
 	Reports        *handlers.ReportsHandler
 	Inbound        *handlers.InboundHandler
 	Feedback       *handlers.FeedbackHandler
@@ -48,7 +49,7 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 	}
 
 	protectedV1 := e.Group("/v1")
-	protectedV1.Use(appmiddleware.RequireCompany(opts.JWTSecret))
+	protectedV1.Use(appmiddleware.RequireCompany(opts.JWTSecret, opts.RequireAuth))
 	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"))
 
 	if opts.Feedback != nil {

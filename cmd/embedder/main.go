@@ -24,13 +24,15 @@ func main() {
 	collection := flag.String("collection", "", "qdrant collection")
 	batchSize := flag.Int("batch-size", 64, "chunks per embedding batch")
 	limit := flag.Int("limit", 0, "maximum chunks to index")
-	provider := flag.String("provider", "auto", "embedding provider: auto, openai, openrouter, gemini, voyage, claude, ollama, or hash")
+	provider := flag.String("provider", "auto", "embedding provider: auto, openai, openrouter, gemini, voyage, claude, ollama, hash")
 	dim := flag.Int("dim", 0, "embedding dimensions")
 	model := flag.String("model", "", "embedding model name")
 	baseURL := flag.String("base-url", "", "OpenAI-compatible base URL")
 	embedRPM := flag.Float64("embed-rpm", 0, "throttle embedding requests per minute (0 = no client-side throttle)")
 	embedRetries := flag.Int("embed-retries", 0, "max retries on 429/5xx per batch (0 = provider default)")
 	dryRun := flag.Bool("dry-run", false, "count chunks without embedding")
+	maxChunks := flag.Int("max-chunks", 0, "cap chunks indexed when -limit is empty (0 = use config default)")
+	allowLarge := flag.Bool("allow-large-remote-run", false, "permit a remote-provider run above the large-run threshold")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -73,18 +75,32 @@ func main() {
 		if *company == 0 {
 			log.Println("warning: -company=0 scans chunks across every company; pass -company=<id> to scope")
 		}
+		effectiveLimit := effectiveLimit(*limit, *maxChunks, cfg.Embedding.RefreshMaxChunks)
+		if !*dryRun && !*allowLarge && isRemoteProvider(resolvedProvider) {
+			if effectiveLimit == 0 || effectiveLimit > cfg.Embedding.LargeRunThreshold {
+				log.Fatalf("refusing large remote embedding run (provider=%s limit=%d threshold=%d); pass -allow-large-remote-run, a smaller -max-chunks/-limit, or -dry-run first",
+					resolvedProvider, effectiveLimit, cfg.Embedding.LargeRunThreshold)
+			}
+		}
 		result, err := indexer.Run(ctx, vectorindex.Options{
 			CompanyID:        *company,
 			CollectionPrefix: *collection,
 			BatchSize:        *batchSize,
-			Limit:            *limit,
+			Limit:            effectiveLimit,
 			Model:            modelName,
 			DryRun:           *dryRun,
 		})
 		if err != nil {
 			log.Fatalf("index kb: %v", err)
 		}
-		fmt.Printf("kb index complete: chunks=%d points=%d batches=%d collection=%s model=%s provider=%s dim=%d\n", result.Chunks, result.Points, result.Batches, *collection, modelName, resolvedProvider, embedder.Dim())
+		if *dryRun {
+			tokens := result.EstimatedInputRunes / 4
+			costUSD := float64(tokens) / 1_000_000 * 0.15
+			fmt.Printf("kb index dry-run: chunks=%d batches=%d estimated_runes=%d estimated_tokens~=%d estimated_cost_usd~=%.4f (estimate only, gemini standard embedding)\n",
+				result.Chunks, result.Batches, result.EstimatedInputRunes, tokens, costUSD)
+		} else {
+			fmt.Printf("kb index complete: chunks=%d points=%d batches=%d collection=%s model=%s provider=%s dim=%d\n", result.Chunks, result.Points, result.Batches, *collection, modelName, resolvedProvider, embedder.Dim())
+		}
 	default:
 		log.Fatalf("unknown task %q", *task)
 	}
@@ -122,6 +138,25 @@ func embeddingSettings(provider string, model string, dim int, baseURL string, r
 		VoyageKey:      firstNonEmpty(os.Getenv("VOYAGE_API_KEY"), cfg.APIKeys.Voyage),
 		OpenRouterKey:  firstNonEmpty(os.Getenv("OPENROUTER_API_KEY"), cfg.APIKeys.OpenRouter),
 		LocalURL:       cfg.LLM.LocalURL,
+	}
+}
+
+func effectiveLimit(limit, maxChunks, configMax int) int {
+	if limit > 0 {
+		return limit
+	}
+	if maxChunks > 0 {
+		return maxChunks
+	}
+	return configMax
+}
+
+func isRemoteProvider(provider string) bool {
+	switch provider {
+	case "hash", "ollama", "local":
+		return false
+	default:
+		return true
 	}
 }
 

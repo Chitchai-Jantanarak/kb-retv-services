@@ -52,6 +52,34 @@ func TestIndexerEmbedsUpsertsAndMarksChunks(t *testing.T) {
 	}
 }
 
+func TestIndexerDryRunEstimatesInputRunes(t *testing.T) {
+	source := &fakeChunkSource{
+		chunks: []Chunk{
+			{ID: 10, CompanyID: 3, Content: "printer offline"},
+			{ID: 11, CompanyID: 3, Content: "network queue"},
+		},
+	}
+	vectorStore := &fakeVectorStore{}
+	indexer := NewIndexer(source, fakeEmbedder{dim: 3}, vectorStore, &fakeMarker{})
+
+	result, err := indexer.Run(context.Background(), Options{
+		CompanyID:        3,
+		CollectionPrefix: "kb_chunks",
+		BatchSize:        10,
+		DryRun:           true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Points != 0 || len(vectorStore.points) != 0 {
+		t.Fatalf("dry-run wrote vectors: points=%d upserts=%d", result.Points, len(vectorStore.points))
+	}
+	wantRunes := len([]rune("printer offline")) + len([]rune("network queue"))
+	if result.EstimatedInputRunes != wantRunes {
+		t.Fatalf("EstimatedInputRunes = %d, want %d", result.EstimatedInputRunes, wantRunes)
+	}
+}
+
 func TestIndexerRejectsCrossTenantSourceLeak(t *testing.T) {
 	source := &leakySource{
 		chunks: []Chunk{
