@@ -1,0 +1,472 @@
+basePath: /
+definitions:
+  github_com_my_app_internal_application_dto.AttachmentRef:
+    properties:
+      id:
+        type: string
+      mime_type:
+        type: string
+      size_bytes:
+        minimum: 0
+        type: integer
+      storage_key:
+        type: string
+      url:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ReplyRequest:
+    properties:
+      attachments:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.AttachmentRef'
+        type: array
+      channel:
+        enum:
+        - line
+        - email
+        - web
+        - voice
+        - api
+        - in_app
+        type: string
+      conversation_id:
+        type: string
+      customer_id:
+        type: string
+      debug:
+        type: boolean
+      message:
+        type: string
+      message_id:
+        type: string
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      mode:
+        enum:
+        - fast_draft
+        - full_review
+        - debug
+        type: string
+      query:
+        type: string
+      site_id:
+        type: string
+    type: object
+  github_com_my_app_internal_transport_http_response.Envelope:
+    properties:
+      data: {}
+      error:
+        $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Error'
+      success:
+        type: boolean
+    type: object
+  github_com_my_app_internal_transport_http_response.Error:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  scripts_swagger.emailInboundWebhookRequest:
+    properties:
+      body:
+        example: The connection has been unstable since this morning.
+        type: string
+      body_html:
+        example: <p>The connection has been unstable since this morning.</p>
+        type: string
+      from:
+        example: Customer One <customer@example.com>
+        type: string
+      message_id:
+        example: email-20260520-001
+        type: string
+      subject:
+        example: Internet connection issue
+        type: string
+      to:
+        example: support@example.com
+        type: string
+    type: object
+  scripts_swagger.feedbackRequest:
+    properties:
+      ai_action_id:
+        example: 42
+        type: integer
+      note:
+        example: Agent sent the draft unchanged.
+        type: string
+      verdict:
+        enum:
+        - accepted
+        - edited
+        - rejected
+        - escalated
+        example: accepted
+        type: string
+    type: object
+  scripts_swagger.lineInboundEvent:
+    properties:
+      message:
+        $ref: '#/definitions/scripts_swagger.lineInboundMessage'
+      replyToken:
+        example: reply-token-example
+        type: string
+      source:
+        $ref: '#/definitions/scripts_swagger.lineInboundSource'
+      timestamp:
+        example: 1716172800000
+        type: integer
+      type:
+        example: message
+        type: string
+    type: object
+  scripts_swagger.lineInboundMessage:
+    properties:
+      id:
+        example: "519551372899"
+        type: string
+      text:
+        example: My internet is offline
+        type: string
+      type:
+        example: text
+        type: string
+    type: object
+  scripts_swagger.lineInboundSource:
+    properties:
+      groupId:
+        example: C4af4980629
+        type: string
+      roomId:
+        example: R4af4980629
+        type: string
+      type:
+        example: user
+        type: string
+      userId:
+        example: U4af4980629
+        type: string
+    type: object
+  scripts_swagger.lineInboundWebhookRequest:
+    properties:
+      destination:
+        example: U1234567890abcdef1234567890abcdef
+        type: string
+      events:
+        items:
+          $ref: '#/definitions/scripts_swagger.lineInboundEvent'
+        type: array
+    type: object
+  scripts_swagger.reviewQueueCallbackData:
+    properties:
+      company_id:
+        example: 1
+        type: integer
+      id:
+        example: 123
+        type: integer
+      kind:
+        example: symptom_proposed
+        type: string
+    type: object
+  scripts_swagger.reviewQueueCallbackRequest:
+    properties:
+      company_id:
+        example: 1
+        type: integer
+      kind:
+        enum:
+        - kb_promotion
+        - symptom_proposed
+        - subject_proposed
+        - kb_gap
+        example: symptom_proposed
+        type: string
+      payload:
+        additionalProperties: true
+        type: object
+      payload_hash:
+        example: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        type: string
+      source_refs:
+        additionalProperties: true
+        type: object
+    type: object
+  scripts_swagger.reviewQueueCallbackResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.reviewQueueCallbackData'
+    type: object
+  scripts_swagger.reviewRejectRequest:
+    properties:
+      reason:
+        example: The generated article duplicated an existing answer.
+        type: string
+    type: object
+info:
+  contact: {}
+  description: Internal AI service for tenancy-scoped support retrieval and reply
+    workflows.
+  title: Centric RAG AI Service
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /internal/review-queue:
+    post:
+      consumes:
+      - application/json
+      description: Laravel internal endpoint used by the Go review outbox. `X-AI-Signature`
+        is lowercase hex HMAC-SHA256 over `<timestamp>.<raw JSON body>` using `GO_AI_WEBHOOK_SECRET`.
+      parameters:
+      - description: Unix seconds timestamp, accepted within GO_AI_WEBHOOK_TOLERANCE
+        in: header
+        name: X-AI-Timestamp
+        required: true
+        type: string
+      - description: Lowercase hex HMAC-SHA256 of '<timestamp>.<raw body>'
+        in: header
+        name: X-AI-Signature
+        required: true
+        type: string
+      - description: Review queue callback
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.reviewQueueCallbackRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Existing idempotent review item
+          schema:
+            $ref: '#/definitions/scripts_swagger.reviewQueueCallbackResponse'
+        "201":
+          description: Created review queue item
+          schema:
+            $ref: '#/definitions/scripts_swagger.reviewQueueCallbackResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Receive signed Laravel review queue callback
+      tags:
+      - laravel-callbacks
+  /v1/admin/review-queue/{id}/reject:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Review item ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Review rejection
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.reviewRejectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Reject review queue item
+      tags:
+      - review-queue
+  /v1/inbound/email:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Email webhook payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.emailInboundWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Receive email inbound webhook
+      tags:
+      - inbound
+  /v1/inbound/line:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: LINE webhook payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.lineInboundWebhookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Receive LINE inbound webhook
+      tags:
+      - inbound
+  /v1/reply:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Reply request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ReplyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Create reply
+      tags:
+      - reply
+  /v1/reply/feedback:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Smart-reply feedback
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.feedbackRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Record reply feedback
+      tags:
+      - reply
+swagger: "2.0"
