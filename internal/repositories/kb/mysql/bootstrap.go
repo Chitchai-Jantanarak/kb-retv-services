@@ -2,7 +2,9 @@ package mysql
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 
 	"github.com/my/app/internal/application/services/kbbootstrap"
@@ -166,8 +168,8 @@ func insertChunksWithParents(ctx context.Context, tx *sql.Tx, articleID int64, c
 	if groupSize <= 1 {
 		for i, c := range chunks {
 			if _, err := tx.ExecContext(ctx, `
-INSERT INTO kb_chunks (kb_article_id, chunk_index, content, token_count, chunk_kind)
-VALUES (?, ?, ?, ?, 'child')`, articleID, i, c, len([]rune(c))); err != nil {
+INSERT INTO kb_chunks (kb_article_id, chunk_index, content, content_hash, token_count, chunk_kind)
+VALUES (?, ?, ?, ?, ?, 'child')`, articleID, i, c, contentHash(c), len([]rune(c))); err != nil {
 				return err
 			}
 		}
@@ -179,9 +181,9 @@ VALUES (?, ?, ?, ?, 'child')`, articleID, i, c, len([]rune(c))); err != nil {
 		end := min(start+groupSize, len(chunks))
 		parentContent := joinChunks(chunks[start:end])
 		res, err := tx.ExecContext(ctx, `
-INSERT INTO kb_chunks (kb_article_id, chunk_index, content, token_count, chunk_kind, parent_chunk_id)
-VALUES (?, ?, ?, ?, 'parent', NULL)`,
-			articleID, -1-parentIndex, parentContent, len([]rune(parentContent)))
+INSERT INTO kb_chunks (kb_article_id, chunk_index, content, content_hash, token_count, chunk_kind, parent_chunk_id)
+VALUES (?, ?, ?, ?, ?, 'parent', NULL)`,
+			articleID, -1-parentIndex, parentContent, contentHash(parentContent), len([]rune(parentContent)))
 		if err != nil {
 			return err
 		}
@@ -191,15 +193,20 @@ VALUES (?, ?, ?, ?, 'parent', NULL)`,
 		}
 		for i := start; i < end; i++ {
 			if _, err := tx.ExecContext(ctx, `
-INSERT INTO kb_chunks (kb_article_id, chunk_index, content, token_count, chunk_kind, parent_chunk_id)
-VALUES (?, ?, ?, ?, 'child', ?)`,
-				articleID, i, chunks[i], len([]rune(chunks[i])), parentID); err != nil {
+INSERT INTO kb_chunks (kb_article_id, chunk_index, content, content_hash, token_count, chunk_kind, parent_chunk_id)
+VALUES (?, ?, ?, ?, ?, 'child', ?)`,
+				articleID, i, chunks[i], contentHash(chunks[i]), len([]rune(chunks[i])), parentID); err != nil {
 				return err
 			}
 		}
 		parentIndex++
 	}
 	return nil
+}
+
+func contentHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 func joinChunks(chunks []string) string {

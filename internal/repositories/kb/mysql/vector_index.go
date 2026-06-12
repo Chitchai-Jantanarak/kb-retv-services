@@ -57,7 +57,8 @@ SELECT
 FROM kb_chunks ch
 JOIN kb_articles a ON a.id = ch.kb_article_id
 LEFT JOIN kb_embeddings emb ON emb.kb_chunk_id = ch.id
-WHERE ch.id > ? AND emb.id IS NULL AND ch.chunk_kind = 'child'`
+WHERE ch.id > ? AND ch.chunk_kind = 'child'
+  AND (emb.id IS NULL OR emb.content_hash IS NULL OR emb.content_hash <> ch.content_hash)`
 	args := []any{afterID}
 	if companyID > 0 {
 		query += " AND a.company_id = ?"
@@ -86,7 +87,8 @@ SELECT
 FROM kb_chunks ch
 JOIN kb_articles a ON a.id = ch.kb_article_id
 LEFT JOIN kb_embeddings emb ON emb.kb_chunk_id = ch.id AND emb.model = ?
-WHERE ch.id > ? AND emb.id IS NULL AND ch.chunk_kind = 'child'`
+WHERE ch.id > ? AND ch.chunk_kind = 'child'
+  AND (emb.id IS NULL OR emb.content_hash IS NULL OR emb.content_hash <> ch.content_hash)`
 	args := []any{s.model, afterID}
 	if companyID > 0 {
 		query += " AND a.company_id = ?"
@@ -173,18 +175,19 @@ func (m *EmbeddingMarker) Mark(ctx context.Context, refs []vectorindex.ChunkRef)
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO kb_embeddings (kb_chunk_id, vector_ref, model, dimensions)
-VALUES (?, ?, ?, ?)
+INSERT INTO kb_embeddings (kb_chunk_id, vector_ref, model, dimensions, content_hash)
+VALUES (?, ?, ?, ?, (SELECT content_hash FROM kb_chunks WHERE id = ?))
 ON DUPLICATE KEY UPDATE
   vector_ref = VALUES(vector_ref),
-  dimensions = VALUES(dimensions)`)
+  dimensions = VALUES(dimensions),
+  content_hash = VALUES(content_hash)`)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = stmt.Close() }()
 
 	for _, ref := range refs {
-		if _, err := stmt.ExecContext(ctx, ref.ChunkID, ref.VectorRef, ref.Model, ref.Dim); err != nil {
+		if _, err := stmt.ExecContext(ctx, ref.ChunkID, ref.VectorRef, ref.Model, ref.Dim, ref.ChunkID); err != nil {
 			return err
 		}
 	}
