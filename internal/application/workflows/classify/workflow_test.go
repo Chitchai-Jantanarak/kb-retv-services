@@ -321,8 +321,8 @@ func TestRunEnqueuesNewSymptomForReview(t *testing.T) {
 		Review:   rev,
 		Resolve: func(_ context.Context, _ int64) (ports.LLMProvider, error) {
 			return &stubProvider{
-				stage1Resp: `{"subject":"Robot","problem_type":"hardware","confidence":0.6}`,
-				stage2Resp: `{"severity":"medium","symptom":"robot_dancing","symptom_is_new":true,"confidence":0.7}`,
+				stage1Resp: `{"subject":"Order","problem_type":"hardware","confidence":0.6}`,
+				stage2Resp: `{"severity":"medium","symptom":"order_missing","symptom_is_new":true,"confidence":0.7}`,
 			}, nil
 		},
 	})

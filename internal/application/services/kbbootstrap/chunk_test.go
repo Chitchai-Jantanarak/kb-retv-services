@@ -5,13 +5,13 @@ import "testing"
 func TestBuildArticleBodyIncludesReportFieldsAndMetadata(t *testing.T) {
 	report := ReportRecord{
 		Code:          "REP-7",
-		Title:         "Robot offline",
-		CustomerName:  "Pudu Demo",
+		Title:         "Order not received",
+		CustomerName:  "Demo Customer",
 		SiteName:      "Kitchen 1",
 		StatusName:    "open",
 		WorkTypeName:  "support",
 		SeverityName:  "high",
-		ProblemFull:   "Robot cannot start.",
+		ProblemFull:   "Cannot place order.",
 		ProblemDetail: "Battery warning appears.",
 		FixProblem:    "Reset battery connector.",
 	}
@@ -20,13 +20,13 @@ func TestBuildArticleBodyIncludesReportFieldsAndMetadata(t *testing.T) {
 
 	for _, want := range []string{
 		"Report: REP-7",
-		"Title: Robot offline",
-		"Customer: Pudu Demo",
+		"Title: Order not received",
+		"Customer: Demo Customer",
 		"Site: Kitchen 1",
 		"Status: open",
 		"Work type: support",
 		"Severity: high",
-		"Problem: Robot cannot start.",
+		"Problem: Cannot place order.",
 		"Detail: Battery warning appears.",
 		"Resolution: Reset battery connector.",
 	} {
@@ -37,7 +37,7 @@ func TestBuildArticleBodyIncludesReportFieldsAndMetadata(t *testing.T) {
 }
 
 func TestChunkTextKeepsUnicodeAndSizeBound(t *testing.T) {
-	text := "ภาษาไทยทดสอบระบบ robot offline ต้องตรวจสอบ network และ battery ก่อน escalation"
+	text := "ภาษาไทยทดสอบระบบ order check ต้องตรวจสอบ network และ battery ก่อน escalation"
 
 	chunks := ChunkText(text, 24)
 

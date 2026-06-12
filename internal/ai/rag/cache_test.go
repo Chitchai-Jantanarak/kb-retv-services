@@ -116,7 +116,7 @@ func (c *memoryCache) SetNX(ctx context.Context, key string, value []byte, ttl t
 }
 
 func TestCacheKeyIncludesMode(t *testing.T) {
-	base := Query{CompanyID: 3, Text: "PUDU robot offline"}
+	base := Query{CompanyID: 3, Text: "order not received"}
 	fast := base
 	fast.Mode = ModeFastDraft
 	full := base
@@ -131,10 +131,10 @@ func TestCacheKeyIncludesMode(t *testing.T) {
 }
 
 func TestCacheKeyForPlanIncludesGraphAnchors(t *testing.T) {
-	query := Query{CompanyID: 3, Text: "PUDU tray jam"}
-	basePlan := QueryPlan{CanonicalText: "pudu tray jam"}
+	query := Query{CompanyID: 3, Text: "package damaged"}
+	basePlan := QueryPlan{CanonicalText: "package damaged"}
 	graphPlan := QueryPlan{
-		CanonicalText: "pudu tray jam",
+		CanonicalText: "package damaged",
 		GraphAnchors:  []GraphAnchor{{Kind: GraphAnchorSymptom, ID: 44}},
 	}
 

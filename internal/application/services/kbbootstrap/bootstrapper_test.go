@@ -12,16 +12,16 @@ func TestBootstrapperCreatesArticlesAndChunks(t *testing.T) {
 				ID:          7,
 				CompanyID:   3,
 				Code:        "REP-7",
-				Title:       "Robot offline",
-				ProblemFull: "Robot cannot start because network is unavailable.",
-				FixProblem:  "Reconnect network and restart robot.",
+				Title:       "Order not received",
+				ProblemFull: "Order not received due to a network error.",
+				FixProblem:  "Reconnect network and retry.",
 			},
 			{
 				ID:          8,
 				CompanyID:   3,
 				Code:        "REP-8",
-				Title:       "Tray jam",
-				ProblemFull: "Tray is blocked by bracket.",
+				Title:       "Package damaged",
+				ProblemFull: "Package seal broken.",
 				FixProblem:  "Replace bracket.",
 			},
 		},
@@ -46,8 +46,8 @@ func TestBootstrapperCreatesArticlesAndChunks(t *testing.T) {
 	if len(store.articles) != 2 {
 		t.Fatalf("stored articles = %d, want 2", len(store.articles))
 	}
-	if store.articles[0].Title != "REP-7 - Robot offline" {
-		t.Fatalf("article title = %q, want REP-7 - Robot offline", store.articles[0].Title)
+	if store.articles[0].Title != "REP-7 - Order not received" {
+		t.Fatalf("article title = %q, want REP-7 - Order not received", store.articles[0].Title)
 	}
 	if store.articles[0].SourceReportID != 7 {
 		t.Fatalf("SourceReportID = %d, want 7", store.articles[0].SourceReportID)
@@ -111,7 +111,7 @@ func (s *leakyReportSource) Reports(ctx context.Context, companyID int64, limit 
 
 func TestBootstrapperCountsSkippedExistingArticles(t *testing.T) {
 	source := &fakeReportSource{
-		reports: []ReportRecord{{ID: 7, CompanyID: 3, Code: "REP-7", Title: "Robot offline"}},
+		reports: []ReportRecord{{ID: 7, CompanyID: 3, Code: "REP-7", Title: "Order not received"}},
 	}
 	store := &fakeArticleStore{skip: true}
 	bootstrapper := NewBootstrapper(source, store)

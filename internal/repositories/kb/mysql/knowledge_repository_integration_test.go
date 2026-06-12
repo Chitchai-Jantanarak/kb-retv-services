@@ -100,7 +100,7 @@ func seedKnowledgeArticle(t *testing.T, ctx context.Context, db *sql.DB) knowled
 	seed := knowledgeSeed{
 		companyID:     3,
 		title:         "RAG integration temporary article " + time.Now().Format("20060102150405.000000000"),
-		parentContent: "Parent context: power cycle the robot, reset tray sensor, then verify Wi-Fi sync.",
+		parentContent: "Parent context: reconnect network, check packaging, verify order.",
 	}
 
 	res, err := db.ExecContext(ctx, `
@@ -127,7 +127,7 @@ VALUES (?, -1, ?, ?, 'parent')`,
 		t.Fatalf("parent LastInsertId: %v", err)
 	}
 
-	childContent := "Robot tray jam after restart and Wi-Fi sync failure."
+	childContent := "Package damaged after restart, order sync failed."
 	res, err = db.ExecContext(ctx, `
 INSERT INTO kb_chunks (kb_article_id, chunk_index, content, token_count, chunk_kind, parent_chunk_id)
 VALUES (?, 0, ?, ?, 'child', ?)`,

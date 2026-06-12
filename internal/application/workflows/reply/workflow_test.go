@@ -58,7 +58,7 @@ func TestWorkflowRunCanUseAdditionalRetriever(t *testing.T) {
 	ctx := ctxkey.WithCompanyID(context.Background(), 1)
 	resp, err := workflow.Run(ctx, dto.ReplyRequest{
 		CustomerID: "cust-001",
-		Message:    "The robot is offline.",
+		Message:    "Order not received.",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -79,7 +79,7 @@ func TestWorkflowRunSurfacesDebugStageTimings(t *testing.T) {
 	ctx := ctxkey.WithCompanyID(context.Background(), 1)
 	resp, err := workflow.Run(ctx, dto.ReplyRequest{
 		CustomerID: "cust-001",
-		Message:    "The robot is offline.",
+		Message:    "Order not received.",
 		Mode:       rag.ModeDebug,
 	})
 	if err != nil {
