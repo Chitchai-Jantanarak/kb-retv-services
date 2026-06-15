@@ -17,6 +17,7 @@ type Workflow struct {
 	pipeline   *rag.Pipeline
 	actions    ports.AIActionRecorder
 	agentIDFor AgentIDLookup
+	anchorer   SymptomAnchorer
 }
 
 type Option func(*options)
@@ -33,6 +34,7 @@ type options struct {
 	budget       rag.Budget
 	actions      ports.AIActionRecorder
 	agentIDFor   AgentIDLookup
+	anchorer     SymptomAnchorer
 }
 
 func WithRetriever(retriever rag.Retriever) Option {
@@ -105,6 +107,14 @@ func WithBudget(budget rag.Budget) Option {
 	}
 }
 
+func WithSymptomAnchorer(anchorer SymptomAnchorer) Option {
+	return func(opts *options) {
+		if anchorer != nil {
+			opts.anchorer = anchorer
+		}
+	}
+}
+
 func WithActionRecorder(rec ports.AIActionRecorder, agentIDFor AgentIDLookup) Option {
 	return func(opts *options) {
 		if rec != nil && agentIDFor != nil {
@@ -148,6 +158,7 @@ func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow 
 		}),
 		actions:    cfg.actions,
 		agentIDFor: cfg.agentIDFor,
+		anchorer:   cfg.anchorer,
 	}
 }
 
@@ -162,13 +173,14 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 	cid := ctxkey.MustCompanyID(ctx)
 
 	start := time.Now()
+	metadata := applySymptomAnchor(ctx, w.anchorer, cid, req.Message, req.Metadata)
 	result, err := w.pipeline.Run(ctx, rag.Query{
 		CompanyID: cid,
 		Text:      req.Message,
 		Limit:     3,
 		Mode:      req.Mode,
 		Debug:     req.Debug,
-		Metadata:  req.Metadata,
+		Metadata:  metadata,
 	})
 	if err != nil {
 		return dto.ReplyResponse{}, fmt.Errorf("run rag pipeline: %w", err)
