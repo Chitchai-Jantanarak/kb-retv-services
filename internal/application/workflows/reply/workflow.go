@@ -3,12 +3,14 @@ package reply
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
+	"github.com/my/app/internal/shared/htmltext"
 )
 
 type AgentIDLookup func(ctx context.Context, companyID int64) (int64, bool)
@@ -186,10 +188,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 		return dto.ReplyResponse{}, fmt.Errorf("run rag pipeline: %w", err)
 	}
 
-	suggestion := result.Draft
-	if suggestion == "" {
-		suggestion = buildSuggestion(result.Meta.Intent, result.Candidates)
-	}
+	suggestion := selectSuggestion(result)
 
 	var actionID int64
 	if w.actions != nil && w.agentIDFor != nil {
@@ -265,7 +264,25 @@ func buildSuggestion(intent string, candidates []rag.Candidate) string {
 		return "Acknowledge the issue, confirm the affected service, and ask for the latest error details."
 	}
 
-	return fmt.Sprintf("Intent: %s. Suggested reply: %s", intent, candidates[0].Content)
+	return fmt.Sprintf("Intent: %s. Suggested reply: %s", intent, htmltext.StripInlineImages(candidates[0].Content))
+}
+
+func selectSuggestion(result rag.Result) string {
+	if result.Draft != "" {
+		return result.Draft
+	}
+	if result.Decision == rag.DecisionEscalate {
+		return escalationMessage(result.Meta.Intent)
+	}
+	return buildSuggestion(result.Meta.Intent, result.Candidates)
+}
+
+func escalationMessage(intent string) string {
+	intent = strings.TrimSpace(intent)
+	if intent == "" {
+		return "No confident match in past cases. Escalating to a human agent."
+	}
+	return fmt.Sprintf("No confident match in past cases for intent %q. Escalating to a human agent.", intent)
 }
 
 func toSources(candidates []rag.Candidate) []dto.ReplySource {

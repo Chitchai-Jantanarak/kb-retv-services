@@ -2,6 +2,7 @@ package reply
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/my/app/internal/ai/rag"
@@ -144,4 +145,49 @@ func (r *metadataGraphRetriever) RetrieveGraph(_ context.Context, _ rag.Query, p
 	r.calls++
 	r.lastPlan = plan
 	return r.candidates, nil
+}
+
+func TestSelectSuggestionEscalateReturnsStub(t *testing.T) {
+	result := rag.Result{
+		Decision:   rag.DecisionEscalate,
+		Candidates: []rag.Candidate{{ID: "x", Content: "raw doc body that must not leak"}},
+		Meta:       rag.Meta{Intent: "troubleshooting"},
+	}
+
+	got := selectSuggestion(result)
+
+	if strings.Contains(got, "raw doc body") {
+		t.Fatalf("escalate leaked candidate content: %q", got)
+	}
+	if !strings.Contains(got, "Escalating") {
+		t.Fatalf("got %q, want escalation stub", got)
+	}
+}
+
+func TestSelectSuggestionFallbackStripsImages(t *testing.T) {
+	result := rag.Result{
+		Decision:   rag.DecisionDraft,
+		Candidates: []rag.Candidate{{ID: "x", Content: `<p>fix</p><img src="data:image/png;base64,AAAA">`}},
+		Meta:       rag.Meta{Intent: "troubleshooting"},
+	}
+
+	got := selectSuggestion(result)
+
+	if strings.Contains(got, "base64") || strings.Contains(got, "<img") {
+		t.Fatalf("fallback leaked image data: %q", got)
+	}
+	if !strings.Contains(got, "Suggested reply") {
+		t.Fatalf("got %q, want buildSuggestion output", got)
+	}
+}
+
+func TestSelectSuggestionPrefersExistingDraft(t *testing.T) {
+	result := rag.Result{
+		Decision: rag.DecisionAuto,
+		Draft:    "ready draft",
+	}
+
+	if got := selectSuggestion(result); got != "ready draft" {
+		t.Fatalf("got %q, want existing draft", got)
+	}
 }

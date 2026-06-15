@@ -1,6 +1,7 @@
 package kbbootstrap
 
 import (
+	"github.com/my/app/internal/shared/htmltext"
 	"strings"
 )
 
@@ -55,9 +56,9 @@ func BuildArticleBody(report ReportRecord) string {
 	add("Status", report.StatusName)
 	add("Work type", report.WorkTypeName)
 	add("Severity", report.SeverityName)
-	add("Problem", report.ProblemFull)
-	add("Detail", report.ProblemDetail)
-	add("Resolution", report.FixProblem)
+	add("Problem", htmltext.StripInlineImages(report.ProblemFull))
+	add("Detail", htmltext.StripInlineImages(report.ProblemDetail))
+	add("Resolution", htmltext.StripInlineImages(report.FixProblem))
 
 	return strings.Join(parts, "\n")
 }

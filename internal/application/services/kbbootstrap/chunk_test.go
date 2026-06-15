@@ -71,6 +71,22 @@ func TestLimitUTF8BytesDoesNotSplitRune(t *testing.T) {
 	}
 }
 
+func TestBuildArticleBodyStripsInlineImages(t *testing.T) {
+	report := ReportRecord{
+		Code:          "REP-9",
+		ProblemDetail: `<p>หวัดดีอ้าย</p><img src="data:image/jpeg;base64,/9j/4AAQSkZJRg==">`,
+	}
+
+	body := BuildArticleBody(report)
+
+	if contains(body, "base64") || contains(body, "<img") {
+		t.Fatalf("body still has image data: %q", body)
+	}
+	if !contains(body, "Detail: <p>หวัดดีอ้าย</p>") {
+		t.Fatalf("detail text lost: %q", body)
+	}
+}
+
 func contains(s string, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
