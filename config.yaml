@@ -42,7 +42,8 @@ apiKeys:
   openrouter: ""
 
 llm:
-  default_vendor: "openai"
+  default_vendor: "gemini"
+  default_model: "gemini-2.5-flash"
   embedding_provider: "auto"
   embedding_model: ""
   embedding_dim: 0
