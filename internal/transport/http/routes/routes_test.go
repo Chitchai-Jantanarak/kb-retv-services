@@ -199,6 +199,54 @@ func TestRegisterServesSwaggerDocWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRegisterServesScalarDocsWhenEnabled(t *testing.T) {
+	e := echo.New()
+	Register(e, handlers.NewReplyHandler(fakeWorkflow{}), Options{Log: zap.NewNop(), SwaggerEnabled: true})
+
+	openapi := httptest.NewRecorder()
+	e.ServeHTTP(openapi, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	if openapi.Code != http.StatusOK {
+		t.Fatalf("/openapi.json status = %d, want %d", openapi.Code, http.StatusOK)
+	}
+	var spec struct {
+		Swagger string `json:"swagger"`
+	}
+	if err := json.Unmarshal(openapi.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if spec.Swagger != "2.0" {
+		t.Fatalf("swagger = %q, want 2.0", spec.Swagger)
+	}
+
+	docs := httptest.NewRecorder()
+	e.ServeHTTP(docs, httptest.NewRequest(http.MethodGet, "/docs", nil))
+	if docs.Code != http.StatusOK {
+		t.Fatalf("/docs status = %d, want %d", docs.Code, http.StatusOK)
+	}
+	if !strings.Contains(docs.Body.String(), "Scalar.createApiReference") {
+		t.Fatalf("/docs body missing Scalar bootstrap")
+	}
+
+	redirect := httptest.NewRecorder()
+	e.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/docs/", nil))
+	if redirect.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("/docs/ status = %d, want %d", redirect.Code, http.StatusTemporaryRedirect)
+	}
+}
+
+func TestRegisterSkipsScalarDocsWhenDisabled(t *testing.T) {
+	e := echo.New()
+	Register(e, handlers.NewReplyHandler(fakeWorkflow{}), Options{Log: zap.NewNop()})
+
+	for _, path := range []string{"/openapi.json", "/docs"} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, rec.Code, http.StatusNotFound)
+		}
+	}
+}
+
 type fakeWorkflow struct{}
 
 func (fakeWorkflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResponse, error) {

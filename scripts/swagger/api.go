@@ -90,6 +90,7 @@ func healthz() {}
 // @Tags reply
 // @Accept json
 // @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
 // @Param X-Tenant-Id header string true "Tenant ID"
 // @Param request body dto.ReplyRequest true "Reply request"
 // @Success 200 {object} response.Envelope
@@ -126,6 +127,7 @@ func receiveEmailInbound() {}
 // @Tags reply
 // @Accept json
 // @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
 // @Param X-Tenant-Id header string true "Tenant ID"
 // @Param request body feedbackRequest true "Smart-reply feedback"
 // @Success 200 {object} response.Envelope
@@ -140,6 +142,7 @@ func createFeedback() {}
 // @Tags review-queue
 // @Accept json
 // @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
 // @Param X-Tenant-Id header string true "Tenant ID"
 // @Param id path int true "Review item ID"
 // @Param request body reviewRejectRequest true "Review rejection"
