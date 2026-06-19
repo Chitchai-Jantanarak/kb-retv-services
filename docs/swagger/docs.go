@@ -130,6 +130,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "Tenant ID",
                         "name": "X-Tenant-Id",
                         "in": "header",
@@ -291,6 +298,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "Tenant ID",
                         "name": "X-Tenant-Id",
                         "in": "header",
@@ -353,6 +367,13 @@ const docTemplate = `{
                 ],
                 "summary": "Record reply feedback",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "Tenant ID",

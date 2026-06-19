@@ -52,6 +52,44 @@ func (s *Store) EnsureCollection(ctx context.Context, name string, dim int) erro
 	return err
 }
 
+func (s *Store) CollectionVectorSize(ctx context.Context, name string) (int, bool, error) {
+	if err := validateCollectionName(name); err != nil {
+		return 0, false, err
+	}
+	var resp struct {
+		Result struct {
+			Config struct {
+				Params struct {
+					Vectors struct {
+						Size int `json:"size"`
+					} `json:"vectors"`
+				} `json:"params"`
+			} `json:"config"`
+		} `json:"result"`
+	}
+	err := s.do(ctx, http.MethodGet, "/collections/"+name, nil, &resp)
+	var apiErr qdrantError
+	if errors.As(err, &apiErr) && apiErr.statusCode == http.StatusNotFound {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return resp.Result.Config.Params.Vectors.Size, true, nil
+}
+
+func (s *Store) RecreateCollection(ctx context.Context, name string, dim int) error {
+	if err := validateCollectionName(name); err != nil {
+		return err
+	}
+	err := s.do(ctx, http.MethodDelete, "/collections/"+name, nil, nil)
+	var apiErr qdrantError
+	if err != nil && !(errors.As(err, &apiErr) && apiErr.statusCode == http.StatusNotFound) {
+		return err
+	}
+	return s.EnsureCollection(ctx, name, dim)
+}
+
 func (s *Store) Upsert(ctx context.Context, collection string, points []ports.VectorPoint) error {
 	if err := validateCollectionName(collection); err != nil {
 		return err

@@ -100,7 +100,15 @@ type LLM struct {
 	OpenRouterTitle   string
 	ReferrerURL       string
 	LocalURL          string
+	LocalKey          string
 	ProviderConfigKey string
+
+	RequestTimeoutSeconds   int
+	RateLimitPerSec         float64
+	RateLimitBurst          int
+	BreakerFailures         int
+	BreakerCooldownSeconds  int
+	ResolverCacheTTLSeconds int
 }
 
 type APIKeys struct {
@@ -144,7 +152,14 @@ func LoadFrom(path string) (Config, error) {
 	v.SetDefault("qdrant.collectionPrefix", "kb_chunks")
 	v.SetDefault("memgraph.enabled", false)
 	v.SetDefault("memgraph.uri", "bolt://localhost:7687")
-	v.SetDefault("llm.default_vendor", "openai")
+	v.SetDefault("llm.default_vendor", "gemini")
+	v.SetDefault("llm.default_model", "gemini-2.5-flash")
+	v.SetDefault("llm.request_timeout_seconds", 60)
+	v.SetDefault("llm.breaker_failures", 5)
+	v.SetDefault("llm.breaker_cooldown_seconds", 30)
+	v.SetDefault("llm.rate_limit_per_sec", 0)
+	v.SetDefault("llm.rate_limit_burst", 0)
+	v.SetDefault("llm.resolver_cache_ttl_seconds", 60)
 	v.SetDefault("logger.level", "info")
 	v.SetDefault("logger.format", "console")
 	v.SetDefault("swagger.enabled", true)
@@ -213,7 +228,15 @@ func LoadFrom(path string) (Config, error) {
 			OpenRouterTitle:   v.GetString("llm.openrouter_title"),
 			ReferrerURL:       v.GetString("llm.referrer_url"),
 			LocalURL:          v.GetString("llm.local_url"),
+			LocalKey:          v.GetString("llm.local_key"),
 			ProviderConfigKey: v.GetString("llm.provider_config_key"),
+
+			RequestTimeoutSeconds:   v.GetInt("llm.request_timeout_seconds"),
+			RateLimitPerSec:         v.GetFloat64("llm.rate_limit_per_sec"),
+			RateLimitBurst:          v.GetInt("llm.rate_limit_burst"),
+			BreakerFailures:         v.GetInt("llm.breaker_failures"),
+			BreakerCooldownSeconds:  v.GetInt("llm.breaker_cooldown_seconds"),
+			ResolverCacheTTLSeconds: v.GetInt("llm.resolver_cache_ttl_seconds"),
 		},
 		APIKeys: APIKeys{
 			OpenAI:     firstNonEmpty(v.GetString("apiKeys.openai"), v.GetString("llm.openai_key")),
@@ -298,7 +321,14 @@ var envBindings = []envBinding{
 	{key: "llm.openrouter_title", env: "LLM_OPENROUTER_TITLE"},
 	{key: "llm.referrer_url", env: "LLM_REFERRER_URL"},
 	{key: "llm.local_url", env: "LLM_LOCAL_URL"},
+	{key: "llm.local_key", env: "LOCAL_LLM_API_KEY"},
 	{key: "llm.provider_config_key", env: "AI_PROVIDER_KEY"},
+	{key: "llm.request_timeout_seconds", env: "LLM_REQUEST_TIMEOUT_SECONDS"},
+	{key: "llm.rate_limit_per_sec", env: "LLM_RATE_LIMIT_PER_SEC"},
+	{key: "llm.rate_limit_burst", env: "LLM_RATE_LIMIT_BURST"},
+	{key: "llm.breaker_failures", env: "LLM_BREAKER_FAILURES"},
+	{key: "llm.breaker_cooldown_seconds", env: "LLM_BREAKER_COOLDOWN_SECONDS"},
+	{key: "llm.resolver_cache_ttl_seconds", env: "LLM_RESOLVER_CACHE_TTL_SECONDS"},
 	{key: "laravel.base_url", env: "LARAVEL_BASE_URL"},
 	{key: "laravel.webhook_secret", env: "LARAVEL_WEBHOOK_SECRET"},
 	{key: "laravel.ticket_path", env: "LARAVEL_TICKET_PATH"},

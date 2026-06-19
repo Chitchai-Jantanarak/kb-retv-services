@@ -18,7 +18,7 @@ type FTSChunk struct {
 }
 
 type FTSSource interface {
-	SearchChunks(ctx context.Context, companyID int64, query string, limit int) ([]FTSChunk, error)
+	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]FTSChunk, error)
 }
 
 type FTSRetriever struct {
@@ -41,7 +41,7 @@ func (r *FTSRetriever) Retrieve(ctx context.Context, query Query, _ Meta) ([]Can
 	if limit <= 0 {
 		limit = 5
 	}
-	rows, err := r.source.SearchChunks(ctx, query.CompanyID, q, limit)
+	rows, err := r.source.SearchChunks(ctx, queryCoverage(ctx, query, query.CompanyID), q, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -75,13 +75,22 @@ func NewMySQLFTSSource(db tenant.Querier) *MySQLFTSSource {
 	return &MySQLFTSSource{db: db}
 }
 
-func (s *MySQLFTSSource) SearchChunks(ctx context.Context, companyID int64, query string, limit int) ([]FTSChunk, error) {
-	if companyID <= 0 {
+func (s *MySQLFTSSource) SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]FTSChunk, error) {
+	companies := ftsCompanyIDs(coverage)
+	if len(companies) == 0 {
 		return nil, errors.New("kb_chunks FTS: company_id must be positive")
 	}
 	if limit <= 0 {
 		limit = 5
 	}
+	placeholders := make([]string, len(companies))
+	args := make([]any, 0, len(companies)+3)
+	args = append(args, query)
+	for i, id := range companies {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, query, limit)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
   ch.id,
@@ -92,11 +101,11 @@ SELECT
 FROM kb_chunks ch
 JOIN kb_articles a ON a.id = ch.kb_article_id
 LEFT JOIN kb_chunks p ON p.id = ch.parent_chunk_id
-WHERE a.company_id = ?
+WHERE a.company_id IN (`+strings.Join(placeholders, ",")+`)
   AND ch.chunk_kind = 'child'
   AND MATCH(ch.content) AGAINST(? IN NATURAL LANGUAGE MODE)
 ORDER BY relevance DESC, ch.id ASC
-LIMIT ?`, query, companyID, query, limit)
+LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("kb_chunks FTS: query: %w", err)
 	}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/my/app/internal/domain/ports"
 )
@@ -32,6 +34,17 @@ type CompanyResolver struct {
 	lookup           AgentLookup
 	defaults         Settings
 	defaultThreshold float64
+
+	resilientOpts ResilientOptions
+	ttl           time.Duration
+	mu            sync.Mutex
+	cache         map[int64]cacheEntry
+}
+
+type cacheEntry struct {
+	cfg      AgentConfig
+	provider ports.LLMProvider
+	expires  time.Time
 }
 
 const DefaultConfidenceThreshold = 0.85
@@ -57,11 +70,58 @@ func (r *CompanyResolver) WithDefaultThreshold(t float64) *CompanyResolver {
 	return r
 }
 
+func (r *CompanyResolver) WithResilient(opts ResilientOptions) *CompanyResolver {
+	r.resilientOpts = opts
+	return r
+}
+
+func (r *CompanyResolver) WithCacheTTL(ttl time.Duration) *CompanyResolver {
+	if ttl > 0 {
+		r.ttl = ttl
+		r.cache = make(map[int64]cacheEntry)
+	}
+	return r
+}
+
+func (r *CompanyResolver) cacheEnabled() bool { return r.ttl > 0 && r.cache != nil }
+
+func (r *CompanyResolver) getEntry(companyID int64) (cacheEntry, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.cache[companyID]
+	if !ok || time.Now().After(e.expires) {
+		return cacheEntry{}, false
+	}
+	return e, true
+}
+
+func (r *CompanyResolver) store(companyID int64, e cacheEntry) {
+	e.expires = time.Now().Add(r.ttl)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cache[companyID] = e
+}
+
 func (r *CompanyResolver) AgentFor(ctx context.Context, companyID int64) (AgentConfig, error) {
 	if companyID <= 0 {
 		return AgentConfig{}, errors.New("llm: company resolver: company_id must be positive")
 	}
+	if r.cacheEnabled() {
+		if e, ok := r.getEntry(companyID); ok {
+			return e.cfg, nil
+		}
+	}
+	cfg, err := r.lookupAgent(ctx, companyID)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	if r.cacheEnabled() {
+		r.store(companyID, cacheEntry{cfg: cfg})
+	}
+	return cfg, nil
+}
 
+func (r *CompanyResolver) lookupAgent(ctx context.Context, companyID int64) (AgentConfig, error) {
 	cfg := AgentConfig{
 		Vendor:              r.defaults.Vendor,
 		Model:               r.defaults.Model,
@@ -90,10 +150,41 @@ func (r *CompanyResolver) AgentFor(ctx context.Context, companyID int64) (AgentC
 }
 
 func (r *CompanyResolver) ResolveFor(ctx context.Context, companyID int64) (ports.LLMProvider, error) {
-	cfg, err := r.AgentFor(ctx, companyID)
+	if companyID <= 0 {
+		return nil, errors.New("llm: company resolver: company_id must be positive")
+	}
+
+	var (
+		cfg    AgentConfig
+		gotCfg bool
+	)
+	if r.cacheEnabled() {
+		if e, ok := r.getEntry(companyID); ok {
+			if e.provider != nil {
+				return e.provider, nil
+			}
+			cfg, gotCfg = e.cfg, true
+		}
+	}
+	if !gotCfg {
+		c, err := r.lookupAgent(ctx, companyID)
+		if err != nil {
+			return nil, err
+		}
+		cfg = c
+	}
+
+	provider, err := r.build(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if r.cacheEnabled() {
+		r.store(companyID, cacheEntry{cfg: cfg, provider: provider})
+	}
+	return provider, nil
+}
+
+func (r *CompanyResolver) build(cfg AgentConfig) (ports.LLMProvider, error) {
 	settings := r.defaults
 	settings.Vendor = cfg.Vendor
 	settings.Model = cfg.Model
@@ -103,7 +194,11 @@ func (r *CompanyResolver) ResolveFor(ctx context.Context, companyID int64) (port
 	if cfg.BaseURL != "" {
 		settings.OpenAIBaseURL = cfg.BaseURL
 	}
-	return Resolve(settings)
+	provider, err := Resolve(settings)
+	if err != nil {
+		return nil, err
+	}
+	return NewResilient(provider, r.resilientOpts), nil
 }
 
 func applyVendorKey(s *Settings, vendor, key string) {
@@ -116,5 +211,7 @@ func applyVendorKey(s *Settings, vendor, key string) {
 		s.AnthropicKey = key
 	case VendorGemini:
 		s.GeminiKey = key
+	case VendorLocal:
+		s.LocalKey = key
 	}
 }

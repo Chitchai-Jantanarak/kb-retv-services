@@ -46,7 +46,10 @@ func (r *VectorRetriever) Retrieve(ctx context.Context, query Query, meta Meta) 
 		return nil, nil
 	}
 
-	collection := fmt.Sprintf("%s__%d", vectorCollectionPrefix(r.collectionPrefix), cid)
+	coverage := queryCoverage(ctx, query, cid)
+	if len(coverage) == 0 {
+		return nil, nil
+	}
 
 	vectors, err := r.embedder.Embed(ctx, []string{query.Text})
 	if err != nil {
@@ -58,13 +61,19 @@ func (r *VectorRetriever) Retrieve(ctx context.Context, query Query, meta Meta) 
 
 	limit := vectorLimit(query)
 	searchLimit := limit * 5
-	hits, err := r.vector.Search(ctx, ports.VectorSearch{
-		Collection: collection,
-		Query:      vectors[0],
-		Limit:      searchLimit,
-	})
-	if err != nil {
-		return nil, err
+	prefix := vectorCollectionPrefix(r.collectionPrefix)
+
+	var hits []ports.VectorHit
+	for _, companyID := range coverage {
+		collectionHits, err := r.vector.Search(ctx, ports.VectorSearch{
+			Collection: fmt.Sprintf("%s__%d", prefix, companyID),
+			Query:      vectors[0],
+			Limit:      searchLimit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		hits = append(hits, collectionHits...)
 	}
 	if len(hits) == 0 {
 		return nil, nil
@@ -78,6 +87,7 @@ func (r *VectorRetriever) Retrieve(ctx context.Context, query Query, meta Meta) 
 	found, err := r.chunks.ChunksByIDs(ctx, kb.ChunkQuery{
 		IDs:       ids,
 		CompanyID: cid,
+		Coverage:  coverage,
 	})
 	if err != nil {
 		return nil, err

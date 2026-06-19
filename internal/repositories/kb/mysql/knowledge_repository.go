@@ -31,6 +31,8 @@ func (r *KnowledgeRepository) Search(ctx context.Context, query retrieval.Query)
 
 	text := strings.TrimSpace(query.Text)
 	pattern := "%" + escapeLike(text) + "%"
+	companyClause, companyArgs := companyFilter("a.company_id", query.CompanyID, query.Coverage)
+	args := append(companyArgs, text, pattern, pattern, pattern, limit)
 	rows, err := r.db.QueryContext(
 		ctx, `
 SELECT
@@ -40,7 +42,7 @@ SELECT
   COALESCE(a.body, '')
 FROM kb_articles a
 WHERE
-  a.company_id = ?
+  `+companyClause+`
   AND a.status = 'published'
   AND (
     ? = ''
@@ -54,12 +56,7 @@ WHERE
   )
 ORDER BY a.created_at DESC, a.id DESC
 LIMIT ?`,
-		query.CompanyID,
-		text,
-		pattern,
-		pattern,
-		pattern,
-		limit,
+		args...,
 	)
 	if err != nil {
 		return nil, err
@@ -100,12 +97,13 @@ func (r *KnowledgeRepository) ChunksByIDs(ctx context.Context, query kb.ChunkQue
 	}
 
 	placeholders := make([]string, 0, len(query.IDs))
-	args := make([]any, 0, len(query.IDs)+1)
+	args := make([]any, 0, len(query.IDs)+len(query.Coverage)+1)
 	for _, id := range query.IDs {
 		placeholders = append(placeholders, "?")
 		args = append(args, id)
 	}
-	args = append(args, query.CompanyID)
+	companyClause, companyArgs := companyFilter("a.company_id", query.CompanyID, query.Coverage)
+	args = append(args, companyArgs...)
 
 	rows, err := r.db.QueryContext(ctx, `
 SELECT
@@ -117,7 +115,7 @@ SELECT
 FROM kb_chunks ch
 JOIN kb_articles a ON a.id = ch.kb_article_id
 WHERE ch.id IN (`+strings.Join(placeholders, ",")+`)
-  AND a.company_id = ?
+  AND `+companyClause+`
   AND a.status = 'published'`, args...)
 	if err != nil {
 		return nil, err

@@ -19,6 +19,7 @@ type Chunk struct {
 type ChunkQuery struct {
 	IDs       []string
 	CompanyID int64
+	Coverage  []int64
 }
 
 type ChunkContext struct {

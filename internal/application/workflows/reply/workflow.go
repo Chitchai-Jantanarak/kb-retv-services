@@ -178,6 +178,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 	metadata := applySymptomAnchor(ctx, w.anchorer, cid, req.Message, req.Metadata)
 	result, err := w.pipeline.Run(ctx, rag.Query{
 		CompanyID: cid,
+		Coverage:  ctxkey.CoverageOrSelf(ctx, cid),
 		Text:      req.Message,
 		Limit:     3,
 		Mode:      req.Mode,

@@ -5,6 +5,7 @@ package llmboot
 
 import (
 	"os"
+	"time"
 
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/infra/llm"
@@ -35,6 +36,8 @@ func LLMSettings(cfg config.Config) llm.Settings {
 		OpenAIBaseURL:   cfg.LLM.OpenAIBaseURL,
 		OpenRouterTitle: cfg.LLM.OpenRouterTitle,
 		ReferrerURL:     cfg.LLM.ReferrerURL,
+		LocalURL:        cfg.LLM.LocalURL,
+		LocalKey:        firstNonEmpty(os.Getenv("LOCAL_LLM_API_KEY"), cfg.LLM.LocalKey),
 	}
 }
 
@@ -60,5 +63,22 @@ func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error
 	if db != nil {
 		lookup = mysqlai.NewAgentLookup(db, cfg.LLM.ProviderConfigKey)
 	}
-	return llm.NewCompanyResolver(lookup, LLMSettings(cfg))
+	resolver, err := llm.NewCompanyResolver(lookup, LLMSettings(cfg))
+	if err != nil {
+		return nil, err
+	}
+	resolver.
+		WithResilient(resilientOptions(cfg)).
+		WithCacheTTL(time.Duration(cfg.LLM.ResolverCacheTTLSeconds) * time.Second)
+	return resolver, nil
+}
+
+func resilientOptions(cfg config.Config) llm.ResilientOptions {
+	return llm.ResilientOptions{
+		Timeout:         time.Duration(cfg.LLM.RequestTimeoutSeconds) * time.Second,
+		RequestsPerSec:  cfg.LLM.RateLimitPerSec,
+		Burst:           cfg.LLM.RateLimitBurst,
+		BreakerFailures: cfg.LLM.BreakerFailures,
+		BreakerCooldown: time.Duration(cfg.LLM.BreakerCooldownSeconds) * time.Second,
+	}
 }

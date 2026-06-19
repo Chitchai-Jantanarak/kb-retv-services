@@ -70,6 +70,8 @@ func TestResolveSuccessCases(t *testing.T) {
 		{name: "anthropic", s: Settings{Vendor: "anthropic", AnthropicKey: "k"}},
 		{name: "claude_alias", s: Settings{Vendor: "claude", AnthropicKey: "k"}},
 		{name: "gemini", s: Settings{Vendor: "Gemini", GeminiKey: "k"}}, // case-insensitive
+		{name: "local_no_key", s: Settings{Vendor: "local", LocalURL: "http://localhost:11434/v1", Model: "llama3"}},
+		{name: "local_with_key", s: Settings{Vendor: "LOCAL", LocalKey: "k", Model: "llama3"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

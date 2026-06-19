@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type stubLookup struct {
@@ -15,6 +17,69 @@ type stubLookup struct {
 
 func (s stubLookup) AgentFor(_ context.Context, _ int64) (AgentConfig, bool, error) {
 	return s.agent, s.ok, s.err
+}
+
+type countingLookup struct {
+	agent AgentConfig
+	ok    bool
+	calls atomic.Int32
+}
+
+func (c *countingLookup) AgentFor(_ context.Context, _ int64) (AgentConfig, bool, error) {
+	c.calls.Add(1)
+	return c.agent, c.ok, nil
+}
+
+func TestResolveForWrapsResilientAndCaches(t *testing.T) {
+	lookup := &countingLookup{agent: AgentConfig{Vendor: "gemini", Model: "g"}, ok: true}
+	r, err := NewCompanyResolver(lookup, Settings{Vendor: "gemini", GeminiKey: "k"})
+	if err != nil {
+		t.Fatalf("NewCompanyResolver err = %v", err)
+	}
+	r.WithResilient(ResilientOptions{Timeout: time.Second}).WithCacheTTL(time.Minute)
+
+	p1, err := r.ResolveFor(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ResolveFor err = %v", err)
+	}
+	if _, ok := p1.(*resilient); !ok {
+		t.Fatalf("provider type = %T, want *resilient", p1)
+	}
+
+	p2, err := r.ResolveFor(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ResolveFor (cached) err = %v", err)
+	}
+	if p1 != p2 {
+		t.Fatal("ResolveFor should return the cached provider instance within TTL")
+	}
+
+	if _, err := r.AgentFor(context.Background(), 7); err != nil {
+		t.Fatalf("AgentFor err = %v", err)
+	}
+	if got := lookup.calls.Load(); got != 1 {
+		t.Fatalf("lookup calls = %d, want 1 (cached)", got)
+	}
+}
+
+func TestResolveForRebuildsAfterTTLExpiry(t *testing.T) {
+	lookup := &countingLookup{agent: AgentConfig{Vendor: "gemini", Model: "g"}, ok: true}
+	r, err := NewCompanyResolver(lookup, Settings{Vendor: "gemini", GeminiKey: "k"})
+	if err != nil {
+		t.Fatalf("NewCompanyResolver err = %v", err)
+	}
+	r.WithCacheTTL(time.Nanosecond)
+
+	if _, err := r.ResolveFor(context.Background(), 7); err != nil {
+		t.Fatalf("ResolveFor err = %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := r.ResolveFor(context.Background(), 7); err != nil {
+		t.Fatalf("ResolveFor err = %v", err)
+	}
+	if got := lookup.calls.Load(); got < 2 {
+		t.Fatalf("lookup calls = %d, want >= 2 after TTL expiry", got)
+	}
 }
 
 func TestNewCompanyResolverFailureCases(t *testing.T) {

@@ -70,6 +70,44 @@ func TestVectorRetrieverEmbedsSearchesAndMapsChunks(t *testing.T) {
 	}
 }
 
+func TestVectorRetrieverFansOutAcrossCoverage(t *testing.T) {
+	embedder := &fakeVectorEmbedder{vector: []float32{0.1, 0.2}}
+	store := &fakeVectorSearchStore{
+		hits: []ports.VectorHit{
+			{ID: "11", Score: 0.82, Metadata: map[string]any{"kb_chunk_id": float64(11)}},
+		},
+	}
+	chunks := &fakeChunkLookup{
+		chunks: []kb.Chunk{
+			{ID: "11", ArticleID: "1", CompanyID: 3, Title: "Printer offline", Content: "first"},
+		},
+	}
+	retriever := NewVectorRetriever(VectorRetrieverConfig{
+		Embedder:         embedder,
+		Vector:           store,
+		Chunks:           chunks,
+		CollectionPrefix: "kb_chunks",
+	})
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 3)
+	_, err := retriever.Retrieve(ctx, Query{
+		CompanyID: 3,
+		Coverage:  []int64{3, 8},
+		Text:      "printer offline",
+		Limit:     2,
+	}, Meta{})
+	if err != nil {
+		t.Fatalf("Retrieve() error = %v", err)
+	}
+
+	if len(store.collections) != 2 || store.collections[0] != "kb_chunks__3" || store.collections[1] != "kb_chunks__8" {
+		t.Fatalf("collections searched = %v, want [kb_chunks__3 kb_chunks__8]", store.collections)
+	}
+	if len(chunks.query.Coverage) != 2 || chunks.query.Coverage[0] != 3 || chunks.query.Coverage[1] != 8 {
+		t.Fatalf("lookup coverage = %v, want [3 8]", chunks.query.Coverage)
+	}
+}
+
 type fakeVectorEmbedder struct {
 	texts  []string
 	vector []float32
@@ -88,8 +126,9 @@ func (e *fakeVectorEmbedder) Dim() int {
 }
 
 type fakeVectorSearchStore struct {
-	search ports.VectorSearch
-	hits   []ports.VectorHit
+	search      ports.VectorSearch
+	collections []string
+	hits        []ports.VectorHit
 }
 
 func (s *fakeVectorSearchStore) EnsureCollection(ctx context.Context, name string, dim int) error {
@@ -105,6 +144,7 @@ func (s *fakeVectorSearchStore) Search(ctx context.Context, q ports.VectorSearch
 		return nil, err
 	}
 	s.search = q
+	s.collections = append(s.collections, q.Collection)
 	return s.hits, nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm/anthropic"
 	"github.com/my/app/internal/infra/llm/gemini"
+	"github.com/my/app/internal/infra/llm/local"
 	"github.com/my/app/internal/infra/llm/openai"
 )
 
@@ -17,6 +18,7 @@ const (
 	VendorClaude     = "claude"
 	VendorGemini     = "gemini"
 	VendorOpenRouter = "openrouter"
+	VendorLocal      = "local"
 
 	openRouterBaseURL = "https://openrouter.ai/api/v1"
 )
@@ -34,6 +36,8 @@ type Settings struct {
 	OpenAIBaseURL   string
 	OpenRouterTitle string
 	ReferrerURL     string
+	LocalURL        string
+	LocalKey        string
 }
 
 // Resolve returns an LLMProvider for the requested vendor.
@@ -71,6 +75,12 @@ func Resolve(s Settings) (ports.LLMProvider, error) {
 		return gemini.New(gemini.Config{
 			APIKey: s.GeminiKey,
 			Model:  s.Model,
+		})
+	case VendorLocal:
+		return local.New(local.Config{
+			APIKey:  s.LocalKey,
+			BaseURL: s.LocalURL,
+			Model:   s.Model,
 		})
 	case "":
 		return nil, errors.New("llm: vendor is required")

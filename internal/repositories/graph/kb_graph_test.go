@@ -67,7 +67,7 @@ func TestKBGraphUpsertRejectsZeroCompany(t *testing.T) {
 		{
 			name: "articles_for_symptom_traversal",
 			fn: func() error {
-				_, err := g.ArticlesForSymptom(context.Background(), 0, 1, 10)
+				_, err := g.ArticlesForSymptom(context.Background(), 0, nil, 1, 10)
 				return err
 			},
 			want: "company_id must be positive",
@@ -138,7 +138,7 @@ func TestArticlesForSymptomScopesCompanyInQuery(t *testing.T) {
 	store := &fakeGraphStore{}
 	g := NewKBGraph(store)
 
-	if _, err := g.ArticlesForSymptom(context.Background(), 3, 50, 5); err != nil {
+	if _, err := g.ArticlesForSymptom(context.Background(), 3, []int64{3, 8}, 50, 5); err != nil {
 		t.Fatalf("ArticlesForSymptom err = %v", err)
 	}
 	if len(store.queries) != 1 {
@@ -153,5 +153,12 @@ func TestArticlesForSymptomScopesCompanyInQuery(t *testing.T) {
 	}
 	if q.Params["symptom_id"] != "3:symptom:50" {
 		t.Fatalf("params.symptom_id = %v, want 3:symptom:50", q.Params["symptom_id"])
+	}
+	if !strings.Contains(q.Statement, "a.company_id IN $coverage") {
+		t.Fatalf("statement missing coverage filter:\n%s", q.Statement)
+	}
+	cov, ok := q.Params["coverage"].([]int64)
+	if !ok || len(cov) != 2 || cov[0] != 3 || cov[1] != 8 {
+		t.Fatalf("params.coverage = %v, want [3 8]", q.Params["coverage"])
 	}
 }

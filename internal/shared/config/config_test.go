@@ -76,8 +76,8 @@ apiKeys:
 	if cfg.LLM.OpenAIKey != "openai-test" {
 		t.Fatalf("LLM.OpenAIKey = %q, want openai-test", cfg.LLM.OpenAIKey)
 	}
-	if cfg.LLM.EmbeddingProvider != "openai" {
-		t.Fatalf("LLM.EmbeddingProvider = %q, want openai", cfg.LLM.EmbeddingProvider)
+	if cfg.LLM.EmbeddingProvider != "gemini" {
+		t.Fatalf("LLM.EmbeddingProvider = %q, want gemini", cfg.LLM.EmbeddingProvider)
 	}
 	if cfg.APIKeys.Gemini != "gemini-test" {
 		t.Fatalf("APIKeys.Gemini = %q, want gemini-test", cfg.APIKeys.Gemini)

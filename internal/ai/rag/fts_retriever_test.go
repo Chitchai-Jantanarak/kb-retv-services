@@ -8,17 +8,17 @@ import (
 )
 
 type stubFTSSource struct {
-	chunks []FTSChunk
-	err    error
-	calls  int
-	lastQ  string
-	lastCo int64
+	chunks  []FTSChunk
+	err     error
+	calls   int
+	lastQ   string
+	lastCov []int64
 }
 
-func (s *stubFTSSource) SearchChunks(_ context.Context, companyID int64, query string, _ int) ([]FTSChunk, error) {
+func (s *stubFTSSource) SearchChunks(_ context.Context, coverage []int64, query string, _ int) ([]FTSChunk, error) {
 	s.calls++
 	s.lastQ = query
-	s.lastCo = companyID
+	s.lastCov = coverage
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -77,7 +77,7 @@ func TestFTSRetrieverMapsRowsToCandidates(t *testing.T) {
 	if out[0].ID != "chunk:1" || out[0].Source != "fts" || out[0].Score != 0.9 {
 		t.Fatalf("candidate[0] = %+v", out[0])
 	}
-	if src.lastCo != 7 || src.lastQ != "printer" {
-		t.Fatalf("source got company=%d q=%q", src.lastCo, src.lastQ)
+	if len(src.lastCov) != 1 || src.lastCov[0] != 7 || src.lastQ != "printer" {
+		t.Fatalf("source got coverage=%v q=%q", src.lastCov, src.lastQ)
 	}
 }

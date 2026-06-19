@@ -90,15 +90,17 @@ func (g *KBGraph) LinkReportProducedArticle(ctx context.Context, companyID int64
 
 // ArticlesForSymptom returns articles that SOLVE the given symptom,
 // scoped to the company. Limit is enforced by Cypher.
-func (g *KBGraph) ArticlesForSymptom(ctx context.Context, companyID, symptomID int64, limit int) ([]map[string]any, error) {
+func (g *KBGraph) ArticlesForSymptom(ctx context.Context, companyID int64, coverage []int64, symptomID int64, limit int) ([]map[string]any, error) {
 	if companyID <= 0 {
 		return nil, errors.New("kb_graph: ArticlesForSymptom: company_id must be positive")
 	}
 	if limit <= 0 {
 		limit = 16
 	}
+	scope := coverageOrSelf(coverage, companyID)
 	stmt := fmt.Sprintf(`
-		MATCH (a:%s { company_id: $company_id })-[r:%s { company_id: $company_id }]->(s:%s { company_id: $company_id, id: $symptom_id })
+		MATCH (a:%s)-[r:%s { company_id: $company_id }]->(s:%s { company_id: $company_id, id: $symptom_id })
+		WHERE a.company_id IN $coverage
 		RETURN a.id AS article_id, a.title AS title, r.score AS score
 		ORDER BY r.score DESC
 		LIMIT %d
@@ -107,6 +109,7 @@ func (g *KBGraph) ArticlesForSymptom(ctx context.Context, companyID, symptomID i
 		Statement: stmt,
 		Params: map[string]any{
 			"company_id": companyID,
+			"coverage":   scope,
 			"symptom_id": memgraph.ExternalID(companyID, "symptom", strconv.FormatInt(symptomID, 10)),
 		},
 	})

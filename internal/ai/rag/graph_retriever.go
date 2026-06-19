@@ -6,7 +6,7 @@ import (
 )
 
 type GraphArticleSource interface {
-	ArticlesForSymptom(ctx context.Context, companyID, symptomID int64, limit int) ([]map[string]any, error)
+	ArticlesForSymptom(ctx context.Context, companyID int64, coverage []int64, symptomID int64, limit int) ([]map[string]any, error)
 }
 
 type GraphAnchorRetriever struct {
@@ -22,12 +22,13 @@ func (r *GraphAnchorRetriever) RetrieveGraph(ctx context.Context, query Query, p
 		return nil, nil
 	}
 	limit := vectorLimit(query)
+	coverage := queryCoverage(ctx, query, query.CompanyID)
 	var sets [][]Candidate
 	for _, anchor := range plan.GraphAnchors {
 		if anchor.Kind != GraphAnchorSymptom || anchor.ID <= 0 {
 			continue
 		}
-		rows, err := r.source.ArticlesForSymptom(ctx, query.CompanyID, anchor.ID, limit)
+		rows, err := r.source.ArticlesForSymptom(ctx, query.CompanyID, coverage, anchor.ID, limit)
 		if err != nil {
 			return nil, err
 		}

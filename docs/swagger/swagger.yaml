@@ -285,6 +285,11 @@ paths:
       consumes:
       - application/json
       parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
       - description: Tenant ID
         in: header
         name: X-Tenant-Id
@@ -390,6 +395,11 @@ paths:
       consumes:
       - application/json
       parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
       - description: Tenant ID
         in: header
         name: X-Tenant-Id
@@ -432,6 +442,11 @@ paths:
       consumes:
       - application/json
       parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
       - description: Tenant ID
         in: header
         name: X-Tenant-Id

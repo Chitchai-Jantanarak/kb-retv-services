@@ -81,6 +81,47 @@ func TestVerifyRS256ValidToken(t *testing.T) {
 	}
 }
 
+func TestVerifyDecodesCoverageClaim(t *testing.T) {
+	key, pub := testKey(t)
+	now := time.Now().Unix()
+	tok := mintRS256(t, key, map[string]any{
+		"cid": 42,
+		"cov": []int64{42, 99},
+		"iss": "laravel",
+		"aud": "centric-rag",
+		"use": "service",
+		"exp": now + 120,
+	})
+
+	claims, err := Verify(tok, pub)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims.Cov) != 2 || claims.Cov[0] != 42 || claims.Cov[1] != 99 {
+		t.Fatalf("cov = %v, want [42 99]", claims.Cov)
+	}
+}
+
+func TestVerifyAbsentCoverageClaimIsNil(t *testing.T) {
+	key, pub := testKey(t)
+	now := time.Now().Unix()
+	tok := mintRS256(t, key, map[string]any{
+		"cid": 42,
+		"iss": "laravel",
+		"aud": "centric-rag",
+		"use": "service",
+		"exp": now + 120,
+	})
+
+	claims, err := Verify(tok, pub)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims.Cov) != 0 {
+		t.Fatalf("cov = %v, want empty", claims.Cov)
+	}
+}
+
 func TestVerifyRejectsBadSignature(t *testing.T) {
 	keyA, _ := testKey(t)
 	_, pubB := testKey(t)

@@ -9,6 +9,7 @@ const (
 	requestID
 	loggerKey
 	principalKey
+	coverageKey
 )
 
 type Principal struct {
@@ -17,6 +18,7 @@ type Principal struct {
 	Role      string
 	Groups    []string
 	Perms     []string
+	Coverage  []int64
 }
 
 func WithCompanyID(ctx context.Context, id int64) context.Context {
@@ -68,4 +70,43 @@ func MustPrincipal(ctx context.Context) Principal {
 		panic("principal not found in context")
 	}
 	return v
+}
+
+func WithCoverage(ctx context.Context, set []int64) context.Context {
+	return context.WithValue(ctx, coverageKey, set)
+}
+
+func Coverage(ctx context.Context) ([]int64, bool) {
+	v, ok := ctx.Value(coverageKey).([]int64)
+	return v, ok
+}
+
+func CoverageOrSelf(ctx context.Context, companyID int64) []int64 {
+	if v, ok := ctx.Value(coverageKey).([]int64); ok && len(v) > 0 {
+		return v
+	}
+	return []int64{companyID}
+}
+
+func NormalizeCoverage(set []int64, companyID int64) []int64 {
+	out := make([]int64, 0, len(set)+1)
+	seen := make(map[int64]struct{}, len(set)+1)
+	add := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	add(companyID)
+	for _, id := range set {
+		add(id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

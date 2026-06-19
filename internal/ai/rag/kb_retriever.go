@@ -18,6 +18,7 @@ func NewKnowledgeRetriever(repo ports.KnowledgeRepository) *KnowledgeRetriever {
 func (r *KnowledgeRetriever) Retrieve(ctx context.Context, query Query, meta Meta) ([]Candidate, error) {
 	articles, err := r.repo.Search(ctx, retrieval.Query{
 		CompanyID: query.CompanyID,
+		Coverage:  queryCoverage(ctx, query, query.CompanyID),
 		Text:      query.Text,
 		Limit:     query.Limit,
 	})

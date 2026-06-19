@@ -69,5 +69,6 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 
 	if opts.SwaggerEnabled {
 		e.GET("/swagger/*", echoSwagger.WrapHandler)
+		registerAPIDocs(e)
 	}
 }

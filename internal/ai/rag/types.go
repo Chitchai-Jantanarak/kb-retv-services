@@ -23,6 +23,7 @@ const (
 
 type Query struct {
 	CompanyID int64
+	Coverage  []int64
 	Text      string
 	Limit     int
 	Mode      string

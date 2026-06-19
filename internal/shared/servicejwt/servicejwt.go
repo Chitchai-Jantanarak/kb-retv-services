@@ -20,6 +20,7 @@ type Claims struct {
 	Role   string   `json:"role"`
 	Groups []string `json:"grps"`
 	Perms  []string `json:"perms"`
+	Cov    []int64  `json:"cov,omitempty"`
 	Aud    Audience `json:"aud"`
 	Use    string   `json:"use"`
 	Exp    int64    `json:"exp"`
