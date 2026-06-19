@@ -40,6 +40,7 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "count chunks without embedding")
 	maxChunks := flag.Int("max-chunks", 0, "cap chunks indexed when -limit is empty (0 = use config default)")
 	allowLarge := flag.Bool("allow-large-remote-run", false, "permit a remote-provider run above the large-run threshold")
+	chunkRunes := flag.Int("chunk-runes", 0, "reembed: max runes per chunk (0 = chunker default)")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -108,6 +109,31 @@ func main() {
 		} else {
 			fmt.Printf("kb index complete: chunks=%d points=%d batches=%d collection=%s model=%s provider=%s dim=%d\n", result.Chunks, result.Points, result.Batches, *collection, modelName, resolvedProvider, embedder.Dim())
 		}
+	case "reembed":
+		if *company <= 0 {
+			log.Fatal("reembed requires -company=<id> (re-embed is scoped to one tenant)")
+		}
+		resolvedProvider, modelName, embedder, err := embeddings.NewProvider(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
+		if err != nil {
+			log.Fatalf("build embedder: %v", err)
+		}
+		reembedder := vectorindex.NewReembedder(
+			mysqlkb.NewReportSource(qdb),
+			embedder,
+			qdrant.NewStore(qdrant.Config{URL: cfg.Qdrant.URL, APIKey: cfg.Qdrant.APIKey}),
+		)
+		result, err := reembedder.Run(ctx, vectorindex.ReembedOptions{
+			CompanyID:        *company,
+			CollectionPrefix: *collection,
+			ChunkRunes:       *chunkRunes,
+			Limit:            *limit,
+			Model:            modelName,
+		})
+		if err != nil {
+			log.Fatalf("reembed: %v", err)
+		}
+		fmt.Printf("reembed complete: company=%d collection=%s dim=%d dimension=%s reports=%d chunks=%d points=%d provider=%s model=%s\n",
+			*company, result.Collection, result.Dim, result.DimensionAction, result.Reports, result.Chunks, result.Points, resolvedProvider, modelName)
 	case "embed-batch-submit":
 		resolvedProvider, _, batchEmbedder, err := embeddings.NewBatchEmbedder(embeddingSettings(*provider, *model, *dim, *baseURL, *embedRPM, *embedRetries, cfg))
 		if err != nil {
@@ -310,7 +336,7 @@ func toKeyedVectors(results []embeddings.BatchEmbedResult) []vectorindex.KeyedVe
 func parseCompanies(csv string, single int64) []int64 {
 	if strings.TrimSpace(csv) != "" {
 		var ids []int64
-		for _, part := range strings.Split(csv, ",") {
+		for part := range strings.SplitSeq(csv, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
 				continue

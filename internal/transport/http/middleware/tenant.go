@@ -44,6 +44,7 @@ func RequireCompany(jwtSecret string, requireAuth bool) echo.MiddlewareFunc {
 					Role:      claims.Role,
 					Groups:    claims.Groups,
 					Perms:     claims.Perms,
+					Coverage:  ctxkey.NormalizeCoverage(claims.Cov, claims.CID),
 				}
 			} else {
 				if requireAuth {
@@ -57,11 +58,13 @@ func RequireCompany(jwtSecret string, requireAuth bool) echo.MiddlewareFunc {
 					CompanyID: cid,
 					Role:      "dev",
 					Perms:     []string{"*"},
+					Coverage:  ctxkey.NormalizeCoverage(nil, cid),
 				}
 			}
 
 			ctx := ctxkey.WithCompanyID(req.Context(), cid)
 			ctx = ctxkey.WithPrincipal(ctx, principal)
+			ctx = ctxkey.WithCoverage(ctx, principal.Coverage)
 			c.SetRequest(req.WithContext(ctx))
 			return next(c)
 		}
