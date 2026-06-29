@@ -85,6 +85,9 @@ func (h *InboundHandler) Receive(c *echo.Context) error {
 
 	result, err := h.workflow.Run(c.Request().Context(), normalized, raw)
 	if err != nil {
+		if errors.Is(err, omnichannel.ErrAccountNotFound) {
+			return response.WriteError(c, apperr.Wrap(apperr.CodeNotFound, "unknown receiver", err))
+		}
 		return response.WriteError(c, err)
 	}
 	return c.JSON(http.StatusOK, response.OK(map[string]any{

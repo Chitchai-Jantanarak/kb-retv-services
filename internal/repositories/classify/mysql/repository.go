@@ -76,6 +76,8 @@ SELECT
   COALESCE(r.title, ''),
   CONCAT_WS(
     '\n',
+    COALESCE(r.problem_detail, ''),
+    COALESCE(r.fix_detail, ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problem_full')), ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problemdetail')), ''),
     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.fixproblem')), '')
@@ -201,6 +203,8 @@ VALUES (?, ?, 'ai_extract', ?, 1, NOW(), NOW())`, companyID, name, status)
 	return insertID, nil
 }
 
+const severityApplyThreshold = 0.6
+
 func (r *Repository) WriteClassification(ctx context.Context, c classify.Classification) error {
 	if c.ReportID <= 0 || c.CompanyID <= 0 {
 		return errors.New("classify repo: write: report_id+company_id required")
@@ -233,6 +237,16 @@ ON DUPLICATE KEY UPDATE
 		nullableString(c.Model))
 	if err != nil {
 		return fmt.Errorf("classify repo: write classification: %w", err)
+	}
+
+	if c.SeverityID > 0 && c.SeverityConf >= severityApplyThreshold {
+		_, _ = r.db.ExecContext(ctx, `
+UPDATE reports rep
+JOIN severity_levels sl ON sl.id = ?
+JOIN report_severities rs ON rs.code = sl.code
+SET rep.severity_id = rs.id
+WHERE rep.id = ? AND rep.company_id = ? AND rep.severity_id IS NULL`,
+			c.SeverityID, c.ReportID, c.CompanyID)
 	}
 	return nil
 }

@@ -28,16 +28,22 @@ definitions:
         - voice
         - api
         - in_app
+        example: web
         type: string
       conversation_id:
+        example: conv_8f21
         type: string
       customer_id:
+        example: cust_10293
         type: string
       debug:
+        example: false
         type: boolean
       message:
+        example: My internet has been offline since this morning.
         type: string
       message_id:
+        example: msg_1001
         type: string
       metadata:
         additionalProperties:
@@ -48,10 +54,50 @@ definitions:
         - fast_draft
         - full_review
         - debug
+        example: full_review
         type: string
       query:
         type: string
       site_id:
+        example: site_42
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ReplyResponse:
+    properties:
+      ai_action_id:
+        type: integer
+      confidence:
+        type: number
+      debug_trace: {}
+      decision:
+        type: string
+      draft:
+        type: string
+      intent:
+        type: string
+      reason:
+        type: string
+      retry_after_ms:
+        type: integer
+      sources:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ReplySource'
+        type: array
+      stage_timings_ms:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      suggestion:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ReplySource:
+    properties:
+      id:
+        type: string
+      score:
+        type: number
+      title:
         type: string
     type: object
   github_com_my_app_internal_transport_http_response.Envelope:
@@ -405,6 +451,11 @@ paths:
         name: X-Tenant-Id
         required: true
         type: string
+      - description: Request budget in milliseconds; Go runs within this minus headroom,
+          falling back to server config when absent
+        in: header
+        name: X-Timeout-Ms
+        type: string
       - description: Reply request
         in: body
         name: request
@@ -417,7 +468,12 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_application_dto.ReplyResponse'
+              type: object
         "400":
           description: Bad Request
           schema:

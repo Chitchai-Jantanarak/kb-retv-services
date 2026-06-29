@@ -81,6 +81,13 @@ func main() {
 		},
 	})
 
+	var classifyQueue ports.Queue
+	if q, qerr := infraasynq.NewQueue(infraasynq.Config{RedisURL: redisURL}); qerr != nil {
+		log.Printf("classify trigger disabled: %v", qerr)
+	} else {
+		classifyQueue = q
+	}
+
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(TaskReplyLine, makeHandler(stubHandler("reply:line")))
 	mux.HandleFunc(TaskReplyEmail, makeHandler(stubHandler("reply:email")))
@@ -93,7 +100,7 @@ func main() {
 	mux.HandleFunc(TaskPromoteSubject, makeHandler(promoteFn))
 	mux.HandleFunc(TaskOutboxFlush, makeHandler(buildOutboxHandler(cfg)))
 	mux.HandleFunc(TaskEmbeddingRefresh, makeHandler(buildRefreshHandler(cfg)))
-	mux.HandleFunc(tickets.TaskCreate, makeHandler(buildTicketCreateHandler(cfg)))
+	mux.HandleFunc(tickets.TaskCreate, makeHandler(buildTicketCreateHandler(cfg, classifyQueue)))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -327,7 +334,9 @@ func buildTenantQuerier(cfg config.Config, db *sql.DB) (tenant.Querier, error) {
 	return pool.Router(), nil
 }
 
-func buildTicketCreateHandler(cfg config.Config) taskHandler {
+const classifyAfterTicketLimit = 25
+
+func buildTicketCreateHandler(cfg config.Config, classifyQueue ports.Queue) taskHandler {
 	deliverer, err := tickets.NewDeliverer(tickets.DeliveryConfig{
 		BaseURL: cfg.Laravel.BaseURL,
 		Path:    cfg.Laravel.TicketPath,
@@ -338,7 +347,8 @@ func buildTicketCreateHandler(cfg config.Config) taskHandler {
 		log.Printf("ticket:create disabled: %v", err)
 		return unavailable("ticket:create", err.Error())
 	}
-	log.Printf("ticket:create handler configured: base=%s path=%s", cfg.Laravel.BaseURL, cfg.Laravel.TicketPath)
+	log.Printf("ticket:create handler configured: base=%s path=%s classify_trigger=%t",
+		cfg.Laravel.BaseURL, cfg.Laravel.TicketPath, classifyQueue != nil)
 
 	return func(ctx context.Context, job ports.Job) error {
 		var p tickets.Payload
@@ -356,7 +366,30 @@ func buildTicketCreateHandler(cfg config.Config) taskHandler {
 		if err != nil {
 			return err
 		}
-		return deliverer.Deliver(ctx, body)
+		if err := deliverer.Deliver(ctx, body); err != nil {
+			return err
+		}
+		enqueueClassify(ctx, classifyQueue, p.CompanyID, job.TraceID)
+		return nil
+	}
+}
+
+func enqueueClassify(ctx context.Context, queue ports.Queue, companyID int64, traceID string) {
+	if queue == nil {
+		return
+	}
+	payload, err := json.Marshal(dto.IngestReportPayload{Limit: classifyAfterTicketLimit})
+	if err != nil {
+		log.Printf("ticket:create: marshal classify payload company=%d err=%v", companyID, err)
+		return
+	}
+	if err := queue.Enqueue(ctx, ports.Job{
+		Type:      TaskExtractBatch,
+		CompanyID: companyID,
+		TraceID:   traceID,
+		Payload:   payload,
+	}); err != nil {
+		log.Printf("ticket:create: enqueue extract:batch company=%d err=%v", companyID, err)
 	}
 }
 

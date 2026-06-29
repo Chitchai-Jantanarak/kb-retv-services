@@ -3,14 +3,43 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
+
+func TestGenerateReturnsTypedProviderErrorOn503(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"overloaded"}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+
+	_, err = c.Generate(context.Background(), ports.Prompt{User: "x"})
+	var pe *llmerr.ProviderError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v (%T), want *llmerr.ProviderError", err, err)
+	}
+	if pe.Status != http.StatusServiceUnavailable {
+		t.Fatalf("Status = %d, want 503", pe.Status)
+	}
+	if d, ok := llmerr.Retryable(err); !ok || d != 2*time.Second {
+		t.Fatalf("Retryable = (%v, %v), want (2s, true)", d, ok)
+	}
+}
 
 func TestNewRejectsEmptyAPIKey(t *testing.T) {
 	if _, err := New(Config{}); err == nil {

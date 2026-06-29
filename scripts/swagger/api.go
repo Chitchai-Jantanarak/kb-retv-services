@@ -92,8 +92,9 @@ func healthz() {}
 // @Produce json
 // @Param Authorization header string true "Bearer <RS256 service JWT>"
 // @Param X-Tenant-Id header string true "Tenant ID"
+// @Param X-Timeout-Ms header string false "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent"
 // @Param request body dto.ReplyRequest true "Reply request"
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} response.Envelope{data=dto.ReplyResponse}
 // @Failure 400 {object} response.Envelope
 // @Failure 401 {object} response.Envelope
 // @Failure 403 {object} response.Envelope

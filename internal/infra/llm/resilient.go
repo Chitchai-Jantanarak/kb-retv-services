@@ -4,21 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
 
 type ResilientOptions struct {
-	Timeout         time.Duration
-	RequestsPerSec  float64
-	Burst           int
-	BreakerFailures int
-	BreakerCooldown time.Duration
-	Clock           func() time.Time
+	Timeout          time.Duration
+	RequestsPerSec   float64
+	Burst            int
+	BreakerFailures  int
+	BreakerCooldown  time.Duration
+	MaxRetries       int
+	RetryBaseBackoff time.Duration
+	RetryMaxBackoff  time.Duration
+	Clock            func() time.Time
 }
 
 func NewResilient(inner ports.LLMProvider, opts ResilientOptions) ports.LLMProvider {
@@ -30,8 +35,11 @@ func NewResilient(inner ports.LLMProvider, opts ResilientOptions) ports.LLMProvi
 		clock = time.Now
 	}
 	w := &resilient{
-		inner:   inner,
-		timeout: opts.Timeout,
+		inner:      inner,
+		timeout:    opts.Timeout,
+		maxRetries: opts.MaxRetries,
+		retryBase:  opts.RetryBaseBackoff,
+		retryMax:   opts.RetryMaxBackoff,
 	}
 	if opts.RequestsPerSec > 0 {
 		burst := opts.Burst
@@ -51,10 +59,13 @@ func NewResilient(inner ports.LLMProvider, opts ResilientOptions) ports.LLMProvi
 }
 
 type resilient struct {
-	inner   ports.LLMProvider
-	timeout time.Duration
-	limiter *rate.Limiter
-	breaker *breaker
+	inner      ports.LLMProvider
+	timeout    time.Duration
+	maxRetries int
+	retryBase  time.Duration
+	retryMax   time.Duration
+	limiter    *rate.Limiter
+	breaker    *breaker
 }
 
 var ErrCircuitOpen = errors.New("llm: circuit breaker open")
@@ -95,20 +106,59 @@ func (r *resilient) call(ctx context.Context, fn func(context.Context) (ports.Co
 		}
 	}
 
-	callCtx := ctx
-	if r.timeout > 0 {
-		var cancel context.CancelFunc
-		callCtx, cancel = context.WithTimeout(ctx, r.timeout)
-		defer cancel()
+	var lastErr error
+	for attempt := 0; attempt <= r.maxRetries; attempt++ {
+		out, err := r.attempt(ctx, fn)
+		if err == nil {
+			r.recordSuccess()
+			return out, nil
+		}
+		lastErr = err
+
+		retryAfter, ok := llmerr.Retryable(err)
+		if !ok || attempt == r.maxRetries {
+			break
+		}
+		if werr := r.backoff(ctx, attempt, retryAfter); werr != nil {
+			break
+		}
 	}
 
-	out, err := fn(callCtx)
-	if err != nil {
-		r.recordFailure()
-		return ports.Completion{}, err
+	r.recordFailure()
+	return ports.Completion{}, lastErr
+}
+
+func (r *resilient) attempt(ctx context.Context, fn func(context.Context) (ports.Completion, error)) (ports.Completion, error) {
+	if r.timeout <= 0 {
+		return fn(ctx)
 	}
-	r.recordSuccess()
-	return out, nil
+	callCtx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	return fn(callCtx)
+}
+
+func (r *resilient) backoff(ctx context.Context, attempt int, retryAfter time.Duration) error {
+	timer := time.NewTimer(r.backoffDuration(attempt, retryAfter))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r *resilient) backoffDuration(attempt int, retryAfter time.Duration) time.Duration {
+	base := r.retryBase
+	if base <= 0 {
+		base = 500 * time.Millisecond
+	}
+	ceil := r.retryMax
+	if ceil <= 0 {
+		ceil = 8 * time.Second
+	}
+	wait := max(time.Duration(float64(base)*math.Pow(2, float64(attempt))), retryAfter)
+	return min(wait, ceil)
 }
 
 func (r *resilient) recordFailure() {

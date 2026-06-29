@@ -7,7 +7,96 @@ import (
 	"testing"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/shared/ctxkey"
 )
+
+type ctxCapturingConvos struct {
+	id      int64
+	created bool
+	gotCtx  context.Context
+}
+
+func (s *ctxCapturingConvos) UpsertConversation(ctx context.Context, _ Conversation) (int64, bool, error) {
+	s.gotCtx = ctx
+	return s.id, s.created, nil
+}
+
+type ctxCapturingMessages struct {
+	id     int64
+	gotCtx context.Context
+}
+
+func (s *ctxCapturingMessages) InsertMessage(ctx context.Context, _ StoredMessage) (int64, error) {
+	s.gotCtx = ctx
+	return s.id, nil
+}
+func (s *ctxCapturingMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
+	return 0, 0, false, nil
+}
+
+type foundMessages struct {
+	convoID, msgID int64
+	insertCalled   bool
+}
+
+func (m *foundMessages) InsertMessage(context.Context, StoredMessage) (int64, error) {
+	m.insertCalled = true
+	return 999, nil
+}
+func (m *foundMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
+	return m.convoID, m.msgID, true, nil
+}
+
+func TestRunIsIdempotentOnDuplicateMessageID(t *testing.T) {
+	convos := &ctxCapturingConvos{id: 100, created: true}
+	msgs := &foundMessages{convoID: 77, msgID: 88}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), validNorm("acme@x.com"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if convos.gotCtx != nil {
+		t.Fatalf("duplicate message must NOT create a new conversation")
+	}
+	if msgs.insertCalled {
+		t.Fatalf("duplicate message must NOT insert again")
+	}
+	if res.ConversationID != 77 || res.MessageID != 88 {
+		t.Fatalf("idempotent result must reuse existing ids, got %+v", res)
+	}
+}
+
+func TestRunInjectsCompanyIntoContextForSiloWrite(t *testing.T) {
+	convos := &ctxCapturingConvos{id: 100, created: true}
+	msgs := &ctxCapturingMessages{id: 200}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), validNorm("acme@x.com"), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	cid, ok := ctxkey.CompanyID(convos.gotCtx)
+	if !ok || cid != 7 {
+		t.Fatalf("conversation write ctx must carry resolved company_id 7 (for tenant silo routing), got cid=%d ok=%v", cid, ok)
+	}
+	mid, ok := ctxkey.CompanyID(msgs.gotCtx)
+	if !ok || mid != 7 {
+		t.Fatalf("message write ctx must carry resolved company_id 7, got cid=%d ok=%v", mid, ok)
+	}
+}
 
 type stubAccounts struct {
 	acc ChannelAccount
@@ -19,12 +108,13 @@ func (s *stubAccounts) ByChannelAndExternalID(_ context.Context, _, _ string) (C
 }
 
 type stubConvos struct {
-	id  int64
-	err error
+	id      int64
+	created bool
+	err     error
 }
 
-func (s *stubConvos) UpsertConversation(_ context.Context, _ Conversation) (int64, error) {
-	return s.id, s.err
+func (s *stubConvos) UpsertConversation(_ context.Context, _ Conversation) (int64, bool, error) {
+	return s.id, s.created, s.err
 }
 
 type stubMessages struct {
@@ -34,6 +124,9 @@ type stubMessages struct {
 
 func (s *stubMessages) InsertMessage(_ context.Context, _ StoredMessage) (int64, error) {
 	return s.id, s.err
+}
+func (s *stubMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
+	return 0, 0, false, nil
 }
 
 type captureTickets struct {
@@ -139,11 +232,11 @@ func TestRunRejectsAccountWithNoCompany(t *testing.T) {
 	}
 }
 
-func TestRunHappyPathPersistsAndOptionallyEnqueues(t *testing.T) {
+func TestRunHappyPathPersistsDraft(t *testing.T) {
 	tickets := &captureTickets{}
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
-		Conversations: &stubConvos{id: 100},
+		Conversations: &stubConvos{id: 100, created: true},
 		Messages:      &stubMessages{id: 200},
 		Tickets:       tickets,
 	})
@@ -157,15 +250,58 @@ func TestRunHappyPathPersistsAndOptionallyEnqueues(t *testing.T) {
 	if res.CompanyID != 7 || res.ConversationID != 100 || res.MessageID != 200 {
 		t.Fatalf("result = %+v", res)
 	}
-	if !res.TicketEnqueued || !tickets.called || tickets.companyID != 7 {
-		t.Fatalf("ticket enqueue not invoked: res=%+v tickets=%+v", res, tickets)
+	if res.TicketEnqueued || tickets.called {
+		t.Fatalf("draft must not enqueue a ticket: res=%+v tickets=%+v", res, tickets)
+	}
+}
+
+func TestRunExistingConversationDoesNotEnqueue(t *testing.T) {
+	tickets := &captureTickets{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: false},
+		Messages:      &stubMessages{id: 201},
+		Tickets:       tickets,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), validNorm("Uabc"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.MessageID != 201 {
+		t.Fatalf("expected message appended, got %+v", res)
+	}
+	if res.TicketEnqueued || tickets.called {
+		t.Fatalf("expected no ticket enqueue for an existing open conversation: res=%+v tickets=%+v", res, tickets)
+	}
+}
+
+func TestRunInboundCreatesDraftAndNeverAutoEnqueues(t *testing.T) {
+	tickets := &captureTickets{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Tickets:       tickets,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), validNorm("Uabc"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TicketEnqueued || tickets.called {
+		t.Fatalf("inbound must create a DRAFT, not auto-enqueue a ticket: res=%+v tickets=%+v", res, tickets)
 	}
 }
 
 func TestRunWithoutEnqueuerIsStillOK(t *testing.T) {
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
-		Conversations: &stubConvos{id: 100},
+		Conversations: &stubConvos{id: 100, created: true},
 		Messages:      &stubMessages{id: 200},
 	})
 	if err != nil {

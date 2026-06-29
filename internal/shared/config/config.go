@@ -58,7 +58,11 @@ func (a App) IsProduction() bool {
 }
 
 type Server struct {
-	Port string
+	Port               string
+	RequestBudgetMs    int
+	DeadlineHeadroomMs int
+	DeadlineMinMs      int
+	DeadlineMaxMs      int
 }
 
 type MySQL struct {
@@ -108,6 +112,9 @@ type LLM struct {
 	RateLimitBurst          int
 	BreakerFailures         int
 	BreakerCooldownSeconds  int
+	MaxRetries              int
+	RetryBaseBackoffMs      int
+	RetryMaxBackoffMs       int
 	ResolverCacheTTLSeconds int
 }
 
@@ -144,6 +151,10 @@ func LoadFrom(path string) (Config, error) {
 
 	v.SetDefault("app.env", "development")
 	v.SetDefault("server.port", "8080")
+	v.SetDefault("server.request_budget_ms", 22000)
+	v.SetDefault("server.deadline_headroom_ms", 2000)
+	v.SetDefault("server.deadline_min_ms", 1000)
+	v.SetDefault("server.deadline_max_ms", 60000)
 	v.SetDefault("mysql.enabled", false)
 	v.SetDefault("mysql.maxOpenConns", 25)
 	v.SetDefault("mysql.maxIdleConns", 5)
@@ -154,9 +165,12 @@ func LoadFrom(path string) (Config, error) {
 	v.SetDefault("memgraph.uri", "bolt://localhost:7687")
 	v.SetDefault("llm.default_vendor", "gemini")
 	v.SetDefault("llm.default_model", "gemini-2.5-flash")
-	v.SetDefault("llm.request_timeout_seconds", 60)
+	v.SetDefault("llm.request_timeout_seconds", 8)
 	v.SetDefault("llm.breaker_failures", 5)
 	v.SetDefault("llm.breaker_cooldown_seconds", 30)
+	v.SetDefault("llm.max_retries", 1)
+	v.SetDefault("llm.retry_base_backoff_ms", 400)
+	v.SetDefault("llm.retry_max_backoff_ms", 1500)
 	v.SetDefault("llm.rate_limit_per_sec", 0)
 	v.SetDefault("llm.rate_limit_burst", 0)
 	v.SetDefault("llm.resolver_cache_ttl_seconds", 60)
@@ -188,7 +202,11 @@ func LoadFrom(path string) (Config, error) {
 			Env: v.GetString("app.env"),
 		},
 		Server: Server{
-			Port: v.GetString("server.port"),
+			Port:               v.GetString("server.port"),
+			RequestBudgetMs:    v.GetInt("server.request_budget_ms"),
+			DeadlineHeadroomMs: v.GetInt("server.deadline_headroom_ms"),
+			DeadlineMinMs:      v.GetInt("server.deadline_min_ms"),
+			DeadlineMaxMs:      v.GetInt("server.deadline_max_ms"),
 		},
 		MySQL: MySQL{
 			Enabled:      v.GetBool("mysql.enabled"),
@@ -236,6 +254,9 @@ func LoadFrom(path string) (Config, error) {
 			RateLimitBurst:          v.GetInt("llm.rate_limit_burst"),
 			BreakerFailures:         v.GetInt("llm.breaker_failures"),
 			BreakerCooldownSeconds:  v.GetInt("llm.breaker_cooldown_seconds"),
+			MaxRetries:              v.GetInt("llm.max_retries"),
+			RetryBaseBackoffMs:      v.GetInt("llm.retry_base_backoff_ms"),
+			RetryMaxBackoffMs:       v.GetInt("llm.retry_max_backoff_ms"),
 			ResolverCacheTTLSeconds: v.GetInt("llm.resolver_cache_ttl_seconds"),
 		},
 		APIKeys: APIKeys{
@@ -284,6 +305,10 @@ type envBinding struct {
 var envBindings = []envBinding{
 	{key: "app.env", env: "APP_ENV"},
 	{key: "server.port", env: "SERVER_PORT"},
+	{key: "server.request_budget_ms", env: "SERVER_REQUEST_BUDGET_MS"},
+	{key: "server.deadline_headroom_ms", env: "SERVER_DEADLINE_HEADROOM_MS"},
+	{key: "server.deadline_min_ms", env: "SERVER_DEADLINE_MIN_MS"},
+	{key: "server.deadline_max_ms", env: "SERVER_DEADLINE_MAX_MS"},
 	{key: "budget.maxLLMCallsPerRequest", env: "BUDGET_MAX_LLM_CALLS_PER_REQUEST"},
 	{key: "budget.maxLLMCallsPerCompanyWindow", env: "BUDGET_MAX_LLM_CALLS_PER_COMPANY_WINDOW"},
 	{key: "budget.windowSeconds", env: "BUDGET_WINDOW_SECONDS"},
@@ -324,6 +349,9 @@ var envBindings = []envBinding{
 	{key: "llm.local_key", env: "LOCAL_LLM_API_KEY"},
 	{key: "llm.provider_config_key", env: "AI_PROVIDER_KEY"},
 	{key: "llm.request_timeout_seconds", env: "LLM_REQUEST_TIMEOUT_SECONDS"},
+	{key: "llm.max_retries", env: "LLM_MAX_RETRIES"},
+	{key: "llm.retry_base_backoff_ms", env: "LLM_RETRY_BASE_BACKOFF_MS"},
+	{key: "llm.retry_max_backoff_ms", env: "LLM_RETRY_MAX_BACKOFF_MS"},
 	{key: "llm.rate_limit_per_sec", env: "LLM_RATE_LIMIT_PER_SEC"},
 	{key: "llm.rate_limit_burst", env: "LLM_RATE_LIMIT_BURST"},
 	{key: "llm.breaker_failures", env: "LLM_BREAKER_FAILURES"},

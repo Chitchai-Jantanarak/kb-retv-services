@@ -80,6 +80,8 @@ type Result struct {
 	CacheHit       bool
 	Confidence     float64
 	Decision       Decision
+	Reason         Reason
+	RetryAfterMs   int64
 	Draft          string
 	CRAG           CRAGResult
 	Critique       CritiqueResult

@@ -15,13 +15,11 @@ import (
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
-	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/application/workflows/reply"
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
-	infraasynq "github.com/my/app/internal/infra/asynq"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/memgraph"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
@@ -38,6 +36,7 @@ import (
 	"github.com/my/app/internal/shared/llmboot"
 	"github.com/my/app/internal/shared/logger"
 	"github.com/my/app/internal/transport/http/handlers"
+	appmiddleware "github.com/my/app/internal/transport/http/middleware"
 	"github.com/my/app/internal/transport/http/routes"
 )
 
@@ -90,7 +89,7 @@ func main() {
 		reportsHandler = handlers.NewReportsHandler(reportsmysql.New(qdb))
 		log.Info("reports endpoints configured")
 
-		if h, err := buildInboundHandler(cfg, qdb, log); err != nil {
+		if h, err := buildInboundHandler(cfg, db, qdb, log); err != nil {
 			log.Warn("inbound webhooks not configured", zap.Error(err))
 		} else {
 			inboundHandler = h
@@ -121,6 +120,12 @@ func main() {
 		Inbound:        inboundHandler,
 		Feedback:       feedbackHandler,
 		Review:         reviewHandler,
+		Budget: appmiddleware.BudgetPolicy{
+			Fallback: time.Duration(cfg.Server.RequestBudgetMs) * time.Millisecond,
+			Headroom: time.Duration(cfg.Server.DeadlineHeadroomMs) * time.Millisecond,
+			Min:      time.Duration(cfg.Server.DeadlineMinMs) * time.Millisecond,
+			Max:      time.Duration(cfg.Server.DeadlineMaxMs) * time.Millisecond,
+		},
 	})
 
 	log.Info("starting server", zap.String("port", cfg.Server.Port))
@@ -273,22 +278,16 @@ func appendRetrievers(opts []reply.Option, cfg config.Config, db tenant.Querier,
 	return opts
 }
 
-func buildInboundHandler(cfg config.Config, db tenant.Querier, log *zap.Logger) (*handlers.InboundHandler, error) {
+func buildInboundHandler(cfg config.Config, central, router tenant.Querier, log *zap.Logger) (*handlers.InboundHandler, error) {
 	if cfg.App.IsProduction() && strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" {
 		return nil, errors.New("inbound webhook secret is required in production")
 	}
-	repo := channelsmysql.New(db)
+	centralRepo := channelsmysql.New(central)
+	siloRepo := channelsmysql.New(router)
 	wfCfg := omnichannel.Config{
-		Accounts:      repo,
-		Conversations: repo,
-		Messages:      repo,
-	}
-
-	if enq, err := buildTicketEnqueuer(cfg); err != nil {
-		log.Warn("ticket enqueuer not configured; inbound will not enqueue", zap.Error(err))
-	} else if enq != nil {
-		wfCfg.Tickets = enq
-		log.Info("ticket enqueuer configured")
+		Accounts:      centralRepo,
+		Conversations: siloRepo,
+		Messages:      siloRepo,
 	}
 
 	wf, err := omnichannel.New(wfCfg)
@@ -303,17 +302,6 @@ func buildInboundHandler(cfg config.Config, db tenant.Querier, log *zap.Logger) 
 		return nil, err
 	}
 	return handlers.NewInboundHandler(wf, registry, handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)), nil
-}
-
-func buildTicketEnqueuer(cfg config.Config) (omnichannel.TicketEnqueuer, error) {
-	if cfg.Redis.URL == "" {
-		return nil, nil //nolint:nilnil // queue is optional in the API process
-	}
-	q, err := infraasynq.NewQueue(infraasynq.Config{RedisURL: cfg.Redis.URL})
-	if err != nil {
-		return nil, err
-	}
-	return tickets.NewEnqueuer(q)
 }
 
 func inboundChannels() []string {

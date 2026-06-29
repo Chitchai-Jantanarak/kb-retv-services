@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,6 +86,33 @@ func TestInboundHandlerRejectsOversizedBody(t *testing.T) {
 	}
 	if workflow.calls != 0 {
 		t.Fatalf("workflow calls = %d, want 0", workflow.calls)
+	}
+}
+
+type errInboundWorkflow struct{ err error }
+
+func (w *errInboundWorkflow) Run(context.Context, omnichannel.Normalized, []byte) (omnichannel.Result, error) {
+	return omnichannel.Result{}, w.err
+}
+
+func TestInboundHandlerUnknownReceiverReturns404(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.LineNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	body := `{"destination":"bot-1","events":[{"source":{"userId":"u"},"message":{"id":"m","type":"text","text":"hi"}}]}`
+	wf := &errInboundWorkflow{err: fmt.Errorf("omnichannel: resolve channel account: %w", omnichannel.ErrAccountNotFound)}
+	handler := NewInboundHandler(wf, registry)
+	e := echo.New()
+	e.POST("/v1/inbound/:channel", handler.Receive)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown receiver: status = %d, want 404, body=%s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -149,10 +150,12 @@ func (w *Workflow) Run(ctx context.Context, opts Options) (Result, error) {
 
 		c, classifyErr := w.classifyOne(ctx, provider, r, severityOptions, symptomOptions)
 		if classifyErr != nil {
+			log.Printf("classify: report %d company %d failed: %v", r.ID, r.CompanyID, classifyErr)
 			res.Failed++
 			continue
 		}
 		if err := w.sink.WriteClassification(ctx, c); err != nil {
+			log.Printf("classify: report %d company %d write failed: %v", r.ID, r.CompanyID, err)
 			res.Failed++
 			continue
 		}
@@ -161,65 +164,36 @@ func (w *Workflow) Run(ctx context.Context, opts Options) (Result, error) {
 	return res, nil
 }
 
-func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, r ReportRecord, severityOptions, symptomOptions string) (Classification, error) {
-	stage1Tmpl, err := w.registry.Get(prompts.NameClassifyStage1)
-	if err != nil {
-		return Classification{}, err
-	}
-	stage2Tmpl, err := w.registry.Get(prompts.NameClassifyStage2)
-	if err != nil {
-		return Classification{}, err
-	}
+type stage1Result struct {
+	Subject     string  `json:"subject"`
+	ProblemType string  `json:"problem_type"`
+	Confidence  float64 `json:"confidence"`
+	Rationale   string  `json:"rationale"`
+}
 
+type stage2Result struct {
+	Severity     string  `json:"severity"`
+	Symptom      string  `json:"symptom"`
+	SymptomIsNew bool    `json:"symptom_is_new"`
+	Confidence   float64 `json:"confidence"`
+	Rationale    string  `json:"rationale"`
+}
+
+const (
+	classifyMaxRetries = 2
+	classifyRetryBase  = 800 * time.Millisecond
+	classifyRetryMax   = 8 * time.Second
+)
+
+func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, r ReportRecord, severityOptions, symptomOptions string) (Classification, error) {
 	reportText := strings.TrimSpace(r.Title + "\n\n" + r.Body)
 	if reportText == "" {
 		return Classification{}, errors.New("empty report body")
 	}
 
-	stage1Rendered, err := stage1Tmpl.Render(map[string]string{"report": reportText})
+	stage1, stage2, err := w.runStages(ctx, provider, reportText, severityOptions, symptomOptions)
 	if err != nil {
 		return Classification{}, err
-	}
-	stage1Resp, err := provider.GenerateJSON(ctx, stage1Rendered)
-	if err != nil {
-		return Classification{}, fmt.Errorf("stage1 call: %w", err)
-	}
-	var stage1 struct {
-		Subject     string  `json:"subject"`
-		ProblemType string  `json:"problem_type"`
-		Confidence  float64 `json:"confidence"`
-		Rationale   string  `json:"rationale"`
-	}
-	if err := json.Unmarshal([]byte(stage1Resp.Text), &stage1); err != nil {
-		return Classification{}, fmt.Errorf("stage1 parse: %w", err)
-	}
-
-	stage2Vars := map[string]string{
-		"report":           reportText,
-		"severity_options": severityOptions,
-	}
-	if symptomOptions != "" {
-		stage2Vars["symptom_options"] = symptomOptions
-	} else {
-		stage2Vars["symptom_options"] = "(none yet)"
-	}
-	stage2Rendered, err := stage2Tmpl.Render(stage2Vars)
-	if err != nil {
-		return Classification{}, err
-	}
-	stage2Resp, err := provider.GenerateJSON(ctx, stage2Rendered)
-	if err != nil {
-		return Classification{}, fmt.Errorf("stage2 call: %w", err)
-	}
-	var stage2 struct {
-		Severity     string  `json:"severity"`
-		Symptom      string  `json:"symptom"`
-		SymptomIsNew bool    `json:"symptom_is_new"`
-		Confidence   float64 `json:"confidence"`
-		Rationale    string  `json:"rationale"`
-	}
-	if err := json.Unmarshal([]byte(stage2Resp.Text), &stage2); err != nil {
-		return Classification{}, fmt.Errorf("stage2 parse: %w", err)
 	}
 
 	problemTypeID, err := w.lookup.ProblemTypeIDByCode(ctx, normalizeCode(stage1.ProblemType))
@@ -255,7 +229,6 @@ func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, 
 		})
 	}
 
-	_ = time.Now()
 	return Classification{
 		ReportID:        r.ID,
 		CompanyID:       r.CompanyID,
@@ -269,6 +242,81 @@ func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, 
 		SymptomConf:     stage2.Confidence,
 		Model:           w.model,
 	}, nil
+}
+
+func (w *Workflow) runStages(ctx context.Context, provider ports.LLMProvider, reportText, severityOptions, symptomOptions string) (stage1Result, stage2Result, error) {
+	var s1 stage1Result
+	var s2 stage2Result
+	var lastErr error
+
+	for attempt := 0; attempt <= classifyMaxRetries; attempt++ {
+		if attempt > 0 {
+			wait := min(classifyRetryBase*time.Duration(1<<(attempt-1)), classifyRetryMax)
+			select {
+			case <-ctx.Done():
+				return s1, s2, ctx.Err()
+			case <-time.After(wait):
+			}
+			log.Printf("classify: stages retry attempt %d after: %v", attempt, lastErr)
+		}
+
+		var err error
+		s1, s2, err = w.callStages(ctx, provider, reportText, severityOptions, symptomOptions)
+		if err == nil {
+			return s1, s2, nil
+		}
+		lastErr = err
+	}
+	return s1, s2, lastErr
+}
+
+func (w *Workflow) callStages(ctx context.Context, provider ports.LLMProvider, reportText, severityOptions, symptomOptions string) (stage1Result, stage2Result, error) {
+	var s1 stage1Result
+	var s2 stage2Result
+
+	stage1Tmpl, err := w.registry.Get(prompts.NameClassifyStage1)
+	if err != nil {
+		return s1, s2, err
+	}
+	stage2Tmpl, err := w.registry.Get(prompts.NameClassifyStage2)
+	if err != nil {
+		return s1, s2, err
+	}
+
+	stage1Rendered, err := stage1Tmpl.Render(map[string]string{"report": reportText})
+	if err != nil {
+		return s1, s2, err
+	}
+	stage1Resp, err := provider.GenerateJSON(ctx, stage1Rendered)
+	if err != nil {
+		return s1, s2, fmt.Errorf("stage1 call: %w", err)
+	}
+	if err := json.Unmarshal([]byte(stage1Resp.Text), &s1); err != nil {
+		return s1, s2, fmt.Errorf("stage1 parse: %w", err)
+	}
+
+	stage2Vars := map[string]string{
+		"report":           reportText,
+		"severity_options": severityOptions,
+	}
+	if symptomOptions != "" {
+		stage2Vars["symptom_options"] = symptomOptions
+	} else {
+		stage2Vars["symptom_options"] = "(none yet)"
+	}
+	stage2Rendered, err := stage2Tmpl.Render(stage2Vars)
+	if err != nil {
+		return s1, s2, err
+	}
+	stage2Resp, err := provider.GenerateJSON(ctx, stage2Rendered)
+	if err != nil {
+		return s1, s2, fmt.Errorf("stage2 call: %w", err)
+	}
+	if err := json.Unmarshal([]byte(stage2Resp.Text), &s2); err != nil {
+		return s1, s2, fmt.Errorf("stage2 parse: %w", err)
+	}
+
+	return s1, s2, nil
 }
 
 func normalizeCode(s string) string {

@@ -196,9 +196,10 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 	p.recordKnowledgeGap(ctx, query, verdict)
 
 	var draft string
+	var genErr error
 	if p.llmAllowed(ctx, query.CompanyID, "generate") {
 		if err := timed(timings, "generate", func() error {
-			draft = p.generateDraft(ctx, plannedQuery, verdict, decision, candidates)
+			draft, genErr = p.generateDraft(ctx, plannedQuery, verdict, decision, candidates)
 			return nil
 		}); err != nil {
 			return Result{}, err
@@ -224,12 +225,20 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 		decision = DecisionEscalate
 	}
 
+	reason := ReasonNone
+	var retryAfter time.Duration
+	if decision == DecisionEscalate {
+		reason, retryAfter = classifyEscalation(genErr)
+	}
+
 	result := Result{
 		Meta:           plan.Meta,
 		Candidates:     candidates,
 		Context:        p.compressor.Compress(candidates),
 		Confidence:     confidence,
 		Decision:       decision,
+		Reason:         reason,
+		RetryAfterMs:   retryAfter.Milliseconds(),
 		Draft:          draft,
 		CRAG:           cragResult,
 		Critique:       critique,
@@ -492,16 +501,16 @@ func (p *Pipeline) recordKnowledgeGap(ctx context.Context, query Query, verdict 
 	cancel()
 }
 
-func (p *Pipeline) generateDraft(ctx context.Context, query Query, verdict CRAGVerdict, decision Decision, candidates []Candidate) string {
+func (p *Pipeline) generateDraft(ctx context.Context, query Query, verdict CRAGVerdict, decision Decision, candidates []Candidate) (string, error) {
 	if p.generator == nil || decision == DecisionEscalate || verdict == VerdictIrrelevant || len(candidates) == 0 {
-		return ""
+		return "", nil
 	}
 	generated, err := p.generator.Generate(ctx, query, candidates)
 	if err != nil {
 		logger.FromContext(ctx).Warn("rag generator failed", zap.Error(err))
-		return ""
+		return "", err
 	}
-	return generated
+	return generated, nil
 }
 
 func (p *Pipeline) critiqueDraft(ctx context.Context, query Query, draft string, candidates []Candidate) CritiqueResult {

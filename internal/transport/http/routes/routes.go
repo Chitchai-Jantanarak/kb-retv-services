@@ -21,6 +21,7 @@ type Options struct {
 	Inbound        *handlers.InboundHandler
 	Feedback       *handlers.FeedbackHandler
 	Review         *handlers.ReviewHandler
+	Budget         appmiddleware.BudgetPolicy
 }
 
 func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
@@ -44,11 +45,17 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 	}
 
 	publicV1 := e.Group("/v1")
+	if opts.Budget.Fallback > 0 {
+		publicV1.Use(appmiddleware.Deadline(opts.Budget))
+	}
 	if opts.Inbound != nil {
 		publicV1.POST("/inbound/:channel", opts.Inbound.Receive)
 	}
 
 	protectedV1 := e.Group("/v1")
+	if opts.Budget.Fallback > 0 {
+		protectedV1.Use(appmiddleware.Deadline(opts.Budget))
+	}
 	protectedV1.Use(appmiddleware.RequireCompany(opts.JWTSecret, opts.RequireAuth))
 	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"))
 

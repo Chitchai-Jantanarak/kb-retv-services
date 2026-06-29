@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
 
 const (
@@ -170,7 +171,12 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (port
 		return ports.Completion{}, fmt.Errorf("anthropic: read body: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return ports.Completion{}, fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, string(raw))
+		return ports.Completion{}, &llmerr.ProviderError{
+			Vendor:     "anthropic",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
 	}
 
 	var parsed messagesResponse

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
 
 const (
@@ -18,9 +19,6 @@ const (
 	DefaultModel   = "gemini-2.5-flash"
 )
 
-// Config drives both api.openai.com and any OpenAI-compatible endpoint
-// such as OpenRouter (BaseURL = "https://openrouter.ai/api/v1") or a
-// self-hosted gateway.
 type Config struct {
 	APIKey      string
 	BaseURL     string
@@ -144,7 +142,12 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseForma
 	}
 
 	if resp.StatusCode >= 400 {
-		return ports.Completion{}, fmt.Errorf("openai: status %d: %s", resp.StatusCode, string(raw))
+		return ports.Completion{}, &llmerr.ProviderError{
+			Vendor:     "openai",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
 	}
 
 	var parsed chatResponse

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
 
 const (
@@ -159,7 +160,12 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 		return ports.Completion{}, fmt.Errorf("gemini: read body: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return ports.Completion{}, fmt.Errorf("gemini: status %d: %s", resp.StatusCode, string(raw))
+		return ports.Completion{}, &llmerr.ProviderError{
+			Vendor:     "gemini",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
 	}
 
 	var parsed generateResponse

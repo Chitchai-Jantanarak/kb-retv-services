@@ -203,6 +203,8 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 		Sources:        toSources(result.Candidates),
 		Confidence:     result.Confidence,
 		Decision:       string(result.Decision),
+		Reason:         string(result.Reason),
+		RetryAfterMs:   result.RetryAfterMs,
 		AIActionID:     actionID,
 		StageTimingsMS: result.StageTimingsMS,
 		DebugTrace:     result.DebugTrace,

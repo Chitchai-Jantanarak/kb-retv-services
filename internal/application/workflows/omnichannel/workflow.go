@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/shared/ctxkey"
 )
+
+var ErrAccountNotFound = errors.New("omnichannel: channel account not found")
 
 type ChannelAccount struct {
 	ID         int64
@@ -25,10 +28,12 @@ type Conversation struct {
 	CompanyID        int64
 	ChannelAccountID int64
 	ExternalCustomer string
+	Subject          string
+	ForceNew         bool
 }
 
 type ConversationStore interface {
-	UpsertConversation(ctx context.Context, c Conversation) (int64, error)
+	UpsertConversation(ctx context.Context, c Conversation) (id int64, created bool, err error)
 }
 
 type StoredMessage struct {
@@ -41,6 +46,7 @@ type StoredMessage struct {
 
 type MessageStore interface {
 	InsertMessage(ctx context.Context, m StoredMessage) (int64, error)
+	FindByExternalID(ctx context.Context, externalID string) (conversationID, messageID int64, found bool, err error)
 }
 
 type TicketEnqueuer interface {
@@ -109,13 +115,27 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		return Result{}, fmt.Errorf("omnichannel: resolve channel account: %w", err)
 	}
 	if account.CompanyID <= 0 {
-		return Result{}, fmt.Errorf("omnichannel: channel account %s/%s has no company", req.Channel, accountKey)
+		return Result{}, fmt.Errorf("omnichannel: channel account %s/%s has no company: %w", req.Channel, accountKey, ErrAccountNotFound)
 	}
 
-	convoID, err := w.conversations.UpsertConversation(ctx, Conversation{
+	ctx = ctxkey.WithCompanyID(ctx, account.CompanyID)
+
+	if extID := strings.TrimSpace(req.ExternalMessageID); extID != "" {
+		convoID, msgID, found, ferr := w.messages.FindByExternalID(ctx, extID)
+		if ferr != nil {
+			return Result{}, fmt.Errorf("omnichannel: dedup message: %w", ferr)
+		}
+		if found {
+			return Result{CompanyID: account.CompanyID, ConversationID: convoID, MessageID: msgID}, nil
+		}
+	}
+
+	convoID, _, err := w.conversations.UpsertConversation(ctx, Conversation{
 		CompanyID:        account.CompanyID,
 		ChannelAccountID: account.ID,
 		ExternalCustomer: customer,
+		Subject:          req.Subject,
+		ForceNew:         req.Channel == "email",
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("omnichannel: upsert conversation: %w", err)
@@ -136,12 +156,6 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		CompanyID:      account.CompanyID,
 		ConversationID: convoID,
 		MessageID:      msgID,
-	}
-	if w.tickets != nil {
-		if err := w.tickets.EnqueueTicket(ctx, account.CompanyID, convoID, msgID, customer, req); err != nil {
-			return res, fmt.Errorf("omnichannel: enqueue ticket: %w", err)
-		}
-		res.TicketEnqueued = true
 	}
 	return res, nil
 }

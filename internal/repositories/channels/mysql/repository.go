@@ -32,7 +32,7 @@ FROM channel_accounts
 WHERE channel = ? AND external_id = ? AND is_active = 1
 LIMIT 1`, channel, externalID).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for %s/%s", channel, externalID)
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for %s/%s: %w", channel, externalID, omnichannel.ErrAccountNotFound)
 	}
 	if err != nil {
 		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: query: %w", err)
@@ -40,35 +40,56 @@ LIMIT 1`, channel, externalID).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.
 	return acc, nil
 }
 
-func (r *Repository) UpsertConversation(ctx context.Context, c omnichannel.Conversation) (int64, error) {
+func (r *Repository) UpsertConversation(ctx context.Context, c omnichannel.Conversation) (int64, bool, error) {
 	if c.CompanyID <= 0 || c.ChannelAccountID <= 0 {
-		return 0, errors.New("conversations: company_id + channel_account_id required")
+		return 0, false, errors.New("conversations: company_id + channel_account_id required")
 	}
 	customer := strings.TrimSpace(c.ExternalCustomer)
-	var id int64
-	err := r.db.QueryRowContext(ctx, `
+
+	if !c.ForceNew {
+		var id int64
+		err := r.db.QueryRowContext(ctx, `
 SELECT id FROM conversations
-WHERE company_id = ? AND channel_account_id = ? AND external_customer <=> ?
+WHERE company_id = ? AND channel_account_id = ? AND external_customer <=> ? AND status = 'pending'
 ORDER BY id DESC
 LIMIT 1`, c.CompanyID, c.ChannelAccountID, nullableString(customer)).Scan(&id)
-	if err == nil {
-		_, _ = r.db.ExecContext(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = ?`, id)
-		return id, nil
+		if err == nil {
+			_, _ = r.db.ExecContext(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = ?`, id)
+			return id, false, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return 0, false, fmt.Errorf("conversations: select: %w", err)
+		}
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("conversations: select: %w", err)
-	}
+
 	res, err := r.db.ExecContext(ctx, `
-INSERT INTO conversations (company_id, channel_account_id, external_customer, status, last_message_at)
-VALUES (?, ?, ?, 'open', NOW())`, c.CompanyID, c.ChannelAccountID, nullableString(customer))
+INSERT INTO conversations (company_id, channel_account_id, external_customer, subject, status, last_message_at)
+VALUES (?, ?, ?, ?, 'pending', NOW())`, c.CompanyID, c.ChannelAccountID, nullableString(customer), nullableString(strings.TrimSpace(c.Subject)))
 	if err != nil {
-		return 0, fmt.Errorf("conversations: insert: %w", err)
+		return 0, false, fmt.Errorf("conversations: insert: %w", err)
 	}
 	insertID, err := res.LastInsertId()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return insertID, nil
+	return insertID, true, nil
+}
+
+func (r *Repository) FindByExternalID(ctx context.Context, externalID string) (int64, int64, bool, error) {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
+		return 0, 0, false, nil
+	}
+	var convoID, msgID int64
+	err := r.db.QueryRowContext(ctx, `
+SELECT conversation_id, id FROM messages WHERE external_id = ? ORDER BY id ASC LIMIT 1`, externalID).Scan(&convoID, &msgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("messages: find by external_id: %w", err)
+	}
+	return convoID, msgID, true, nil
 }
 
 func (r *Repository) InsertMessage(ctx context.Context, m omnichannel.StoredMessage) (int64, error) {

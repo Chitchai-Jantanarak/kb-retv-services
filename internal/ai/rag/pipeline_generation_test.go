@@ -4,9 +4,37 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/my/app/internal/domain/kb"
+	"github.com/my/app/internal/infra/llm/llmerr"
 )
+
+func TestPipelineEscalatesWithReasonWhenGeneratorUnavailable(t *testing.T) {
+	pipeline := NewPipeline(Config{
+		Extractor:           DefaultExtractor{},
+		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "restart printer", Score: 0.9}}}},
+		Compressor:          Compressor{MaxRunes: 100},
+		CRAG:                fakeCRAG{verdict: VerdictRelevant},
+		Generator:           &stubGenerator{err: &llmerr.ProviderError{Status: 503, RetryAfter: 2 * time.Second}},
+		ConfidenceThreshold: 0.85,
+		Workers:             1,
+	})
+
+	result, err := pipeline.Run(context.Background(), Query{CompanyID: 1, Text: "printer offline"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Decision != DecisionEscalate {
+		t.Fatalf("Decision = %q, want escalate", result.Decision)
+	}
+	if result.Reason != ReasonLLMUnavailable {
+		t.Fatalf("Reason = %q, want llm_unavailable", result.Reason)
+	}
+	if result.RetryAfterMs != 2000 {
+		t.Fatalf("RetryAfterMs = %d, want 2000", result.RetryAfterMs)
+	}
+}
 
 type stubGenerator struct {
 	draft      string

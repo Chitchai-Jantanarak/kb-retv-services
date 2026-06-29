@@ -1,6 +1,3 @@
-// Package llmboot wires the LLM + embedding stack from shared config.
-// It centralises what cmd/api and cmd/worker would otherwise duplicate
-// (Settings struct assembly, env-var fallbacks, AgentLookup wiring).
 package llmboot
 
 import (
@@ -23,8 +20,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// LLMSettings builds an llm.Settings from cfg + environment variable
-// fallbacks. Env vars always win when present (OPENAI_API_KEY etc.).
 func LLMSettings(cfg config.Config) llm.Settings {
 	return llm.Settings{
 		Vendor:          cfg.LLM.DefaultVendor,
@@ -41,8 +36,6 @@ func LLMSettings(cfg config.Config) llm.Settings {
 	}
 }
 
-// EmbeddingSettings builds embeddings.ProviderSettings using the same
-// env+cfg fallback chain. Voyage is embedding-only so it lives here.
 func EmbeddingSettings(cfg config.Config) embeddings.ProviderSettings {
 	return embeddings.ProviderSettings{
 		Provider:      cfg.LLM.EmbeddingProvider,
@@ -56,8 +49,6 @@ func EmbeddingSettings(cfg config.Config) embeddings.ProviderSettings {
 	}
 }
 
-// Resolver constructs an llm.CompanyResolver wired to a MySQL
-// AgentLookup when db is non-nil. db == nil falls back to defaults.
 func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error) {
 	var lookup llm.AgentLookup
 	if db != nil {
@@ -75,10 +66,13 @@ func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error
 
 func resilientOptions(cfg config.Config) llm.ResilientOptions {
 	return llm.ResilientOptions{
-		Timeout:         time.Duration(cfg.LLM.RequestTimeoutSeconds) * time.Second,
-		RequestsPerSec:  cfg.LLM.RateLimitPerSec,
-		Burst:           cfg.LLM.RateLimitBurst,
-		BreakerFailures: cfg.LLM.BreakerFailures,
-		BreakerCooldown: time.Duration(cfg.LLM.BreakerCooldownSeconds) * time.Second,
+		Timeout:          time.Duration(cfg.LLM.RequestTimeoutSeconds) * time.Second,
+		RequestsPerSec:   cfg.LLM.RateLimitPerSec,
+		Burst:            cfg.LLM.RateLimitBurst,
+		BreakerFailures:  cfg.LLM.BreakerFailures,
+		BreakerCooldown:  time.Duration(cfg.LLM.BreakerCooldownSeconds) * time.Second,
+		MaxRetries:       cfg.LLM.MaxRetries,
+		RetryBaseBackoff: time.Duration(cfg.LLM.RetryBaseBackoffMs) * time.Millisecond,
+		RetryMaxBackoff:  time.Duration(cfg.LLM.RetryMaxBackoffMs) * time.Millisecond,
 	}
 }

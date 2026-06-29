@@ -304,6 +304,12 @@
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent",
+                        "name": "X-Timeout-Ms",
+                        "in": "header"
+                    },
+                    {
                         "description": "Reply request",
                         "name": "request",
                         "in": "body",
@@ -317,7 +323,19 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.ReplyResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -459,22 +477,28 @@
                         "voice",
                         "api",
                         "in_app"
-                    ]
+                    ],
+                    "example": "web"
                 },
                 "conversation_id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "conv_8f21"
                 },
                 "customer_id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "cust_10293"
                 },
                 "debug": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": false
                 },
                 "message": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "My internet has been offline since this morning."
                 },
                 "message_id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "msg_1001"
                 },
                 "metadata": {
                     "type": "object",
@@ -488,12 +512,71 @@
                         "fast_draft",
                         "full_review",
                         "debug"
-                    ]
+                    ],
+                    "example": "full_review"
                 },
                 "query": {
                     "type": "string"
                 },
                 "site_id": {
+                    "type": "string",
+                    "example": "site_42"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ReplyResponse": {
+            "type": "object",
+            "properties": {
+                "ai_action_id": {
+                    "type": "integer"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "debug_trace": {},
+                "decision": {
+                    "type": "string"
+                },
+                "draft": {
+                    "type": "string"
+                },
+                "intent": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "retry_after_ms": {
+                    "type": "integer"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ReplySource"
+                    }
+                },
+                "stage_timings_ms": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "suggestion": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ReplySource": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "title": {
                     "type": "string"
                 }
             }
