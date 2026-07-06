@@ -21,6 +21,7 @@ type Options struct {
 	Inbound        *handlers.InboundHandler
 	Feedback       *handlers.FeedbackHandler
 	Review         *handlers.ReviewHandler
+	Chat           *handlers.ChatHandler
 	Budget         appmiddleware.BudgetPolicy
 }
 
@@ -58,6 +59,10 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 	}
 	protectedV1.Use(appmiddleware.RequireCompany(opts.JWTSecret, opts.RequireAuth))
 	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"))
+
+	if opts.Chat != nil {
+		protectedV1.POST("/chat", opts.Chat.Create, appmiddleware.RequirePermission("ai:reply:create"))
+	}
 
 	if opts.Feedback != nil {
 		protectedV1.POST("/reply/feedback", opts.Feedback.Create, appmiddleware.RequirePermission("ai:feedback:create"))

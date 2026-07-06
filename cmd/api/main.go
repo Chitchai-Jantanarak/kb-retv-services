@@ -15,6 +15,7 @@ import (
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
+	chatwf "github.com/my/app/internal/application/workflows/chat"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/application/workflows/reply"
@@ -85,7 +86,18 @@ func main() {
 	var inboundHandler *handlers.InboundHandler
 	var feedbackHandler *handlers.FeedbackHandler
 	var reviewHandler *handlers.ReviewHandler
+	var chatHandler *handlers.ChatHandler
 	if qdb != nil {
+		if resolver, rerr := llmboot.Resolver(cfg, qdb); rerr != nil {
+			log.Warn("chat endpoint not configured", zap.Error(rerr))
+		} else if chatRegistry, regErr := prompts.NewRegistry(); regErr != nil {
+			log.Warn("chat endpoint not configured", zap.Error(regErr))
+		} else if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, rag.NewMySQLFTSSource(qdb)); cerr != nil {
+			log.Warn("chat endpoint not configured", zap.Error(cerr))
+		} else {
+			chatHandler = handlers.NewChatHandler(cw)
+			log.Info("chat endpoint configured")
+		}
 		reportsHandler = handlers.NewReportsHandler(reportsmysql.New(qdb))
 		log.Info("reports endpoints configured")
 
@@ -120,6 +132,7 @@ func main() {
 		Inbound:        inboundHandler,
 		Feedback:       feedbackHandler,
 		Review:         reviewHandler,
+		Chat:           chatHandler,
 		Budget: appmiddleware.BudgetPolicy{
 			Fallback: time.Duration(cfg.Server.RequestBudgetMs) * time.Millisecond,
 			Headroom: time.Duration(cfg.Server.DeadlineHeadroomMs) * time.Millisecond,
