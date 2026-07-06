@@ -180,3 +180,17 @@ LLM_EMBEDDING_DIM=2048
 		t.Fatalf("LLM.EmbeddingDim = %d, want 2048", cfg.LLM.EmbeddingDim)
 	}
 }
+
+func TestChatCacheDefaults(t *testing.T) {
+	cfg, err := LoadFrom("")
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if cfg.Chat.CacheTTLSeconds != 300 {
+		t.Fatalf("Chat.CacheTTLSeconds = %d, want 300", cfg.Chat.CacheTTLSeconds)
+	}
+	if cfg.Chat.CacheMaxEntries != 4096 {
+		t.Fatalf("Chat.CacheMaxEntries = %d, want 4096", cfg.Chat.CacheMaxEntries)
+	}
+}

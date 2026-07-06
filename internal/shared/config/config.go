@@ -23,6 +23,7 @@ type Config struct {
 	Swagger   Swagger
 	Laravel   Laravel
 	Budget    Budget
+	Chat      Chat
 	Embedding Embedding
 }
 
@@ -30,6 +31,11 @@ type Budget struct {
 	MaxLLMCallsPerRequest       int
 	MaxLLMCallsPerCompanyWindow int
 	WindowSeconds               int
+}
+
+type Chat struct {
+	CacheTTLSeconds int
+	CacheMaxEntries int
 }
 
 type Embedding struct {
@@ -180,6 +186,8 @@ func LoadFrom(path string) (Config, error) {
 	v.SetDefault("budget.maxLLMCallsPerRequest", 6)
 	v.SetDefault("budget.maxLLMCallsPerCompanyWindow", 0)
 	v.SetDefault("budget.windowSeconds", 60)
+	v.SetDefault("chat.cacheTTLSeconds", 300)
+	v.SetDefault("chat.cacheMaxEntries", 4096)
 	v.SetDefault("embedding.refreshMaxChunks", 512)
 	v.SetDefault("embedding.refreshBatchSize", 64)
 	v.SetDefault("embedding.largeRunThreshold", 1000)
@@ -288,6 +296,10 @@ func LoadFrom(path string) (Config, error) {
 			MaxLLMCallsPerCompanyWindow: v.GetInt("budget.maxLLMCallsPerCompanyWindow"),
 			WindowSeconds:               v.GetInt("budget.windowSeconds"),
 		},
+		Chat: Chat{
+			CacheTTLSeconds: v.GetInt("chat.cacheTTLSeconds"),
+			CacheMaxEntries: v.GetInt("chat.cacheMaxEntries"),
+		},
 		Embedding: Embedding{
 			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),
 			RefreshBatchSize:  v.GetInt("embedding.refreshBatchSize"),
@@ -312,6 +324,8 @@ var envBindings = []envBinding{
 	{key: "budget.maxLLMCallsPerRequest", env: "BUDGET_MAX_LLM_CALLS_PER_REQUEST"},
 	{key: "budget.maxLLMCallsPerCompanyWindow", env: "BUDGET_MAX_LLM_CALLS_PER_COMPANY_WINDOW"},
 	{key: "budget.windowSeconds", env: "BUDGET_WINDOW_SECONDS"},
+	{key: "chat.cacheTTLSeconds", env: "CHAT_CACHE_TTL_SECONDS"},
+	{key: "chat.cacheMaxEntries", env: "CHAT_CACHE_MAX_ENTRIES"},
 	{key: "embedding.refreshMaxChunks", env: "EMBEDDING_REFRESH_MAXCHUNKS"},
 	{key: "embedding.refreshBatchSize", env: "EMBEDDING_REFRESH_BATCHSIZE"},
 	{key: "embedding.largeRunThreshold", env: "EMBEDDING_LARGE_RUN_THRESHOLD"},

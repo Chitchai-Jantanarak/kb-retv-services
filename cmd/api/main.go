@@ -22,6 +22,7 @@ import (
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm"
+	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/infra/memgraph"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	"github.com/my/app/internal/infra/qdrant"
@@ -78,8 +79,20 @@ func main() {
 		log.Info("tenant DB-swarm router configured")
 	}
 
+	var resolver *llm.CompanyResolver
+	if qdb != nil {
+		if r, rerr := llmboot.Resolver(cfg, qdb); rerr != nil {
+			log.Warn("llm resolver not configured", zap.Error(rerr))
+		} else {
+			resolver = r
+			log.Info("llm company resolver configured",
+				zap.String("default_vendor", cfg.LLM.DefaultVendor),
+				zap.String("default_model", cfg.LLM.DefaultModel))
+		}
+	}
+
 	knowledge := buildKnowledge(qdb)
-	workflow := reply.NewWorkflow(knowledge, buildWorkflowOptions(cfg, qdb, log)...)
+	workflow := reply.NewWorkflow(knowledge, buildWorkflowOptions(cfg, qdb, log, resolver)...)
 
 	e := echo.New()
 	var reportsHandler *handlers.ReportsHandler
@@ -88,15 +101,27 @@ func main() {
 	var reviewHandler *handlers.ReviewHandler
 	var chatHandler *handlers.ChatHandler
 	if qdb != nil {
-		if resolver, rerr := llmboot.Resolver(cfg, qdb); rerr != nil {
-			log.Warn("chat endpoint not configured", zap.Error(rerr))
+		if resolver == nil {
+			log.Warn("chat endpoint not configured: llm resolver unavailable")
 		} else if chatRegistry, regErr := prompts.NewRegistry(); regErr != nil {
 			log.Warn("chat endpoint not configured", zap.Error(regErr))
-		} else if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, rag.NewMySQLFTSSource(qdb)); cerr != nil {
-			log.Warn("chat endpoint not configured", zap.Error(cerr))
 		} else {
-			chatHandler = handlers.NewChatHandler(cw)
-			log.Info("chat endpoint configured")
+			chatOpts := make([]chatwf.Option, 0, 1)
+			if cfg.Chat.CacheTTLSeconds > 0 {
+				chatOpts = append(chatOpts, chatwf.WithCache(
+					memcache.New(cfg.Chat.CacheMaxEntries),
+					time.Duration(cfg.Chat.CacheTTLSeconds)*time.Second,
+				))
+				log.Info("chat response cache configured",
+					zap.Int("ttl_seconds", cfg.Chat.CacheTTLSeconds),
+					zap.Int("max_entries", cfg.Chat.CacheMaxEntries))
+			}
+			if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, rag.NewMySQLFTSSource(qdb), chatOpts...); cerr != nil {
+				log.Warn("chat endpoint not configured", zap.Error(cerr))
+			} else {
+				chatHandler = handlers.NewChatHandler(cw)
+				log.Info("chat endpoint configured")
+			}
 		}
 		reportsHandler = handlers.NewReportsHandler(reportsmysql.New(qdb))
 		log.Info("reports endpoints configured")
@@ -175,7 +200,7 @@ func buildKnowledge(db tenant.Querier) ports.KnowledgeRepository {
 	})
 }
 
-func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger) []reply.Option {
+func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger, resolver *llm.CompanyResolver) []reply.Option {
 	opts := make([]reply.Option, 0, 8)
 	opts = append(opts, reply.WithBudget(budget.New(budget.Config{
 		MaxCallsPerRequest:       cfg.Budget.MaxLLMCallsPerRequest,
@@ -188,14 +213,9 @@ func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger)
 	opts = append(opts, reply.WithKnowledgeGap(mysqlkb.NewKnowledgeGapStore(db)))
 	log.Info("knowledge gap recorder configured")
 
-	resolver, err := llmboot.Resolver(cfg, db)
-	if err != nil {
-		log.Warn("llm resolver not configured", zap.Error(err))
+	if resolver == nil {
 		return appendRetrievers(opts, cfg, db, log)
 	}
-	log.Info("llm company resolver configured",
-		zap.String("default_vendor", cfg.LLM.DefaultVendor),
-		zap.String("default_model", cfg.LLM.DefaultModel))
 
 	registry, regErr := prompts.NewRegistry()
 	if regErr != nil {

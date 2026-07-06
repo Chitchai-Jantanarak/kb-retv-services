@@ -47,9 +47,9 @@ SELECT
   COALESCE(rs.name, ''),
   COALESCE(rwt.name, ''),
   COALESCE(rsv.name, ''),
-  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problem_full')), ''),
-  COALESCE(NULLIF(r.problem_detail, ''), JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problemdetail')), ''),
-  COALESCE(NULLIF(r.fix_detail, ''), JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.fixproblem')), '')
+  '',
+  COALESCE(r.problem_detail, ''),
+  COALESCE(r.fix_detail, '')
 FROM reports r
 LEFT JOIN customers c ON c.id = r.customer_id
 LEFT JOIN sites st ON st.id = r.site_id

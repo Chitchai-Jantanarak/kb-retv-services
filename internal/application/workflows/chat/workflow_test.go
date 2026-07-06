@@ -4,11 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
@@ -16,6 +18,7 @@ import (
 type stubProvider struct {
 	text   string
 	prompt ports.Prompt
+	calls  int
 }
 
 func (p *stubProvider) Generate(context.Context, ports.Prompt) (ports.Completion, error) {
@@ -24,6 +27,7 @@ func (p *stubProvider) Generate(context.Context, ports.Prompt) (ports.Completion
 
 func (p *stubProvider) GenerateJSON(_ context.Context, prompt ports.Prompt) (ports.Completion, error) {
 	p.prompt = prompt
+	p.calls++
 	return ports.Completion{Text: p.text}, nil
 }
 
@@ -191,5 +195,107 @@ func TestNormalizeCaseDraft(t *testing.T) {
 	}
 	if draft.Ready {
 		t.Fatal("Ready = true, want downgraded to false")
+	}
+}
+
+func TestRunServesRepeatFromCache(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"cached answer","case":null}`}
+	wf, err := New(
+		prompts.MustNewRegistry(),
+		resolverFor(provider),
+		nil,
+		WithCache(memcache.New(16), time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "how to reset printer"}}}
+
+	first, err := wf.Run(ctx, req)
+	if err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	second, err := wf.Run(ctx, req)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 (second run cached)", provider.calls)
+	}
+	if first.Reply != second.Reply {
+		t.Fatalf("cached reply mismatch: %q vs %q", first.Reply, second.Reply)
+	}
+}
+
+func TestRunCacheIsScopedByCompanyAndTranscript(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"answer","case":null}`}
+	wf, err := New(
+		prompts.MustNewRegistry(),
+		resolverFor(provider),
+		nil,
+		WithCache(memcache.New(16), time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}}}
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), req); err != nil {
+		t.Fatalf("company 7: %v", err)
+	}
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 8), req); err != nil {
+		t.Fatalf("company 8: %v", err)
+	}
+	other := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "different question"}}}
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), other); err != nil {
+		t.Fatalf("other transcript: %v", err)
+	}
+	if provider.calls != 3 {
+		t.Fatalf("provider calls = %d, want 3 (no cross-company or cross-transcript hits)", provider.calls)
+	}
+}
+
+func TestRunWithoutCacheCallsProviderEveryTime(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"answer","case":null}`}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}}}
+	for i := 0; i < 2; i++ {
+		if _, err := wf.Run(ctx, req); err != nil {
+			t.Fatalf("Run %d: %v", i, err)
+		}
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+}
+
+func TestRunDoesNotCacheEmptyReply(t *testing.T) {
+	provider := &stubProvider{text: "   "}
+	wf, err := New(
+		prompts.MustNewRegistry(),
+		resolverFor(provider),
+		nil,
+		WithCache(memcache.New(16), time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}}}
+	for i := 0; i < 2; i++ {
+		if _, err := wf.Run(ctx, req); err != nil {
+			t.Fatalf("Run %d: %v", i, err)
+		}
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2 (empty reply must not be cached)", provider.calls)
 	}
 }

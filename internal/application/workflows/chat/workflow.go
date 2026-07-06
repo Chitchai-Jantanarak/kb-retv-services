@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
@@ -17,12 +19,25 @@ type FTSSource interface {
 }
 
 type Workflow struct {
-	tmpl    prompts.Template
-	resolve rag.ProviderForCompany
-	fts     FTSSource
+	tmpl     prompts.Template
+	resolve  rag.ProviderForCompany
+	fts      FTSSource
+	cache    ports.Cache
+	cacheTTL time.Duration
 }
 
-func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource) (*Workflow, error) {
+type Option func(*Workflow)
+
+func WithCache(cache ports.Cache, ttl time.Duration) Option {
+	return func(w *Workflow) {
+		if cache != nil && ttl > 0 {
+			w.cache = cache
+			w.cacheTTL = ttl
+		}
+	}
+}
+
+func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("chat: prompt registry is required")
 	}
@@ -33,7 +48,11 @@ func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSour
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
-	return &Workflow{tmpl: tmpl, resolve: resolve, fts: fts}, nil
+	w := &Workflow{tmpl: tmpl, resolve: resolve, fts: fts}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w, nil
 }
 
 func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatResponse, error) {
@@ -47,6 +66,11 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	lastUser := req.LastUserMessage()
 	if lastUser == "" {
 		return dto.ChatResponse{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
+	}
+
+	key := cacheKey(companyID, req)
+	if resp, ok := w.cachedResponse(ctx, key); ok {
+		return resp, nil
 	}
 
 	sources, knowledge := w.knowledgeContext(ctx, companyID, lastUser)
@@ -69,11 +93,13 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	}
 
 	turn := parseTurn(completion.Text)
-	return dto.ChatResponse{
+	resp := dto.ChatResponse{
 		Reply:   turn.Reply,
 		Sources: sources,
 		Case:    normalizeCaseDraft(turn.Case),
-	}, nil
+	}
+	w.storeResponse(ctx, key, resp)
+	return resp, nil
 }
 
 func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]string, string) {
