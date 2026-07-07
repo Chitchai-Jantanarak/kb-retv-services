@@ -9,6 +9,8 @@ import (
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/intent"
+	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/shared/ctxkey"
@@ -110,7 +112,7 @@ func TestRunReturnsReplySourcesAndCase(t *testing.T) {
 	if resp.Reply != "summary" {
 		t.Fatalf("Reply = %q, want summary", resp.Reply)
 	}
-	if len(resp.Sources) != 1 || resp.Sources[0] != "KB-1" {
+	if len(resp.Sources) != 1 || resp.Sources[0].Title != "KB-1" {
 		t.Fatalf("Sources = %v, want [KB-1]", resp.Sources)
 	}
 	if resp.Case == nil || !resp.Case.Ready {
@@ -127,6 +129,47 @@ func TestRunReturnsReplySourcesAndCase(t *testing.T) {
 	}
 	if !strings.Contains(provider.prompt.User, "User: robot broke") {
 		t.Fatal("User prompt missing transcript")
+	}
+}
+
+func TestRunDebugSurfacesChatStageTimings(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"summary","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix"}}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broke"}},
+		Locale:   dto.ChatLocaleEnglish,
+		Debug:    true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, stage := range []string{"knowledge", "render", "resolve", "generate", "parse"} {
+		if _, ok := resp.StageTimingsMS[stage]; !ok {
+			t.Fatalf("stage %q missing from timings: %+v", stage, resp.StageTimingsMS)
+		}
+	}
+}
+
+func TestRunOmitsChatStageTimingsWithoutDebug(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"summary","case":null}`}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broke"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.StageTimingsMS != nil {
+		t.Fatalf("StageTimingsMS = %+v, want nil without debug", resp.StageTimingsMS)
 	}
 }
 
@@ -229,6 +272,41 @@ func TestRunServesRepeatFromCache(t *testing.T) {
 	}
 }
 
+func TestRunDebugCacheHitSurfacesCacheTimingOnlyAfterRouter(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"cached answer","case":null}`}
+	wf, err := New(
+		prompts.MustNewRegistry(),
+		resolverFor(provider),
+		nil,
+		WithCache(memcache.New(16), time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "how to reset printer"}}}
+	if _, err := wf.Run(ctx, req); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	cached, err := wf.Run(ctx, dto.ChatRequest{
+		Messages: req.Messages,
+		Debug:    true,
+	})
+	if err != nil {
+		t.Fatalf("cached Run: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+	if _, ok := cached.StageTimingsMS["cache"]; !ok {
+		t.Fatalf("cache timing missing: %+v", cached.StageTimingsMS)
+	}
+	if _, ok := cached.StageTimingsMS["generate"]; ok {
+		t.Fatalf("generate timing recorded on cache hit: %+v", cached.StageTimingsMS)
+	}
+}
+
 func TestRunCacheIsScopedByCompanyAndTranscript(t *testing.T) {
 	provider := &stubProvider{text: `{"reply":"answer","case":null}`}
 	wf, err := New(
@@ -297,5 +375,214 @@ func TestRunDoesNotCacheEmptyReply(t *testing.T) {
 	}
 	if provider.calls != 2 {
 		t.Fatalf("provider calls = %d, want 2 (empty reply must not be cached)", provider.calls)
+	}
+}
+
+func routerForTest(t *testing.T, fts FTSSource) *intent.Router {
+	t.Helper()
+	emb := &chatStubEmbedder{vecs: map[string][]float32{
+		"ติดต่อเจ้าหน้าที่": {1, 0, 0},
+		"ตรวจสอบสถานะเคส":   {0, 1, 0},
+		"เปิดเคสใหม่":       {0, 0, 1},
+		"robot broken":      {0, 0, 0, 1},
+		"ติดต่อ":            {1, 0, 0},
+	}}
+	r, err := intent.New(context.Background(), emb, newFTSScorer(fts),
+		intent.WithAnchors(map[intent.Intent][]string{
+			intent.Handoff:    {"ติดต่อเจ้าหน้าที่"},
+			intent.CaseStatus: {"ตรวจสอบสถานะเคส"},
+			intent.OpenCase:   {"เปิดเคสใหม่"},
+		}),
+		intent.WithThresholds(0.4, 0.6),
+		intent.WithRetrievalMin(1.0),
+	)
+	if err != nil {
+		t.Fatalf("intent.New: %v", err)
+	}
+	return r
+}
+
+type stubOrch struct {
+	resp skeleton.Response
+	err  error
+}
+
+func (s stubOrch) Handle(_ context.Context, _ skeleton.Actor, _ string) (skeleton.Response, error) {
+	return s.resp, s.err
+}
+
+func TestRunToolMatchSkipsLLM(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{resp: skeleton.Response{Matched: true, ToolID: "f1_find_cases", Headline: "2 cases match", Lines: []string{"C1|open", "C2|done"}}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 when a tool matches", provider.calls)
+	}
+	if resp.Status != dto.ChatStatusAnswered {
+		t.Fatalf("status = %q, want answered", resp.Status)
+	}
+	if !strings.Contains(resp.Reply, "2 cases match") {
+		t.Fatalf("reply = %q, want the tool headline", resp.Reply)
+	}
+}
+
+func TestRunToolNoMatchFallsThroughToLLM(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"llm answer","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{resp: skeleton.Response{Matched: false}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 when no tool matches", provider.calls)
+	}
+	if resp.Reply != "llm answer" {
+		t.Fatalf("reply = %q, want the LLM fallback", resp.Reply)
+	}
+}
+
+func TestRunToolErrorFallsThroughToLLM(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"llm answer","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{err: apperr.New(apperr.CodeInternal, "handler missing")}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	})
+	if err != nil {
+		t.Fatalf("Run must not fail when the orchestrator errors: %v", err)
+	}
+	if provider.calls != 1 || resp.Reply != "llm answer" {
+		t.Fatalf("orchestrator error must fall through to LLM; calls=%d reply=%q", provider.calls, resp.Reply)
+	}
+}
+
+type chatStubEmbedder struct{ vecs map[string][]float32 }
+
+func (s *chatStubEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		out[i] = s.vecs[t]
+	}
+	return out, nil
+}
+
+func TestRunHandoffSkipsProvider(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "ติดต่อ"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 for handoff", provider.calls)
+	}
+	if resp.Status != dto.ChatStatusHandoff {
+		t.Fatalf("status = %q, want handoff", resp.Status)
+	}
+}
+
+func TestRunDebugHandoffSurfacesRouterTimingAndSkipsGenerate(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "à¸•à¸´à¸”à¸•à¹ˆà¸­"}},
+		Debug:    true,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, ok := resp.StageTimingsMS["router"]; !ok {
+		t.Fatalf("router timing missing: %+v", resp.StageTimingsMS)
+	}
+	if _, ok := resp.StageTimingsMS["generate"]; ok {
+		t.Fatalf("generate timing recorded on handoff: %+v", resp.StageTimingsMS)
+	}
+}
+
+func TestRunKBSearchReturnsStructuredSources(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"พบข้อมูลหุ่นยนต์","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{ChunkID: 9, ArticleID: 4, Title: "Robot broken case", Content: "motor failure", Relevance: 7.5}}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 for kb_search", provider.calls)
+	}
+	if resp.Status != dto.ChatStatusAnswered {
+		t.Fatalf("status = %q, want answered", resp.Status)
+	}
+	if len(resp.Sources) != 1 || resp.Sources[0].Title != "Robot broken case" {
+		t.Fatalf("sources = %+v, want one structured source", resp.Sources)
+	}
+	if len(resp.Activity) == 0 {
+		t.Fatal("activity is empty")
+	}
+}
+
+func TestChatPromptForcesEvidenceUse(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"answer","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "robot repair steps", Relevance: 5}}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, want := range []string{
+		"tenant-scoped support assistant",
+		"Use the provided reference notes as evidence",
+		"Do not tell the user to search",
+		"Do not invent database records",
+	} {
+		if !strings.Contains(provider.prompt.System, want) {
+			t.Fatalf("system prompt missing %q\n%s", want, provider.prompt.System)
+		}
 	}
 }

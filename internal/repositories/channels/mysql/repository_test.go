@@ -15,11 +15,13 @@ func (f fakeResult) LastInsertId() (int64, error) { return f.id, nil }
 func (f fakeResult) RowsAffected() (int64, error) { return 1, nil }
 
 type fakeQuerier struct {
-	execSQL  string
-	execArgs []any
+	execSQL     string
+	execArgs    []any
+	queryCalled bool
 }
 
 func (f *fakeQuerier) QueryContext(context.Context, string, ...any) (*sql.Rows, error) {
+	f.queryCalled = true
 	return nil, nil
 }
 func (f *fakeQuerier) QueryRowContext(context.Context, string, ...any) *sql.Row { return nil }

@@ -1,13 +1,13 @@
 package middleware
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
+	"github.com/my/app/internal/shared/perms"
 	"github.com/my/app/internal/transport/http/response"
 )
 
@@ -34,10 +34,10 @@ func can(principal ctxkey.Principal, permission string) bool {
 	if principal.Role == "super_admin" {
 		return true
 	}
-	if slices.Contains(principal.Perms, "*") || slices.Contains(principal.Perms, permission) {
+	if perms.Can(principal.Perms, permission) {
 		return true
 	}
-	return slices.Contains(defaultRolePerms[principal.Role], permission)
+	return perms.Can(defaultRolePerms[principal.Role], permission)
 }
 
 var defaultRolePerms = map[string][]string{

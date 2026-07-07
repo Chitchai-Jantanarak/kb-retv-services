@@ -1,0 +1,26 @@
+{
+  "handoff": [
+    "talk to a human agent",
+    "connect me to support staff"
+  ],
+  "case_status": [
+    "check case status",
+    "show case progress"
+  ],
+  "open_case": [
+    "open a new support case",
+    "report a problem"
+  ],
+  "general_support": [
+    "how do I use this service",
+    "the device is not working",
+    "there is a system error"
+  ],
+  "off_domain": [
+    "recommend a place to travel",
+    "what should I eat today",
+    "weather forecast",
+    "tell me a joke",
+    "stock price today"
+  ]
+}

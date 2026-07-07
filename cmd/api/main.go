@@ -15,6 +15,11 @@ import (
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
+	"github.com/my/app/internal/application/intent"
+	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/toolaudit"
+	"github.com/my/app/internal/application/toolbroker"
+	"github.com/my/app/internal/application/tools"
 	chatwf "github.com/my/app/internal/application/workflows/chat"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
@@ -37,6 +42,7 @@ import (
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/llmboot"
 	"github.com/my/app/internal/shared/logger"
+	"github.com/my/app/internal/shared/perms"
 	"github.com/my/app/internal/transport/http/handlers"
 	appmiddleware "github.com/my/app/internal/transport/http/middleware"
 	"github.com/my/app/internal/transport/http/routes"
@@ -101,6 +107,7 @@ func main() {
 	var reviewHandler *handlers.ReviewHandler
 	var chatHandler *handlers.ChatHandler
 	if qdb != nil {
+		reportsRepo := reportsmysql.New(qdb)
 		if resolver == nil {
 			log.Warn("chat endpoint not configured: llm resolver unavailable")
 		} else if chatRegistry, regErr := prompts.NewRegistry(); regErr != nil {
@@ -116,14 +123,48 @@ func main() {
 					zap.Int("ttl_seconds", cfg.Chat.CacheTTLSeconds),
 					zap.Int("max_entries", cfg.Chat.CacheMaxEntries))
 			}
-			if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, rag.NewMySQLFTSSource(qdb), chatOpts...); cerr != nil {
+			ftsSource := rag.NewMySQLFTSSource(qdb)
+			if _, _, sharedEmbedder, eerr := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg)); eerr != nil {
+				log.Warn("chat intent router not configured", zap.Error(eerr))
+			} else {
+				guardEmbedder, guardTh, guardReason := llmboot.GuardEmbedder(cfg, sharedEmbedder)
+				log.Info("chat guard embedder resolved", zap.String("reason", guardReason))
+				routerOpts := []intent.Option{}
+				if guardTh.HasValues {
+					routerOpts = append(routerOpts,
+						intent.WithThresholds(guardTh.Floor, guardTh.Accept),
+						intent.WithMargin(guardTh.Margin))
+				}
+				if chatRouter, rerr := intent.New(context.Background(), guardEmbedder, chatwf.NewFTSScorer(ftsSource), routerOpts...); rerr != nil {
+					log.Warn("chat intent router not configured", zap.Error(rerr))
+				} else {
+					chatOpts = append(chatOpts, chatwf.WithRouter(chatRouter))
+					log.Info("chat intent router configured")
+				}
+				if catalog, terr := tools.Load(os.DirFS("config/tools"), perms.Set()); terr != nil {
+					log.Warn("tool orchestrator not configured", zap.Error(terr))
+				} else {
+					broker := toolbroker.New(toolbroker.Deps{FTS: ftsSource, Reports: reportsRepo, Inbound: channelsmysql.New(qdb), Promoter: reportsRepo})
+					bound := broker.Bound(catalog)
+					if selector, serr := tools.NewSelector(context.Background(), sharedEmbedder, bound); serr != nil {
+						log.Warn("tool orchestrator not configured", zap.Error(serr))
+					} else {
+						orch := skeleton.New(selector, bound, broker.Handlers(), toolaudit.New(mysqlai.NewActionRecorder(qdb)))
+						chatOpts = append(chatOpts, chatwf.WithOrchestrator(orch))
+						log.Info("tool orchestrator configured",
+							zap.Int("bound", len(bound)),
+							zap.Strings("unbound", broker.UnboundIDs(catalog)))
+					}
+				}
+			}
+			if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, ftsSource, chatOpts...); cerr != nil {
 				log.Warn("chat endpoint not configured", zap.Error(cerr))
 			} else {
 				chatHandler = handlers.NewChatHandler(cw)
 				log.Info("chat endpoint configured")
 			}
 		}
-		reportsHandler = handlers.NewReportsHandler(reportsmysql.New(qdb))
+		reportsHandler = handlers.NewReportsHandler(reportsRepo)
 		log.Info("reports endpoints configured")
 
 		if h, err := buildInboundHandler(cfg, db, qdb, log); err != nil {

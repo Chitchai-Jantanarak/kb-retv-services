@@ -1,0 +1,29 @@
+{
+  "id": "example_lookup",
+  "intent": "example_lookup",
+  "kind": "read",
+  "description": "Example read-only tool definition",
+  "anchors": [
+    "find matching records",
+    "show recent items"
+  ],
+  "thresholds": {
+    "accept": 0.55,
+    "floor": 0.35
+  },
+  "resolve": [],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.view",
+    "team_view": false
+  },
+  "handler": "example.lookup",
+  "limit": 10,
+  "compose": {
+    "headline": "{n} matches",
+    "row": "{code}|{title}|{status}",
+    "cite": "code"
+  },
+  "audit": "ai.example_lookup",
+  "enabled_by": "company"
+}

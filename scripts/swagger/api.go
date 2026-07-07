@@ -6,6 +6,8 @@ import (
 )
 
 var (
+	_ = dto.ChatRequest{}
+	_ = dto.ChatResponse{}
 	_ = dto.ReplyRequest{}
 	_ = response.Envelope{}
 )
@@ -101,6 +103,23 @@ func healthz() {}
 // @Failure 500 {object} response.Envelope
 // @Router /v1/reply [post]
 func createReply() {}
+
+// @Summary Create chat turn
+// @Description Runs the tenant-scoped chat workflow. Set debug=true to include stage_timings_ms for fast_guard, router, cache, knowledge, render, resolve, generate, parse, and store_cache.
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param X-Timeout-Ms header string false "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent"
+// @Param request body dto.ChatRequest true "Chat request"
+// @Success 200 {object} response.Envelope{data=dto.ChatResponse}
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/chat [post]
+func createChat() {}
 
 // @Summary Receive LINE inbound webhook
 // @Tags inbound

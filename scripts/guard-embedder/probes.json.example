@@ -1,0 +1,20 @@
+{
+  "probes": [
+    {
+      "text": "give me a travel recommendation",
+      "label": "off_domain"
+    },
+    {
+      "text": "what should I eat today",
+      "label": "off_domain"
+    },
+    {
+      "text": "how do I reset the device",
+      "label": "in_domain"
+    },
+    {
+      "text": "check my case status",
+      "label": "in_domain"
+    }
+  ]
+}

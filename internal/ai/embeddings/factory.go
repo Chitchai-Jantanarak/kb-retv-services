@@ -75,6 +75,12 @@ func NewProvider(settings ProviderSettings) (string, string, ports.EmbeddingProv
 			dim = 384
 		}
 		return provider, model, NewHashProvider(dim), nil
+	case "static-local":
+		prov, err := staticLocalFromSettings(settings)
+		if err != nil {
+			return "", "", nil, err
+		}
+		return provider, "static-local", prov, nil
 	default:
 		return "", "", nil, fmt.Errorf("unknown embedding provider %q", settings.Provider)
 	}

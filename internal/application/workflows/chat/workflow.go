@@ -9,10 +9,16 @@ import (
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/intent"
+	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
+
+type toolRunner interface {
+	Handle(ctx context.Context, actor skeleton.Actor, msg string) (skeleton.Response, error)
+}
 
 type FTSSource interface {
 	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]rag.FTSChunk, error)
@@ -22,6 +28,8 @@ type Workflow struct {
 	tmpl     prompts.Template
 	resolve  rag.ProviderForCompany
 	fts      FTSSource
+	router   *intent.Router
+	orch     toolRunner
 	cache    ports.Cache
 	cacheTTL time.Duration
 }
@@ -35,6 +43,14 @@ func WithCache(cache ports.Cache, ttl time.Duration) Option {
 			w.cacheTTL = ttl
 		}
 	}
+}
+
+func WithRouter(router *intent.Router) Option {
+	return func(w *Workflow) { w.router = router }
+}
+
+func WithOrchestrator(orch toolRunner) Option {
+	return func(w *Workflow) { w.orch = orch }
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
@@ -59,6 +75,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	if err := req.Validate(); err != nil {
 		return dto.ChatResponse{}, err
 	}
+	timings := chatTimings(req.Debug)
 	companyID, ok := ctxkey.CompanyID(ctx)
 	if !ok || companyID <= 0 {
 		return dto.ChatResponse{}, apperr.New(apperr.CodeUnauthorized, "company scope is required")
@@ -68,41 +85,171 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		return dto.ChatResponse{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
 	}
 
-	key := cacheKey(companyID, req)
-	if resp, ok := w.cachedResponse(ctx, key); ok {
-		return resp, nil
+	if w.router != nil {
+		fastGuardHit := false
+		timedChat(timings, "fast_guard", func() {
+			fastGuardHit = fastGuardOffDomain(lastUser)
+		})
+		if fastGuardHit {
+			return withChatTimings(dto.ChatResponse{
+				Reply:    offDomainReply(req.Locale),
+				Status:   dto.ChatStatusOffDomain,
+				Activity: activity(req.Locale, "request_checked"),
+			}, timings), nil
+		}
 	}
 
-	sources, knowledge := w.knowledgeContext(ctx, companyID, lastUser)
-	prompt, err := w.tmpl.Render(map[string]string{
-		"language":   promptLanguage(req.Locale),
-		"transcript": buildTranscript(req.Messages),
-		"knowledge":  knowledgeSection(knowledge),
+	if w.router != nil {
+		var decision intent.Decision
+		err := timedChatErr(timings, "router", func() error {
+			var err error
+			decision, err = w.router.Route(ctx, lastUser)
+			return err
+		})
+		if err != nil {
+			return dto.ChatResponse{}, err
+		}
+		if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff {
+			var toolResp skeleton.Response
+			var toolErr error
+			timedChat(timings, "tool", func() {
+				toolResp, toolErr = w.orch.Handle(ctx, toolActor(ctx, companyID), lastUser)
+			})
+			if toolErr == nil && toolResp.Matched {
+				return withChatTimings(toolChatResponse(req.Locale, toolResp), timings), nil
+			}
+		}
+		if resp, handled := w.shortCircuit(req.Locale, decision); handled {
+			return withChatTimings(resp, timings), nil
+		}
+	}
+
+	key := cacheKey(companyID, req)
+	var (
+		cachedResp dto.ChatResponse
+		cachedOK   bool
+	)
+	timedChat(timings, "cache", func() {
+		cachedResp, cachedOK = w.cachedResponse(ctx, key)
+	})
+	if cachedOK {
+		return withChatTimings(cachedResp, timings), nil
+	}
+
+	var (
+		sources   []dto.ChatSource
+		knowledge string
+	)
+	timedChat(timings, "knowledge", func() {
+		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
+	})
+
+	var prompt ports.Prompt
+	err := timedChatErr(timings, "render", func() error {
+		var err error
+		prompt, err = w.tmpl.Render(map[string]string{
+			"language":   promptLanguage(req.Locale),
+			"transcript": buildTranscript(req.Messages),
+			"knowledge":  knowledgeSection(knowledge),
+		})
+		return err
 	})
 	if err != nil {
 		return dto.ChatResponse{}, fmt.Errorf("chat: render prompt: %w", err)
 	}
 
-	provider, err := w.resolve(ctx, companyID)
+	var provider ports.LLMProvider
+	err = timedChatErr(timings, "resolve", func() error {
+		var err error
+		provider, err = w.resolve(ctx, companyID)
+		return err
+	})
 	if err != nil {
 		return dto.ChatResponse{}, fmt.Errorf("chat: resolve provider: %w", err)
 	}
-	completion, err := provider.GenerateJSON(ctx, prompt)
+	var completion ports.Completion
+	err = timedChatErr(timings, "generate", func() error {
+		var err error
+		completion, err = provider.GenerateJSON(ctx, prompt)
+		return err
+	})
 	if err != nil {
 		return dto.ChatResponse{}, err
 	}
 
-	turn := parseTurn(completion.Text)
+	var turn llmTurn
+	timedChat(timings, "parse", func() {
+		turn = parseTurn(completion.Text)
+	})
 	resp := dto.ChatResponse{
-		Reply:   turn.Reply,
-		Sources: sources,
-		Case:    normalizeCaseDraft(turn.Case),
+		Reply:    turn.Reply,
+		Status:   dto.ChatStatusAnswered,
+		Sources:  sources,
+		Activity: activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+		Case:     normalizeCaseDraft(turn.Case),
 	}
-	w.storeResponse(ctx, key, resp)
-	return resp, nil
+	timedChat(timings, "store_cache", func() {
+		w.storeResponse(ctx, key, resp)
+	})
+	return withChatTimings(resp, timings), nil
 }
 
-func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]string, string) {
+func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
+	switch d.Intent {
+	case intent.OffDomain:
+		return dto.ChatResponse{
+			Reply:    offDomainReply(locale),
+			Status:   dto.ChatStatusOffDomain,
+			Activity: activity(locale, "request_checked"),
+		}, true
+	case intent.Handoff:
+		return dto.ChatResponse{
+			Reply:    handoffReply(locale),
+			Status:   dto.ChatStatusHandoff,
+			Activity: activity(locale, "request_checked", "permission_checked"),
+		}, true
+	default:
+		return dto.ChatResponse{}, false
+	}
+}
+
+func toolActor(ctx context.Context, companyID int64) skeleton.Actor {
+	principal, _ := ctxkey.PrincipalFrom(ctx)
+	return skeleton.Actor{
+		CompanyID: companyID,
+		UserID:    principal.UserID,
+		Perms:     principal.Perms,
+		Coverage:  ctxkey.CoverageOrSelf(ctx, companyID),
+	}
+}
+
+func toolChatResponse(locale string, r skeleton.Response) dto.ChatResponse {
+	reply := r.Headline
+	if len(r.Lines) > 0 {
+		reply = r.Headline + "\n" + strings.Join(r.Lines, "\n")
+	}
+	return dto.ChatResponse{
+		Reply:    reply,
+		Status:   dto.ChatStatusAnswered,
+		Activity: activity(locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+	}
+}
+
+func offDomainReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I can only help with support cases, knowledge references, case status, and staff handoff for this service."
+	}
+	return "ฉันช่วยได้เฉพาะเรื่องเคสบริการ แหล่งอ้างอิง สถานะเคส และการติดต่อเจ้าหน้าที่ในระบบนี้"
+}
+
+func handoffReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I am routing you to a staff member. Please describe your issue and they will follow up."
+	}
+	return "กำลังส่งต่อให้เจ้าหน้าที่ กรุณาอธิบายปัญหาของคุณ แล้วเจ้าหน้าที่จะติดต่อกลับ"
+}
+
+func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]dto.ChatSource, string) {
 	if w.fts == nil {
 		return nil, ""
 	}
@@ -112,17 +259,23 @@ func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query 
 	}
 
 	var (
-		sources []string
+		sources []dto.ChatSource
 		block   strings.Builder
 	)
 	for _, chunk := range chunks {
 		title := strings.TrimSpace(chunk.Title)
-		if title != "" {
-			sources = append(sources, title)
-		}
 		snippet := strings.TrimSpace(chunk.Content)
 		if len(snippet) > knowledgeSnippetMaxChars {
 			snippet = snippet[:knowledgeSnippetMaxChars]
+		}
+		if title != "" || snippet != "" {
+			sources = append(sources, dto.ChatSource{
+				ID:      fmt.Sprintf("chunk:%d", chunk.ChunkID),
+				Title:   title,
+				Snippet: snippet,
+				Source:  "fts",
+				Score:   chunk.Relevance,
+			})
 		}
 		if snippet != "" {
 			fmt.Fprintf(&block, "- %s: %s\n", title, snippet)

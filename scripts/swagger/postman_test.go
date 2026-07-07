@@ -95,6 +95,51 @@ func TestPostmanCollectionIncludesRAGFoundationDebugSet(t *testing.T) {
 	}
 }
 
+func TestPostmanCollectionIncludesChatDebugTimingSet(t *testing.T) {
+	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_collection.json")
+	if err != nil {
+		t.Fatalf("read postman collection: %v", err)
+	}
+
+	var collection map[string]any
+	if err := json.Unmarshal(specBytes, &collection); err != nil {
+		t.Fatalf("parse postman collection: %v", err)
+	}
+
+	chat := postmanFolder(t, collection, "Chat Debug Timing")
+	tests := map[string][]string{
+		"POST chat - fast guard timing": {
+			"stage_timings_ms",
+			"fast_guard",
+			"generate",
+		},
+		"POST chat - handoff router timing": {
+			"stage_timings_ms",
+			"router",
+			"generate",
+		},
+		"POST chat - KB cold timing": {
+			"stage_timings_ms",
+			"generate",
+			"knowledge",
+		},
+		"POST chat - KB repeat cache timing": {
+			"stage_timings_ms",
+			"cache",
+			"generate",
+		},
+	}
+	for name, wants := range tests {
+		item := postmanItem(t, chat, name)
+		script := postmanScript(t, item, "test")
+		for _, want := range wants {
+			if !containsSubstring(script, want) {
+				t.Fatalf("%s test script missing %q", name, want)
+			}
+		}
+	}
+}
+
 func TestPostmanEnvironmentDocumentsRAGFoundationVariables(t *testing.T) {
 	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_environment.json")
 	if err != nil {
@@ -110,6 +155,8 @@ func TestPostmanEnvironmentDocumentsRAGFoundationVariables(t *testing.T) {
 		"symptom_node_id",
 		"ai_symptom_node_id",
 		"parent_context_issue",
+		"chat_known_issue",
+		"chat_off_domain_probe",
 	} {
 		if !postmanEnvironmentHasKey(t, environment, key) {
 			t.Fatalf("postman environment missing %s", key)

@@ -27,6 +27,7 @@ type ChatMessage struct {
 type ChatRequest struct {
 	Messages []ChatMessage `json:"messages"`
 	Locale   string        `json:"locale"`
+	Debug    bool          `json:"debug,omitempty"`
 }
 
 func (r *ChatRequest) Normalize() {
@@ -81,8 +82,31 @@ type ChatCaseDraft struct {
 	Ready    bool   `json:"ready"`
 }
 
+const (
+	ChatStatusAnswered           = "answered"
+	ChatStatusOffDomain          = "off_domain"
+	ChatStatusHandoff            = "handoff"
+	ChatStatusNeedsClarification = "needs_clarification"
+)
+
+type ChatSource struct {
+	ID      string  `json:"id"`
+	Title   string  `json:"title,omitempty"`
+	Snippet string  `json:"snippet,omitempty"`
+	Source  string  `json:"source,omitempty"`
+	Score   float64 `json:"score,omitempty"`
+}
+
+type ChatActivity struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
+}
+
 type ChatResponse struct {
-	Reply   string         `json:"reply"`
-	Sources []string       `json:"sources"`
-	Case    *ChatCaseDraft `json:"case,omitempty"`
+	Reply          string           `json:"reply"`
+	Status         string           `json:"status"`
+	Sources        []ChatSource     `json:"sources"`
+	Activity       []ChatActivity   `json:"activity,omitempty"`
+	Case           *ChatCaseDraft   `json:"case,omitempty"`
+	StageTimingsMS map[string]int64 `json:"stage_timings_ms,omitempty"`
 }

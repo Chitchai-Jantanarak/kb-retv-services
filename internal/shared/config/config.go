@@ -34,8 +34,10 @@ type Budget struct {
 }
 
 type Chat struct {
-	CacheTTLSeconds int
-	CacheMaxEntries int
+	CacheTTLSeconds       int
+	CacheMaxEntries       int
+	GuardEmbedderProvider string
+	GuardEmbedderAssetDir string
 }
 
 type Embedding struct {
@@ -297,8 +299,10 @@ func LoadFrom(path string) (Config, error) {
 			WindowSeconds:               v.GetInt("budget.windowSeconds"),
 		},
 		Chat: Chat{
-			CacheTTLSeconds: v.GetInt("chat.cacheTTLSeconds"),
-			CacheMaxEntries: v.GetInt("chat.cacheMaxEntries"),
+			CacheTTLSeconds:       v.GetInt("chat.cacheTTLSeconds"),
+			CacheMaxEntries:       v.GetInt("chat.cacheMaxEntries"),
+			GuardEmbedderProvider: v.GetString("chat.guardEmbedderProvider"),
+			GuardEmbedderAssetDir: v.GetString("chat.guardEmbedderAssetDir"),
 		},
 		Embedding: Embedding{
 			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),
@@ -326,6 +330,8 @@ var envBindings = []envBinding{
 	{key: "budget.windowSeconds", env: "BUDGET_WINDOW_SECONDS"},
 	{key: "chat.cacheTTLSeconds", env: "CHAT_CACHE_TTL_SECONDS"},
 	{key: "chat.cacheMaxEntries", env: "CHAT_CACHE_MAX_ENTRIES"},
+	{key: "chat.guardEmbedderProvider", env: "CHAT_GUARDEMBEDDERPROVIDER"},
+	{key: "chat.guardEmbedderAssetDir", env: "CHAT_GUARDEMBEDDERASSETDIR"},
 	{key: "embedding.refreshMaxChunks", env: "EMBEDDING_REFRESH_MAXCHUNKS"},
 	{key: "embedding.refreshBatchSize", env: "EMBEDDING_REFRESH_BATCHSIZE"},
 	{key: "embedding.largeRunThreshold", env: "EMBEDDING_LARGE_RUN_THRESHOLD"},

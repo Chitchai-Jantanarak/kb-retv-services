@@ -29,5 +29,27 @@ Thumbs.db
 
 
 /plan.md
-docs
+*.md
+docs/
 README.md
+
+# Local definitions, examples may be committed as .json.example.
+*.json
+
+# Confidential: service keys and local secrets - never commit.
+secrets/
+*.pem
+*.key
+
+# Local Claude state.
+.claude/
+
+# Generated guard embedder asset - built outside Git.
+assets/guard-embedder/
+
+# Local generated/runtime outputs.
+/api
+/mailpoll
+/worker
+__pycache__/
+*.pyc
