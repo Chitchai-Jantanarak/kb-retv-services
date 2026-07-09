@@ -131,7 +131,7 @@ func parseCompanyIDs(raw string) ([]int64, error) {
 }
 
 func queryActiveCompanyIDs(ctx context.Context, db *sql.DB) ([]int64, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id FROM companies ORDER BY id ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT company_id FROM company_routes ORDER BY company_id ASC`)
 	if err != nil {
 		return nil, err
 	}
