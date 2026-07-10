@@ -157,6 +157,10 @@ func LoadFrom(path string) (Config, error) {
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	for _, binding := range envBindings {
+		_ = v.BindEnv(binding.key, binding.env)
+	}
+
 	v.SetDefault("app.env", "development")
 	v.SetDefault("server.port", "8080")
 	v.SetDefault("server.request_budget_ms", 22000)

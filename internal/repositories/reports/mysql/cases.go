@@ -68,6 +68,88 @@ func (r *Repository) LatestCases(ctx context.Context, coverage []int64, status s
 	return out, rows.Err()
 }
 
+func buildCaseByCodeQuery(coverage []int64, code string) (string, []any) {
+	placeholders := make([]string, len(coverage))
+	args := make([]any, 0, len(coverage)+1)
+	args = append(args, code)
+	for i, id := range coverage {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(`
+SELECT r.code, r.title, COALESCE(s.code, '')
+FROM reports r
+LEFT JOIN report_statuses s ON s.id = r.status_id
+WHERE r.code = ? AND r.company_id IN (%s)
+LIMIT 1`, strings.Join(placeholders, ","))
+	return query, args
+}
+
+func (r *Repository) CaseByCode(ctx context.Context, coverage []int64, code string) (CaseRow, error) {
+	if len(coverage) == 0 {
+		return CaseRow{}, errors.New("reports: coverage must not be empty")
+	}
+	if code == "" {
+		return CaseRow{}, errors.New("reports: code must not be empty")
+	}
+	query, args := buildCaseByCodeQuery(coverage, code)
+
+	var codeVal, title, statusCode sql.NullString
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return CaseRow{}, fmt.Errorf("reports: case %q not found", code)
+		}
+		return CaseRow{}, fmt.Errorf("reports: case by code: %w", err)
+	}
+	return CaseRow{Code: codeVal.String, Title: title.String, Status: statusCode.String}, nil
+}
+
+func buildCasesByProductQuery(coverage []int64, product string, limit int) (string, []any) {
+	if limit <= 0 {
+		limit = 20
+	}
+	placeholders := make([]string, len(coverage))
+	args := make([]any, 0, len(coverage)+2)
+	for i, id := range coverage {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, "%"+product+"%", limit)
+	query := fmt.Sprintf(`
+SELECT r.code, r.title, COALESCE(s.code, '')
+FROM reports r
+JOIN report_node rn ON rn.report_id = r.id
+JOIN nodes n ON n.id = rn.node_id
+LEFT JOIN report_statuses s ON s.id = r.status_id
+WHERE r.company_id IN (%s) AND n.title LIKE ?
+ORDER BY r.created_at DESC
+LIMIT ?`, strings.Join(placeholders, ","))
+	return query, args
+}
+
+func (r *Repository) CasesByProduct(ctx context.Context, coverage []int64, product string, limit int) ([]CaseRow, error) {
+	if len(coverage) == 0 {
+		return []CaseRow{}, nil
+	}
+	query, args := buildCasesByProductQuery(coverage, product, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("reports: cases by product: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]CaseRow, 0)
+	for rows.Next() {
+		var code, title, statusCode sql.NullString
+		if err := rows.Scan(&code, &title, &statusCode); err != nil {
+			return nil, fmt.Errorf("reports: cases by product scan: %w", err)
+		}
+		out = append(out, CaseRow{Code: code.String, Title: title.String, Status: statusCode.String})
+	}
+	return out, rows.Err()
+}
+
 func buildIsResponsibleQuery(companyID, reportID, userID int64) (string, []any) {
 	query := `
 SELECT COUNT(*)

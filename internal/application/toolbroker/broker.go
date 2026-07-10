@@ -7,10 +7,12 @@ import (
 )
 
 type Deps struct {
-	FTS      toolhandlers.FTSSource
-	Reports  toolhandlers.CasesRepo
-	Inbound  toolhandlers.InboundRepo
-	Promoter toolhandlers.Promoter
+	FTS       toolhandlers.FTSSource
+	Reports   toolhandlers.CasesRepo
+	Inbound   toolhandlers.InboundRepo
+	Promoter  toolhandlers.Promoter
+	Employees toolhandlers.EmployeeRepo
+	Customers toolhandlers.CustomerRepo
 }
 
 type Broker struct {
@@ -26,6 +28,16 @@ func New(deps Deps) *Broker {
 		handlers["reports.update"] = toolhandlers.NewUpdateCase(deps.Reports)
 		handlers["reports.close"] = toolhandlers.NewCloseCase(deps.Reports)
 		handlers["reports.assign"] = toolhandlers.NewAssignCase(deps.Reports)
+		handlers["reports.find"] = toolhandlers.NewFindCases(deps.Reports)
+		handlers["reports.track"] = toolhandlers.NewTrackCase(deps.Reports)
+		handlers["reports.byProduct"] = toolhandlers.NewProductCases(deps.Reports)
+	}
+	if deps.Employees != nil {
+		handlers["employee.status"] = toolhandlers.NewEmployeeStatus(deps.Employees)
+		handlers["workload"] = toolhandlers.NewWorkload(deps.Employees)
+	}
+	if deps.Customers != nil {
+		handlers["customer.profile"] = toolhandlers.NewCustomerProfile(deps.Customers)
 	}
 	if deps.Inbound != nil {
 		handlers["inbound.read"] = toolhandlers.NewInboundRead(deps.Inbound)

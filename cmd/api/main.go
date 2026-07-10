@@ -34,6 +34,8 @@ import (
 	"github.com/my/app/internal/infra/tenant"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
+	customermysql "github.com/my/app/internal/repositories/customer/mysql"
+	employeemysql "github.com/my/app/internal/repositories/employee/mysql"
 	"github.com/my/app/internal/repositories/graph"
 	"github.com/my/app/internal/repositories/kb/memory"
 	mysqlkb "github.com/my/app/internal/repositories/kb/mysql"
@@ -144,12 +146,12 @@ func main() {
 				if catalog, terr := tools.Load(os.DirFS("config/tools"), perms.Set()); terr != nil {
 					log.Warn("tool orchestrator not configured", zap.Error(terr))
 				} else {
-					broker := toolbroker.New(toolbroker.Deps{FTS: ftsSource, Reports: reportsRepo, Inbound: channelsmysql.New(qdb), Promoter: reportsRepo})
+					broker := toolbroker.New(toolbroker.Deps{FTS: ftsSource, Reports: reportsRepo, Inbound: channelsmysql.New(qdb), Promoter: reportsRepo, Employees: employeemysql.New(qdb), Customers: customermysql.New(qdb)})
 					bound := broker.Bound(catalog)
 					if selector, serr := tools.NewSelector(context.Background(), sharedEmbedder, bound); serr != nil {
 						log.Warn("tool orchestrator not configured", zap.Error(serr))
 					} else {
-						orch := skeleton.New(selector, bound, broker.Handlers(), toolaudit.New(mysqlai.NewActionRecorder(qdb)))
+						orch := skeleton.New(selector, bound, broker.Handlers(), toolaudit.New(mysqlai.NewActionRecorder(qdb), agentIDLookup(resolver, log)))
 						chatOpts = append(chatOpts, chatwf.WithOrchestrator(orch))
 						log.Info("tool orchestrator configured",
 							zap.Int("bound", len(bound)),

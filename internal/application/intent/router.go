@@ -2,6 +2,8 @@ package intent
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -265,29 +267,15 @@ func dot(a, b []float32) float64 {
 	return sum
 }
 
-var defaultAnchors = map[Intent][]string{
-	Handoff: {
-		"talk to a human agent",
-		"connect me to support staff",
-	},
-	CaseStatus: {
-		"check case status",
-		"show case progress",
-	},
-	OpenCase: {
-		"open a new support case",
-		"report a problem",
-	},
-	GeneralSupport: {
-		"how do I use this service",
-		"the device is not working",
-		"there is a system error",
-	},
-	OffDomain: {
-		"recommend a place to travel",
-		"what should I eat today",
-		"weather forecast",
-		"tell me a joke",
-		"stock price today",
-	},
+//go:embed anchors.json
+var anchorsJSON []byte
+
+var defaultAnchors = mustLoadAnchors(anchorsJSON)
+
+func mustLoadAnchors(raw []byte) map[Intent][]string {
+	var anchors map[Intent][]string
+	if err := json.Unmarshal(raw, &anchors); err != nil {
+		panic(fmt.Sprintf("intent: invalid anchors.json: %v", err))
+	}
+	return anchors
 }

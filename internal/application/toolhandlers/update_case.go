@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/my/app/internal/application/skeleton"
+	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 )
 
 type CasesRepo interface {
@@ -14,6 +15,9 @@ type CasesRepo interface {
 	CaseIDByCode(ctx context.Context, coverage []int64, code string) (int64, error)
 	UpdateCaseStatus(ctx context.Context, coverage []int64, reportID int64, statusCode string) error
 	AssignCase(ctx context.Context, coverage []int64, reportID, employeeID int64) error
+	LatestCases(ctx context.Context, coverage []int64, status string, limit int) ([]reportsmysql.CaseRow, error)
+	CaseByCode(ctx context.Context, coverage []int64, code string) (reportsmysql.CaseRow, error)
+	CasesByProduct(ctx context.Context, coverage []int64, product string, limit int) ([]reportsmysql.CaseRow, error)
 }
 
 var caseCodeRe = regexp.MustCompile(`(?i)REP-?\d+`)

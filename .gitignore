@@ -36,6 +36,9 @@ README.md
 # Local definitions, examples may be committed as .json.example.
 *.json
 
+# Intent router anchors: committed single source, embedded by Go and read by verify.py.
+!internal/application/intent/anchors.json
+
 # Confidential: service keys and local secrets - never commit.
 secrets/
 *.pem

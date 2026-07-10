@@ -1,0 +1,54 @@
+{
+  "handoff": [
+    "talk to a human agent",
+    "connect me to support staff",
+    "transfer me to a real person",
+    "ขอคุยกับเจ้าหน้าที่ที่เป็นคน",
+    "โอนสายให้เจ้าหน้าที่",
+    "ขอสายพนักงานจริง",
+    "担当者と話したい",
+    "オペレーターにつないでください"
+  ],
+  "case_status": [
+    "check case status",
+    "show case progress",
+    "where is my ticket now",
+    "ตรวจสอบสถานะเคส",
+    "เคสของฉันถึงไหนแล้ว",
+    "ケースの進捗を確認したい"
+  ],
+  "open_case": [
+    "open a new support case",
+    "report a problem",
+    "แจ้งปัญหาใหม่",
+    "เปิดเคสใหม่",
+    "新しい問題を報告したい"
+  ],
+  "general_support": [
+    "how do I use this service",
+    "the device is not working",
+    "there is a system error",
+    "ใช้งานระบบนี้อย่างไร",
+    "อุปกรณ์ใช้งานไม่ได้",
+    "ระบบมีข้อผิดพลาด",
+    "システムの使い方を教えて",
+    "デバイスが動作しません"
+  ],
+  "off_domain": [
+    "recommend a place to travel",
+    "what should I eat today",
+    "weather forecast",
+    "tell me a joke",
+    "stock price today",
+    "แนะนำร้านอาหารอร่อย",
+    "แนะนำที่เที่ยว",
+    "พยากรณ์อากาศวันนี้",
+    "เล่าเรื่องตลกให้ฟังหน่อย",
+    "ราคาหุ้นวันนี้",
+    "おすすめの観光地は",
+    "今日の天気は",
+    "面白い冗談を言って",
+    "今日の株価は",
+    "何を食べればいい"
+  ]
+}

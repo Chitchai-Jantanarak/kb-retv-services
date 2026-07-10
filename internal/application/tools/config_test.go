@@ -30,7 +30,7 @@ func TestConfigToolsAreValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config tools invalid: %v", err)
 	}
-	if len(got) != 8 {
-		t.Fatalf("want 8 tools, got %d", len(got))
+	if len(got) != 13 {
+		t.Fatalf("want 13 tools, got %d", len(got))
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/my/app/internal/application/skeleton"
+	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 )
 
 type stubCasesRepo struct {
@@ -29,6 +30,17 @@ type stubCasesRepo struct {
 	assignCoverage   []int64
 	assignReportID   int64
 	assignEmployeeID int64
+
+	latestCases       []reportsmysql.CaseRow
+	latestCoverage    []int64
+	latestStatus      string
+	latestLimit       int
+	caseByCode        reportsmysql.CaseRow
+	caseByCodeErr     error
+	byCodeCoverage    []int64
+	casesByProduct    []reportsmysql.CaseRow
+	byProductCoverage []int64
+	byProductTerm     string
 }
 
 func (s *stubCasesRepo) IsResponsible(_ context.Context, _, _, _ int64) (bool, error) {
@@ -58,6 +70,27 @@ func (s *stubCasesRepo) AssignCase(_ context.Context, coverage []int64, reportID
 	s.assignReportID = reportID
 	s.assignEmployeeID = employeeID
 	return s.assignErr
+}
+
+func (s *stubCasesRepo) LatestCases(_ context.Context, coverage []int64, status string, limit int) ([]reportsmysql.CaseRow, error) {
+	s.latestCoverage = coverage
+	s.latestStatus = status
+	s.latestLimit = limit
+	return s.latestCases, nil
+}
+
+func (s *stubCasesRepo) CaseByCode(_ context.Context, coverage []int64, _ string) (reportsmysql.CaseRow, error) {
+	s.byCodeCoverage = coverage
+	if s.caseByCodeErr != nil {
+		return reportsmysql.CaseRow{}, s.caseByCodeErr
+	}
+	return s.caseByCode, nil
+}
+
+func (s *stubCasesRepo) CasesByProduct(_ context.Context, coverage []int64, product string, _ int) ([]reportsmysql.CaseRow, error) {
+	s.byProductCoverage = coverage
+	s.byProductTerm = product
+	return s.casesByProduct, nil
 }
 
 func TestUpdateDeniedWhenNotResponsible(t *testing.T) {
