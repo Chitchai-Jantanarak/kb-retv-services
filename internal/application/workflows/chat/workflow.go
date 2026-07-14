@@ -24,10 +24,20 @@ type FTSSource interface {
 	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]rag.FTSChunk, error)
 }
 
+type ProfileSource interface {
+	Build(ctx context.Context, companyID int64) (string, error)
+}
+
+type CaseSource interface {
+	SearchCases(ctx context.Context, coverage []int64, query, product, status string, limit int) ([]dto.ChatCaseResult, error)
+}
+
 type Workflow struct {
 	tmpl     prompts.Template
 	resolve  rag.ProviderForCompany
 	fts      FTSSource
+	profile  ProfileSource
+	cases    CaseSource
 	router   *intent.Router
 	orch     toolRunner
 	cache    ports.Cache
@@ -51,6 +61,22 @@ func WithRouter(router *intent.Router) Option {
 
 func WithOrchestrator(orch toolRunner) Option {
 	return func(w *Workflow) { w.orch = orch }
+}
+
+func WithProfile(profile ProfileSource) Option {
+	return func(w *Workflow) {
+		if profile != nil {
+			w.profile = profile
+		}
+	}
+}
+
+func WithCaseSearch(cases CaseSource) Option {
+	return func(w *Workflow) {
+		if cases != nil {
+			w.cases = cases
+		}
+	}
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
@@ -144,6 +170,15 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
 	})
 
+	var profileBlock string
+	if w.profile != nil {
+		timedChat(timings, "profile", func() {
+			if block, perr := w.profile.Build(ctx, companyID); perr == nil {
+				profileBlock = block
+			}
+		})
+	}
+
 	var prompt ports.Prompt
 	err := timedChatErr(timings, "render", func() error {
 		var err error
@@ -151,6 +186,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 			"language":   promptLanguage(req.Locale),
 			"transcript": buildTranscript(req.Messages),
 			"knowledge":  knowledgeSection(knowledge),
+			"profile":    profileSection(profileBlock),
 		})
 		return err
 	})
@@ -187,6 +223,14 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		Sources:  sources,
 		Activity: activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
 		Case:     normalizeCaseDraft(turn.Case),
+	}
+	if search := normalizeSearch(turn.Search); search != nil && w.cases != nil {
+		timedChat(timings, "search", func() {
+			coverage := ctxkey.CoverageOrSelf(ctx, companyID)
+			if results, serr := w.cases.SearchCases(ctx, coverage, search.Query, search.Product, search.Status, chatSearchLimit); serr == nil {
+				resp.SearchResults = results
+			}
+		})
 	}
 	timedChat(timings, "store_cache", func() {
 		w.storeResponse(ctx, key, resp)

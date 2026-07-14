@@ -53,11 +53,21 @@ type TicketEnqueuer interface {
 	EnqueueTicket(ctx context.Context, companyID, conversationID, messageID int64, senderExternal string, req dto.InboundMessageRequest) error
 }
 
+type Completeness struct {
+	Status  string
+	Missing []string
+}
+
+type CompletenessAssessor interface {
+	Assess(ctx context.Context, companyID, conversationID int64, subject, body string) (Completeness, error)
+}
+
 type Workflow struct {
 	accounts      AccountResolver
 	conversations ConversationStore
 	messages      MessageStore
 	tickets       TicketEnqueuer
+	completeness  CompletenessAssessor
 }
 
 type Config struct {
@@ -65,6 +75,7 @@ type Config struct {
 	Conversations ConversationStore
 	Messages      MessageStore
 	Tickets       TicketEnqueuer
+	Completeness  CompletenessAssessor
 }
 
 func New(cfg Config) (*Workflow, error) {
@@ -82,6 +93,7 @@ func New(cfg Config) (*Workflow, error) {
 		conversations: cfg.Conversations,
 		messages:      cfg.Messages,
 		tickets:       cfg.Tickets,
+		completeness:  cfg.Completeness,
 	}, nil
 }
 
@@ -90,6 +102,8 @@ type Result struct {
 	ConversationID int64
 	MessageID      int64
 	TicketEnqueued bool
+	IntakeStatus   string
+	IntakeMissing  []string
 }
 
 func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, error) {
@@ -157,5 +171,13 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		ConversationID: convoID,
 		MessageID:      msgID,
 	}
+
+	if w.completeness != nil && req.Channel == ChannelEmail {
+		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, req.Subject, req.Body); aerr == nil {
+			res.IntakeStatus = assessed.Status
+			res.IntakeMissing = assessed.Missing
+		}
+	}
+
 	return res, nil
 }

@@ -97,6 +97,25 @@ type ChatSource struct {
 	Score   float64 `json:"score,omitempty"`
 }
 
+type ChatSearchRequest struct {
+	Query   string `json:"query,omitempty"`
+	Product string `json:"product,omitempty"`
+	Status  string `json:"status,omitempty"`
+}
+
+func (r ChatSearchRequest) IsZero() bool {
+	return strings.TrimSpace(r.Query) == "" &&
+		strings.TrimSpace(r.Product) == "" &&
+		strings.TrimSpace(r.Status) == ""
+}
+
+type ChatCaseResult struct {
+	ID     int64  `json:"id"`
+	Code   string `json:"code,omitempty"`
+	Title  string `json:"title"`
+	Status string `json:"status,omitempty"`
+}
+
 type ChatActivity struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
@@ -108,5 +127,6 @@ type ChatResponse struct {
 	Sources        []ChatSource     `json:"sources"`
 	Activity       []ChatActivity   `json:"activity,omitempty"`
 	Case           *ChatCaseDraft   `json:"case,omitempty"`
+	SearchResults  []ChatCaseResult `json:"search_results,omitempty"`
 	StageTimingsMS map[string]int64 `json:"stage_timings_ms,omitempty"`
 }

@@ -10,6 +10,7 @@ import (
 const (
 	knowledgeChunkLimit      = 3
 	knowledgeSnippetMaxChars = 600
+	chatSearchLimit          = 5
 )
 
 func promptLanguage(locale string) string {
@@ -24,6 +25,13 @@ func knowledgeSection(block string) string {
 		return ""
 	}
 	return "\n\nReference notes from the knowledge base (may be partial):\n" + block
+}
+
+func profileSection(block string) string {
+	if strings.TrimSpace(block) == "" {
+		return ""
+	}
+	return "\n\nCompany profile (use to answer identity/product questions):\n" + block
 }
 
 func buildTranscript(messages []dto.ChatMessage) string {

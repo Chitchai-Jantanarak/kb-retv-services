@@ -3,10 +3,12 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	"github.com/my/app/internal/infra/tenant"
 )
@@ -125,6 +127,47 @@ VALUES (?, ?, 'inbound', 'customer', ?, ?, ?, NOW())`,
 	return id, nil
 }
 
+func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64, res intake.Result) error {
+	if conversationID <= 0 {
+		return errors.New("conversations: conversation_id required")
+	}
+	status := strings.TrimSpace(res.Status)
+	if status == "" {
+		status = intake.StatusUnknown
+	}
+
+	missing, err := json.Marshal(nonNilStrings(res.Missing))
+	if err != nil {
+		return fmt.Errorf("conversations: encode intake_missing: %w", err)
+	}
+	fields, err := json.Marshal(nonNilFields(res.Fields))
+	if err != nil {
+		return fmt.Errorf("conversations: encode intake_fields: %w", err)
+	}
+
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE conversations
+SET intake_status = ?, intake_missing = ?, intake_fields = ?
+WHERE id = ?`, status, string(missing), string(fields), conversationID); err != nil {
+		return fmt.Errorf("conversations: write completeness: %w", err)
+	}
+	return nil
+}
+
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
+}
+
+func nonNilFields(in map[string]string) map[string]string {
+	if in == nil {
+		return map[string]string{}
+	}
+	return in
+}
+
 func nullableString(s string) any {
 	if s == "" {
 		return nil
@@ -136,4 +179,5 @@ var (
 	_ omnichannel.AccountResolver   = (*Repository)(nil)
 	_ omnichannel.ConversationStore = (*Repository)(nil)
 	_ omnichannel.MessageStore      = (*Repository)(nil)
+	_ intake.Sink                   = (*Repository)(nil)
 )

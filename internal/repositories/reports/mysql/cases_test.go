@@ -62,6 +62,54 @@ func TestBuildLatestCasesQueryWithStatusFilter(t *testing.T) {
 	}
 }
 
+func TestBuildSearchCasesQueryScopesAndFilters(t *testing.T) {
+	query, args := buildSearchCasesQuery([]int64{3, 4}, "printer", "Router X", "waiting", 5)
+	if !strings.Contains(query, "r.company_id IN (?,?)") {
+		t.Fatalf("query = %q, want coverage scope", query)
+	}
+	if !strings.Contains(query, "r.title LIKE ? OR r.problem_detail LIKE ?") {
+		t.Fatalf("query = %q, want keyword filter over title+detail", query)
+	}
+	if !strings.Contains(query, "EXISTS (SELECT 1 FROM report_node") {
+		t.Fatalf("query = %q, want product EXISTS filter (no join duplication)", query)
+	}
+	if !strings.Contains(query, "AND s.code = ?") {
+		t.Fatalf("query = %q, want status filter", query)
+	}
+	// 2 coverage + 2 keyword + 1 product + 1 status + 1 limit
+	if len(args) != 7 {
+		t.Fatalf("args = %v, want 7", args)
+	}
+	if args[len(args)-1] != 5 {
+		t.Fatalf("last arg = %v, want limit 5", args[len(args)-1])
+	}
+}
+
+func TestBuildSearchCasesQueryOmitsAbsentFilters(t *testing.T) {
+	query, args := buildSearchCasesQuery([]int64{3}, "", "", "", 0)
+	if strings.Contains(query, "LIKE") || strings.Contains(query, "EXISTS") || strings.Contains(query, "s.code = ?") {
+		t.Fatalf("query = %q, want no optional filters", query)
+	}
+	// 1 coverage + default limit
+	if len(args) != 2 {
+		t.Fatalf("args = %v, want 2 (coverage + default limit)", args)
+	}
+	if args[1] != 5 {
+		t.Fatalf("default limit = %v, want 5", args[1])
+	}
+}
+
+func TestSearchCasesEmptyCoverageReturnsEmpty(t *testing.T) {
+	repo := New(&fakeCasesQuerier{})
+	rows, err := repo.SearchCases(context.Background(), nil, "x", "", "", 5)
+	if err != nil {
+		t.Fatalf("SearchCases() error = %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %v, want empty for empty coverage", rows)
+	}
+}
+
 func TestBuildLatestCasesQueryWithoutStatusOmitsFilter(t *testing.T) {
 	query, args := buildLatestCasesQuery([]int64{3, 4}, "", 10)
 	if strings.Contains(query, "s.code = ?") {

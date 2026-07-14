@@ -480,6 +480,106 @@ func TestRunToolErrorFallsThroughToLLM(t *testing.T) {
 	}
 }
 
+type stubProfile struct {
+	block string
+	calls int
+}
+
+func (s *stubProfile) Build(context.Context, int64) (string, error) {
+	s.calls++
+	return s.block, nil
+}
+
+type stubCaseSearch struct {
+	results []dto.ChatCaseResult
+	query   string
+	product string
+	status  string
+	calls   int
+}
+
+func (s *stubCaseSearch) SearchCases(_ context.Context, _ []int64, query, product, status string, _ int) ([]dto.ChatCaseResult, error) {
+	s.calls++
+	s.query = query
+	s.product = product
+	s.status = status
+	return s.results, nil
+}
+
+func TestRunInjectsCompanyProfileIntoPrompt(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"we build robots","case":null}`}
+	prof := &stubProfile{block: "You are the support assistant for Acme (acme.io).\nSupported products: Router X."}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithProfile(prof))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "what do you sell?"}},
+		Locale:   dto.ChatLocaleEnglish,
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if prof.calls != 1 {
+		t.Fatalf("profile Build calls = %d, want 1", prof.calls)
+	}
+	for _, want := range []string{"Acme", "Router X"} {
+		if !strings.Contains(provider.prompt.System, want) {
+			t.Fatalf("system prompt missing profile %q\n%s", want, provider.prompt.System)
+		}
+	}
+}
+
+func TestRunExecutesSearchAndAttachesResults(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"here are matching cases","case":null,"search":{"query":"printer","status":"waiting"}}`}
+	cases := &stubCaseSearch{results: []dto.ChatCaseResult{
+		{ID: 9, Code: "chat:1", Title: "Printer offline", Status: "waiting"},
+		{ID: 10, Code: "chat:2", Title: "Printer jam", Status: "waiting"},
+	}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithCaseSearch(cases))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "find my printer cases"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if cases.calls != 1 {
+		t.Fatalf("SearchCases calls = %d, want 1", cases.calls)
+	}
+	if cases.query != "printer" || cases.status != "waiting" {
+		t.Fatalf("search args = (%q,%q,%q), want printer/-/waiting", cases.query, cases.product, cases.status)
+	}
+	if len(resp.SearchResults) != 2 || resp.SearchResults[0].ID != 9 {
+		t.Fatalf("SearchResults = %+v, want 2 rows starting id 9", resp.SearchResults)
+	}
+}
+
+func TestRunSkipsSearchWhenTurnHasNone(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"just an answer","case":null,"search":null}`}
+	cases := &stubCaseSearch{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithCaseSearch(cases))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "how do I reset it?"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if cases.calls != 0 {
+		t.Fatalf("SearchCases calls = %d, want 0 when no search in turn", cases.calls)
+	}
+	if len(resp.SearchResults) != 0 {
+		t.Fatalf("SearchResults = %+v, want empty", resp.SearchResults)
+	}
+}
+
 type chatStubEmbedder struct{ vecs map[string][]float32 }
 
 func (s *chatStubEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {

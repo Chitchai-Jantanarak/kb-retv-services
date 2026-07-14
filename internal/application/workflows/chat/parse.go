@@ -6,13 +6,15 @@ import (
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/workflows/intake"
 )
 
 var replyRe = regexp.MustCompile(`"reply"\s*:\s*"((?:[^"\\]|\\.)*)`)
 
 type llmTurn struct {
-	Reply string             `json:"reply"`
-	Case  *dto.ChatCaseDraft `json:"case"`
+	Reply  string                 `json:"reply"`
+	Case   *dto.ChatCaseDraft     `json:"case"`
+	Search *dto.ChatSearchRequest `json:"search"`
 }
 
 func parseTurn(raw string) llmTurn {
@@ -42,6 +44,19 @@ func parseTurn(raw string) llmTurn {
 	return llmTurn{Reply: strings.TrimSpace(raw)}
 }
 
+func normalizeSearch(req *dto.ChatSearchRequest) *dto.ChatSearchRequest {
+	if req == nil {
+		return nil
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	req.Product = strings.TrimSpace(req.Product)
+	req.Status = strings.ToLower(strings.TrimSpace(req.Status))
+	if req.IsZero() {
+		return nil
+	}
+	return req
+}
+
 func normalizeCaseDraft(draft *dto.ChatCaseDraft) *dto.ChatCaseDraft {
 	if draft == nil {
 		return nil
@@ -52,8 +67,20 @@ func normalizeCaseDraft(draft *dto.ChatCaseDraft) *dto.ChatCaseDraft {
 	if draft.Problem == "" && draft.Detail == "" && draft.Product == "" {
 		return nil
 	}
-	if draft.Ready && (draft.Problem == "" || draft.Detail == "" || draft.Product == "") {
+	if draft.Ready && !caseComplete(*draft) {
 		draft.Ready = false
 	}
 	return draft
+}
+
+func caseComplete(draft dto.ChatCaseDraft) bool {
+	if draft.Problem == "" {
+		return false
+	}
+	return len(intake.DefaultSpec().Missing(map[string]string{
+		intake.FieldProblemDetail: draft.Detail,
+		intake.FieldProduct:       draft.Product,
+		intake.FieldSeverity:      draft.Severity,
+		intake.FieldContact:       draft.Contact,
+	})) == 0
 }

@@ -81,6 +81,7 @@ func TestDefaultsCoverAllNamedTemplates(t *testing.T) {
 		NameSelfRAG,
 		NameGenerate,
 		NameChat,
+		NameIntakeExtract,
 	}
 	got := make([]string, 0, len(Defaults()))
 	for _, tmpl := range Defaults() {
@@ -186,6 +187,8 @@ func TestRegistryRoundTripRenderForEveryDefault(t *testing.T) {
 		"language":         "English",
 		"transcript":       "User: printer broke\n",
 		"knowledge":        "",
+		"fields":           "required: problem_detail, product",
+		"message":          "Subject: printer down\n\nit stopped printing",
 	}
 	for _, name := range r.Names() {
 		tmpl, err := r.Get(name)

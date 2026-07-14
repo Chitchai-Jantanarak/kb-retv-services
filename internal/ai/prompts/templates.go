@@ -14,6 +14,7 @@ const (
 	NameSelfRAG        = "self_rag"
 	NameGenerate       = "generate"
 	NameChat           = "chat"
+	NameIntakeExtract  = "intake_extract"
 )
 
 // canonicalNames lists every template that must be present in any
@@ -31,5 +32,6 @@ func canonicalNames() []string {
 		NameSelfRAG,
 		NameGenerate,
 		NameChat,
+		NameIntakeExtract,
 	}
 }

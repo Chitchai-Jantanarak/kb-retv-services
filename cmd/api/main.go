@@ -16,11 +16,13 @@ import (
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/intent"
+	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/application/toolaudit"
 	"github.com/my/app/internal/application/toolbroker"
 	"github.com/my/app/internal/application/tools"
 	chatwf "github.com/my/app/internal/application/workflows/chat"
+	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/application/workflows/reply"
@@ -37,8 +39,10 @@ import (
 	customermysql "github.com/my/app/internal/repositories/customer/mysql"
 	employeemysql "github.com/my/app/internal/repositories/employee/mysql"
 	"github.com/my/app/internal/repositories/graph"
+	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
 	"github.com/my/app/internal/repositories/kb/memory"
 	mysqlkb "github.com/my/app/internal/repositories/kb/mysql"
+	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
 	"github.com/my/app/internal/shared/config"
@@ -159,6 +163,10 @@ func main() {
 					}
 				}
 			}
+			chatOpts = append(chatOpts,
+				chatwf.WithProfile(profile.NewAssembler(profilemysql.New(qdb))),
+				chatwf.WithCaseSearch(chatCaseSearch{repo: reportsRepo}),
+			)
 			if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, ftsSource, chatOpts...); cerr != nil {
 				log.Warn("chat endpoint not configured", zap.Error(cerr))
 			} else {
@@ -169,7 +177,7 @@ func main() {
 		reportsHandler = handlers.NewReportsHandler(reportsRepo)
 		log.Info("reports endpoints configured")
 
-		if h, err := buildInboundHandler(cfg, db, qdb, log); err != nil {
+		if h, err := buildInboundHandler(cfg, db, qdb, resolver, log); err != nil {
 			log.Warn("inbound webhooks not configured", zap.Error(err))
 		} else {
 			inboundHandler = h
@@ -354,7 +362,7 @@ func appendRetrievers(opts []reply.Option, cfg config.Config, db tenant.Querier,
 	return opts
 }
 
-func buildInboundHandler(cfg config.Config, central, router tenant.Querier, log *zap.Logger) (*handlers.InboundHandler, error) {
+func buildInboundHandler(cfg config.Config, central, router tenant.Querier, resolver *llm.CompanyResolver, log *zap.Logger) (*handlers.InboundHandler, error) {
 	if cfg.App.IsProduction() && strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" {
 		return nil, errors.New("inbound webhook secret is required in production")
 	}
@@ -364,6 +372,10 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, log 
 		Accounts:      centralRepo,
 		Conversations: siloRepo,
 		Messages:      siloRepo,
+	}
+	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {
+		wfCfg.Completeness = assessor
+		log.Info("email intake completeness check configured")
 	}
 
 	wf, err := omnichannel.New(wfCfg)
@@ -378,6 +390,27 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, log 
 		return nil, err
 	}
 	return handlers.NewInboundHandler(wf, registry, handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)), nil
+}
+
+func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.CompanyResolver, log *zap.Logger) omnichannel.CompletenessAssessor {
+	if router == nil || resolver == nil {
+		log.Warn("email intake completeness check not configured: llm resolver unavailable")
+		return nil
+	}
+	registry, err := prompts.NewRegistry()
+	if err != nil {
+		log.Warn("email intake completeness check not configured", zap.Error(err))
+		return nil
+	}
+	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
+		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
+		intake.WithProducts(intakeProducts{repo: profilemysql.New(router)}),
+	)
+	if err != nil {
+		log.Warn("email intake completeness check not configured", zap.Error(err))
+		return nil
+	}
+	return intakeAssessor{svc: intake.NewService(extractor, sink, log)}
 }
 
 func inboundChannels() []string {
