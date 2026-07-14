@@ -5,9 +5,21 @@
     "transfer me to a real person",
     "ขอคุยกับเจ้าหน้าที่ที่เป็นคน",
     "โอนสายให้เจ้าหน้าที่",
-    "ขอสายพนักงานจริง",
     "担当者と話したい",
-    "オペレーターにつないでください"
+    "オペレーターにつないでください",
+    "请帮我转接人工客服",
+    "我要和人工客服通话",
+    "상담원에게 연결해 주세요",
+    "사람 상담원과 통화하고 싶어요",
+    "cho tôi gặp nhân viên hỗ trợ thật",
+    "tolong sambungkan ke agen manusia",
+    "conécteme con un agente humano de verdad",
+    "mettez-moi en relation avec un agent humain",
+    "verbinden Sie mich mit einem menschlichen Mitarbeiter",
+    "me conecte a um atendente humano de verdade",
+    "соедините меня с живым оператором",
+    "حوّلني إلى موظف بشري حقيقي",
+    "मुझे किसी असली एजेंट से जोड़ें"
   ],
   "case_status": [
     "check case status",
@@ -15,14 +27,18 @@
     "where is my ticket now",
     "ตรวจสอบสถานะเคส",
     "เคสของฉันถึงไหนแล้ว",
-    "ケースの進捗を確認したい"
+    "ケースの進捗を確認したい",
+    "查一下我的工单状态",
+    "내 티켓 상태 확인해줘"
   ],
   "open_case": [
     "open a new support case",
     "report a problem",
     "แจ้งปัญหาใหม่",
     "เปิดเคสใหม่",
-    "新しい問題を報告したい"
+    "新しい問題を報告したい",
+    "我要新建一个工单",
+    "새 문의를 등록하고 싶어요"
   ],
   "general_support": [
     "how do I use this service",
@@ -32,7 +48,15 @@
     "อุปกรณ์ใช้งานไม่ได้",
     "ระบบมีข้อผิดพลาด",
     "システムの使い方を教えて",
-    "デバイスが動作しません"
+    "デバイスが動作しません",
+    "这个设备无法正常工作",
+    "无法连接到网络",
+    "시스템에 오류가 있어요",
+    "el dispositivo no funciona",
+    "no puedo conectarme a internet",
+    "das Gerät funktioniert nicht",
+    "интернет не работает",
+    "не могу подключиться к сети"
   ],
   "off_domain": [
     "recommend a place to travel",
@@ -48,7 +72,16 @@
     "おすすめの観光地は",
     "今日の天気は",
     "面白い冗談を言って",
-    "今日の株価は",
-    "何を食べればいい"
+    "推荐附近好吃的餐厅",
+    "근처 맛집 추천해줘",
+    "gợi ý một nhà hàng ngon",
+    "rekomendasikan restoran enak",
+    "recomiéndame un buen restaurante",
+    "recommande-moi un bon restaurant",
+    "empfiehl mir ein gutes Restaurant",
+    "recomende um bom restaurante",
+    "порекомендуй хороший ресторан",
+    "أوصِ بمطعم جيد قريب",
+    "यहाँ पास में एक अच्छा रेस्टोरेंट बताओ"
   ]
 }
