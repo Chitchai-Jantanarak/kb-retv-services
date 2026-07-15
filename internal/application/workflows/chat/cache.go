@@ -37,12 +37,18 @@ func (w *Workflow) cachedResponse(ctx context.Context, key string) (dto.ChatResp
 	return resp, true
 }
 
+func sanitizeForCache(resp dto.ChatResponse) dto.ChatResponse {
+	resp.StageTimingsMS = nil
+	resp.SearchResults = nil
+	resp.Case = nil
+	return resp
+}
+
 func (w *Workflow) storeResponse(ctx context.Context, key string, resp dto.ChatResponse) {
 	if w.cache == nil || strings.TrimSpace(resp.Reply) == "" {
 		return
 	}
-	resp.StageTimingsMS = nil
-	raw, err := json.Marshal(resp)
+	raw, err := json.Marshal(sanitizeForCache(resp))
 	if err != nil {
 		return
 	}

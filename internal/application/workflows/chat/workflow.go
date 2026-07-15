@@ -144,6 +144,13 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 			if toolErr == nil && toolResp.Matched {
 				return withChatTimings(toolChatResponse(req.Locale, toolResp), timings), nil
 			}
+			if authoritativeIntent(decision.Intent) {
+				return withChatTimings(dto.ChatResponse{
+					Reply:    handoffReply(req.Locale),
+					Status:   dto.ChatStatusHandoff,
+					Activity: activity(req.Locale, "request_checked", "permission_checked"),
+				}, timings), nil
+			}
 		}
 		if resp, handled := w.shortCircuit(req.Locale, decision); handled {
 			return withChatTimings(resp, timings), nil
@@ -214,9 +221,19 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	}
 
 	var turn llmTurn
+	var structuredOK bool
 	timedChat(timings, "parse", func() {
-		turn = parseTurn(completion.Text)
+		turn, structuredOK = parseTurn(completion.Text)
 	})
+	if !structuredOK && strings.TrimSpace(completion.Text) != "" {
+		repair := prompt
+		repair.User = prompt.User + "\n\nYour previous output was not a single JSON object. Reply again with ONLY the JSON object described above."
+		if retry, rerr := provider.GenerateJSON(ctx, repair); rerr == nil {
+			if rt, ok := parseTurn(retry.Text); ok {
+				turn, structuredOK = rt, true
+			}
+		}
+	}
 	resp := dto.ChatResponse{
 		Reply:    turn.Reply,
 		Status:   dto.ChatStatusAnswered,
@@ -254,6 +271,15 @@ func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatRespo
 		}, true
 	default:
 		return dto.ChatResponse{}, false
+	}
+}
+
+func authoritativeIntent(i intent.Intent) bool {
+	switch i {
+	case intent.CaseStatus, intent.OpenCase:
+		return true
+	default:
+		return false
 	}
 }
 

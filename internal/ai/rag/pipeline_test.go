@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+func TestWillGenerateGuards(t *testing.T) {
+	p := &Pipeline{}
+	if willGenerate(p, DecisionAuto, VerdictRelevant, nil) {
+		t.Fatal("no candidates -> no generation")
+	}
+	if willGenerate(p, DecisionEscalate, VerdictRelevant, []Candidate{{ID: "1"}}) {
+		t.Fatal("escalate -> no generation")
+	}
+	if willGenerate(p, DecisionAuto, VerdictIrrelevant, []Candidate{{ID: "1"}}) {
+		t.Fatal("irrelevant -> no generation")
+	}
+	if willGenerate(p, DecisionAuto, VerdictRelevant, []Candidate{{ID: "1"}}) {
+		t.Fatal("nil generator -> no generation")
+	}
+}
+
 func TestPipelineRunCachesRerankedCompressedResult(t *testing.T) {
 	cache := newMemoryCache()
 	retriever := &recordingRetriever{

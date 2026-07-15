@@ -100,6 +100,17 @@ func TestLimiterPerCompanyWindow(t *testing.T) {
 	}
 }
 
+func TestWindowNoOpsWithoutCache(t *testing.T) {
+	l := New(Config{MaxCallsPerCompanyWindow: 1, Window: time.Minute})
+	ctx := l.Begin(context.Background())
+	if ok, _ := l.Acquire(ctx, 7, "generate"); !ok {
+		t.Fatal("call 1 should pass")
+	}
+	if ok, _ := l.Acquire(ctx, 7, "generate"); !ok {
+		t.Fatal("without a cache the per-company window cannot enforce; production must pass a Cache (see cmd/api wiring)")
+	}
+}
+
 func TestLimiterUnlimitedByDefault(t *testing.T) {
 	l := New(Config{})
 	ctx := l.Begin(context.Background())

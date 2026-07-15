@@ -197,7 +197,7 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 
 	var draft string
 	var genErr error
-	if p.llmAllowed(ctx, query.CompanyID, "generate") {
+	if willGenerate(p, decision, verdict, candidates) && p.llmAllowed(ctx, query.CompanyID, "generate") {
 		if err := timed(timings, "generate", func() error {
 			draft, genErr = p.generateDraft(ctx, plannedQuery, verdict, decision, candidates)
 			return nil
@@ -499,6 +499,10 @@ func (p *Pipeline) recordKnowledgeGap(ctx context.Context, query Query, verdict 
 	recordCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	_ = p.knowledgeGap.Record(recordCtx, query.CompanyID, query.Text)
 	cancel()
+}
+
+func willGenerate(p *Pipeline, decision Decision, verdict CRAGVerdict, candidates []Candidate) bool {
+	return p.generator != nil && decision != DecisionEscalate && verdict != VerdictIrrelevant && len(candidates) > 0
 }
 
 func (p *Pipeline) generateDraft(ctx context.Context, query Query, verdict CRAGVerdict, decision Decision, candidates []Candidate) (string, error) {

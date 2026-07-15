@@ -210,7 +210,7 @@ func TestParseTurn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			turn := parseTurn(tt.raw)
+			turn, _ := parseTurn(tt.raw)
 			if turn.Reply != tt.wantReply {
 				t.Fatalf("Reply = %q, want %q", turn.Reply, tt.wantReply)
 			}
