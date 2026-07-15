@@ -245,6 +245,29 @@ func TestPipelineFastDraftFallsBackToExpensiveRetrievalWhenCheapMisses(t *testin
 	}
 }
 
+func TestFastDraftSkipsLLMRerank(t *testing.T) {
+	q := Query{Mode: ModeFastDraft}
+	many := []Candidate{{ID: "1"}, {ID: "2"}, {ID: "3"}}
+	if shouldRerank(q, many) {
+		t.Fatal("fast_draft must skip LLM rerank even with many candidates")
+	}
+}
+
+func TestFastDraftKeepsCRAGForDecision(t *testing.T) {
+	q := Query{Mode: ModeFastDraft}
+	many := []Candidate{{ID: "1"}, {ID: "2"}}
+	if !shouldRunCRAG(q, many) {
+		t.Fatal("fast_draft keeps CRAG; skipping it forces Graded=false -> escalate -> no draft")
+	}
+}
+
+func TestFullReviewStillReranks(t *testing.T) {
+	q := Query{Mode: ModeFullReview}
+	if !shouldRerank(q, []Candidate{{ID: "1"}}) {
+		t.Fatal("full_review must keep rerank")
+	}
+}
+
 type recordingReranker struct {
 	calls int
 }

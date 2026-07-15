@@ -3,10 +3,31 @@ package rag
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestEvidenceContentJoinsGradedSet(t *testing.T) {
+	cands := []Candidate{
+		{ID: "1", Content: "alpha"},
+		{ID: "2", Content: "bravo"},
+		{ID: "3", Content: "charlie"},
+	}
+	out := evidenceContent(cands)
+	for _, want := range []string{"alpha", "bravo", "charlie"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("evidence set missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestEvidenceContentEmpty(t *testing.T) {
+	if evidenceContent(nil) != "" {
+		t.Fatal("no candidates -> empty evidence")
+	}
+}
 
 func TestWillGenerateGuards(t *testing.T) {
 	p := &Pipeline{}

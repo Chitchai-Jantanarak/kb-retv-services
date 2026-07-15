@@ -181,7 +181,7 @@ func (p *Pipeline) Run(ctx context.Context, query Query) (Result, error) {
 	if shouldRunCRAG(plannedQuery, candidates) && p.llmAllowed(ctx, query.CompanyID, "crag") {
 		if err := timed(timings, "crag", func() error {
 			var err error
-			cragResult, err = p.crag.Grade(ctx, plannedQuery.Text, topContent(candidates))
+			cragResult, err = p.crag.Grade(ctx, plannedQuery.Text, evidenceContent(candidates))
 			return err
 		}); err != nil {
 			return Result{}, err
@@ -457,8 +457,8 @@ func fastDraft(query Query) bool {
 	return query.Mode == ModeFastDraft
 }
 
-func shouldRerank(query Query, candidates []Candidate) bool {
-	return !(fastDraft(query) && len(candidates) < 2)
+func shouldRerank(query Query, _ []Candidate) bool {
+	return !fastDraft(query)
 }
 
 func shouldRunCRAG(query Query, candidates []Candidate) bool {
@@ -547,11 +547,18 @@ func validateQuery(query Query) error {
 	return nil
 }
 
-func topContent(candidates []Candidate) string {
+func evidenceContent(candidates []Candidate) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	return candidates[0].Content
+	var b strings.Builder
+	for i, c := range candidates {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(c.Content)
+	}
+	return b.String()
 }
 
 func computeConfidence(crag CRAGResult, candidates []Candidate) float64 {
