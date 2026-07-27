@@ -137,12 +137,14 @@ type ChatResponse struct {
 	Case           *ChatCaseDraft   `json:"case,omitempty"`
 	SearchResults  []ChatCaseResult `json:"search_results,omitempty"`
 	StageTimingsMS map[string]int64 `json:"stage_timings_ms,omitempty"`
+	Transcript     string           `json:"transcript,omitempty"`
 }
 
 const (
-	ChatStreamEventDelta = "delta"
-	ChatStreamEventDone  = "done"
-	ChatStreamEventError = "error"
+	ChatStreamEventDelta      = "delta"
+	ChatStreamEventDone       = "done"
+	ChatStreamEventError      = "error"
+	ChatStreamEventTranscript = "transcript"
 )
 
 type ChatStreamEvent struct {
@@ -152,6 +154,7 @@ type ChatStreamEvent struct {
 	Sources       []ChatSource     `json:"sources,omitempty"`
 	Activity      []ChatActivity   `json:"activity,omitempty"`
 	SearchResults []ChatCaseResult `json:"search_results,omitempty"`
+	Transcript    string           `json:"transcript,omitempty"`
 	Code          string           `json:"code,omitempty"`
 	Message       string           `json:"message,omitempty"`
 }

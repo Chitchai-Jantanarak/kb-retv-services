@@ -21,8 +21,13 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	if err != nil {
 		return err
 	}
+	if pre.transcript != "" {
+		if err := emit(dto.ChatStreamEvent{Type: dto.ChatStreamEventTranscript, Text: pre.transcript}); err != nil {
+			return err
+		}
+	}
 	if pre.handled {
-		return emitFinal(emit, pre.resp)
+		return emitFinal(emit, pre.resp, pre.transcript)
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
@@ -61,10 +66,11 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 
 	doneEvent := func() dto.ChatStreamEvent {
 		return dto.ChatStreamEvent{
-			Type:     dto.ChatStreamEventDone,
-			Status:   dto.ChatStatusAnswered,
-			Sources:  sources,
-			Activity: activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+			Type:       dto.ChatStreamEventDone,
+			Status:     dto.ChatStatusAnswered,
+			Sources:    sources,
+			Activity:   activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+			Transcript: pre.transcript,
 		}
 	}
 
@@ -102,7 +108,7 @@ func (w *Workflow) streamFallback(ctx context.Context, provider ports.LLMProvide
 }
 
 // Turns a pre-stage short-circuit response <Tools>
-func emitFinal(emit func(dto.ChatStreamEvent) error, resp dto.ChatResponse) error {
+func emitFinal(emit func(dto.ChatStreamEvent) error, resp dto.ChatResponse, transcript string) error {
 	if strings.TrimSpace(resp.Reply) != "" {
 		if err := emit(dto.ChatStreamEvent{Type: dto.ChatStreamEventDelta, Text: resp.Reply}); err != nil {
 			return err
@@ -114,5 +120,6 @@ func emitFinal(emit func(dto.ChatStreamEvent) error, resp dto.ChatResponse) erro
 		Sources:       resp.Sources,
 		Activity:      resp.Activity,
 		SearchResults: resp.SearchResults,
+		Transcript:    transcript,
 	})
 }

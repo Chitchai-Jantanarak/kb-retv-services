@@ -33,16 +33,18 @@ type CaseSource interface {
 }
 
 type Workflow struct {
-	tmpl       prompts.Template
-	streamTmpl prompts.Template
-	resolve    rag.ProviderForCompany
-	fts        FTSSource
-	profile    ProfileSource
-	cases      CaseSource
-	router     *intent.Router
-	orch       toolRunner
-	cache      ports.Cache
-	cacheTTL   time.Duration
+	tmpl        prompts.Template
+	streamTmpl  prompts.Template
+	resolve     rag.ProviderForCompany
+	fts         FTSSource
+	profile     ProfileSource
+	cases       CaseSource
+	router      *intent.Router
+	orch        toolRunner
+	cache       ports.Cache
+	cacheTTL    time.Duration
+	fetcher     ports.AttachmentFetcher
+	transcriber ports.Transcriber
 }
 
 type Option func(*Workflow)
@@ -80,6 +82,15 @@ func WithCaseSearch(cases CaseSource) Option {
 	}
 }
 
+func WithTranscription(fetcher ports.AttachmentFetcher, transcriber ports.Transcriber) Option {
+	return func(w *Workflow) {
+		if fetcher != nil && transcriber != nil {
+			w.fetcher = fetcher
+			w.transcriber = transcriber
+		}
+	}
+}
+
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("chat: prompt registry is required")
@@ -113,7 +124,9 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		return dto.ChatResponse{}, err
 	}
 	if pre.handled {
-		return withChatTimings(pre.resp, timings), nil
+		resp := pre.resp
+		resp.Transcript = pre.transcript
+		return withChatTimings(resp, timings), nil
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
@@ -196,11 +209,12 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		}
 	}
 	resp := dto.ChatResponse{
-		Reply:    turn.Reply,
-		Status:   dto.ChatStatusAnswered,
-		Sources:  sources,
-		Activity: activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
-		Case:     normalizeCaseDraft(turn.Case),
+		Reply:      turn.Reply,
+		Status:     dto.ChatStatusAnswered,
+		Sources:    sources,
+		Activity:   activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+		Case:       normalizeCaseDraft(turn.Case),
+		Transcript: pre.transcript,
 	}
 	if search := normalizeSearch(turn.Search); search != nil && w.cases != nil {
 		timedChat(timings, "search", func() {
@@ -217,28 +231,35 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 }
 
 type chatPreamble struct {
-	companyID int64
-	lastUser  string
-	resp      dto.ChatResponse
-	handled   bool
+	companyID  int64
+	lastUser   string
+	resp       dto.ChatResponse
+	handled    bool
+	transcript string
 }
 
 // prepare runs the pre-stages shared by Run and RunStream: request scope
-// checks, the fast off-domain guard, intent routing, and the tool
-// orchestrator short-circuit. It returns handled=true when the caller
-// should use resp as the final answer without touching the LLM.
+// checks, audio transcription, the fast off-domain guard, intent routing,
+// and the tool orchestrator short-circuit. It returns handled=true when the
+// caller should use resp as the final answer without touching the LLM.
 func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map[string]int64) (chatPreamble, error) {
 	companyID, ok := ctxkey.CompanyID(ctx)
 	if !ok || companyID <= 0 {
 		return chatPreamble{}, apperr.New(apperr.CodeUnauthorized, "company scope is required")
 	}
+
+	transcript, err := w.transcribeLastUserAudio(ctx, req)
+	if err != nil {
+		return chatPreamble{}, err
+	}
+
 	lastUser := req.LastUserMessage()
 	if lastUser == "" {
 		return chatPreamble{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
 	}
 
 	if w.router == nil {
-		return chatPreamble{companyID: companyID, lastUser: lastUser}, nil
+		return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
 	}
 
 	fastGuardHit := false
@@ -247,9 +268,10 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 	})
 	if fastGuardHit {
 		return chatPreamble{
-			companyID: companyID,
-			lastUser:  lastUser,
-			handled:   true,
+			companyID:  companyID,
+			lastUser:   lastUser,
+			handled:    true,
+			transcript: transcript,
 			resp: dto.ChatResponse{
 				Reply:    offDomainReply(req.Locale),
 				Status:   dto.ChatStatusOffDomain,
@@ -259,7 +281,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 	}
 
 	var decision intent.Decision
-	err := timedChatErr(timings, "router", func() error {
+	err = timedChatErr(timings, "router", func() error {
 		var err error
 		decision, err = w.router.Route(ctx, lastUser)
 		return err
@@ -275,17 +297,19 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		})
 		if toolErr == nil && toolResp.Matched {
 			return chatPreamble{
-				companyID: companyID,
-				lastUser:  lastUser,
-				handled:   true,
-				resp:      toolChatResponse(req.Locale, toolResp),
+				companyID:  companyID,
+				lastUser:   lastUser,
+				handled:    true,
+				transcript: transcript,
+				resp:       toolChatResponse(req.Locale, toolResp),
 			}, nil
 		}
 		if authoritativeIntent(decision.Intent) {
 			return chatPreamble{
-				companyID: companyID,
-				lastUser:  lastUser,
-				handled:   true,
+				companyID:  companyID,
+				lastUser:   lastUser,
+				handled:    true,
+				transcript: transcript,
 				resp: dto.ChatResponse{
 					Reply:    handoffReply(req.Locale),
 					Status:   dto.ChatStatusHandoff,
@@ -295,10 +319,65 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		}
 	}
 	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, resp: resp}, nil
+		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, transcript: transcript, resp: resp}, nil
 	}
 
-	return chatPreamble{companyID: companyID, lastUser: lastUser}, nil
+	return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
+}
+
+// transcribeLastUserAudio finds the first audio attachment on the last user
+// message, fetches and transcribes it, and mutates req.Messages in place
+// with the effective text per the dumb rule: audio-only replaces content,
+// audio+text appends the transcript as a quoted block. req.Messages shares
+// its backing array with the caller, so this mutation is visible to Run and
+// RunStream once prepare returns.
+func (w *Workflow) transcribeLastUserAudio(ctx context.Context, req dto.ChatRequest) (string, error) {
+	if w.transcriber == nil || w.fetcher == nil {
+		return "", nil
+	}
+
+	idx := -1
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == dto.ChatRoleUser {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return "", nil
+	}
+
+	var audioAtt *dto.AttachmentRef
+	for i := range req.Messages[idx].Attachments {
+		if strings.HasPrefix(strings.ToLower(req.Messages[idx].Attachments[i].MIMEType), "audio/") {
+			audioAtt = &req.Messages[idx].Attachments[i]
+			break
+		}
+	}
+	if audioAtt == nil {
+		return "", nil
+	}
+
+	data, err := w.fetcher.Fetch(ctx, toPromptAttachment(*audioAtt))
+	if err != nil {
+		return "", err
+	}
+	result, err := w.transcriber.Transcribe(ctx, ports.AudioInput{
+		Bytes:      data.Bytes,
+		MIMEType:   data.MIMEType,
+		LocaleHint: req.Locale,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	transcript := strings.TrimSpace(result.Text)
+	if strings.TrimSpace(req.Messages[idx].Content) == "" {
+		req.Messages[idx].Content = transcript
+	} else {
+		req.Messages[idx].Content = req.Messages[idx].Content + "\n\n> " + transcript
+	}
+	return transcript, nil
 }
 
 func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
@@ -380,15 +459,19 @@ func toPromptAttachments(attachments []dto.AttachmentRef) []ports.Attachment {
 	}
 	out := make([]ports.Attachment, len(attachments))
 	for i, a := range attachments {
-		out[i] = ports.Attachment{
-			ID:         a.ID,
-			MIMEType:   a.MIMEType,
-			StorageKey: a.StorageKey,
-			URL:        a.URL,
-			SizeBytes:  a.SizeBytes,
-		}
+		out[i] = toPromptAttachment(a)
 	}
 	return out
+}
+
+func toPromptAttachment(a dto.AttachmentRef) ports.Attachment {
+	return ports.Attachment{
+		ID:         a.ID,
+		MIMEType:   a.MIMEType,
+		StorageKey: a.StorageKey,
+		URL:        a.URL,
+		SizeBytes:  a.SizeBytes,
+	}
 }
 
 func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]dto.ChatSource, string) {

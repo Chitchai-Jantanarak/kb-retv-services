@@ -30,6 +30,7 @@ import (
 	searchwf "github.com/my/app/internal/application/workflows/search"
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/attachments"
 	lineinfra "github.com/my/app/internal/infra/line"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/memcache"
@@ -37,6 +38,7 @@ import (
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	"github.com/my/app/internal/infra/qdrant"
 	"github.com/my/app/internal/infra/tenant"
+	transcribegemini "github.com/my/app/internal/infra/transcribe/gemini"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	customermysql "github.com/my/app/internal/repositories/customer/mysql"
@@ -172,6 +174,16 @@ func main() {
 				chatwf.WithProfile(profile.NewAssembler(profilemysql.New(qdb))),
 				chatwf.WithCaseSearch(chatCaseSearch{repo: reportsRepo}),
 			)
+			if geminiKey := llmboot.LLMSettings(cfg).GeminiKey; geminiKey != "" {
+				if strings.TrimSpace(cfg.Laravel.BaseURL) != "" {
+					transcriber := transcribegemini.New(geminiKey, "", "", 0)
+					fetcher := attachments.New(cfg.Laravel.BaseURL, cfg.Laravel.HostHeader, time.Duration(cfg.Laravel.Timeout)*time.Second, 0)
+					chatOpts = append(chatOpts, chatwf.WithTranscription(fetcher, transcriber))
+					log.Info("voice transcription configured")
+				} else {
+					log.Warn("voice transcription not configured: laravel base url is required to fetch audio attachments")
+				}
+			}
 			if cw, cerr := chatwf.New(chatRegistry, resolver.ResolveFor, ftsSource, chatOpts...); cerr != nil {
 				log.Warn("chat endpoint not configured", zap.Error(cerr))
 			} else {
