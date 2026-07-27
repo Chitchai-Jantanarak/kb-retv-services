@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -84,6 +85,14 @@ type messagesRequest struct {
 	MaxTokens     int       `json:"max_tokens"`
 	Temperature   *float32  `json:"temperature,omitempty"`
 	StopSequences []string  `json:"stop_sequences,omitempty"`
+	Stream        bool      `json:"stream,omitempty"`
+}
+
+type sseDelta struct {
+	Delta struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"delta"`
 }
 
 type messagesUsage struct {
@@ -110,10 +119,78 @@ func (c *Client) GenerateJSON(ctx context.Context, p ports.Prompt) (ports.Comple
 }
 
 func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Completion, error) {
-	return nil, errors.New("anthropic: Stream not implemented")
+	req := c.buildRequest(p, false, true)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: marshal: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("anthropic-version", c.apiVersion)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: http: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, &llmerr.ProviderError{
+			Vendor:     "anthropic",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
+	}
+
+	out := make(chan ports.Completion)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		currentEvent := ""
+		for scanner.Scan() {
+			trimmed := strings.TrimSpace(scanner.Text())
+			if ev, ok := strings.CutPrefix(trimmed, "event:"); ok {
+				currentEvent = strings.TrimSpace(ev)
+				if currentEvent == "message_stop" {
+					return
+				}
+				continue
+			}
+			data, ok := strings.CutPrefix(trimmed, "data:")
+			if !ok {
+				continue
+			}
+			data = strings.TrimSpace(data)
+			if currentEvent != "content_block_delta" || data == "" {
+				continue
+			}
+			var chunk sseDelta
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+			if chunk.Delta.Type != "text_delta" || chunk.Delta.Text == "" {
+				continue
+			}
+			select {
+			case out <- ports.Completion{Text: chunk.Delta.Text, Vendor: "anthropic"}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
-func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (ports.Completion, error) {
+func (c *Client) buildRequest(p ports.Prompt, forceJSON, stream bool) messagesRequest {
 	system := p.System
 	if forceJSON {
 		if system == "" {
@@ -133,6 +210,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (port
 		System:        system,
 		MaxTokens:     maxToks,
 		StopSequences: p.Stop,
+		Stream:        stream,
 		Messages: []message{
 			{
 				Role: "user",
@@ -146,6 +224,11 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (port
 		t := p.Temp
 		req.Temperature = &t
 	}
+	return req
+}
+
+func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (ports.Completion, error) {
+	req := c.buildRequest(p, forceJSON, false)
 
 	body, err := json.Marshal(req)
 	if err != nil {

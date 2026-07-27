@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -197,12 +198,53 @@ func TestGenerateFailureCases(t *testing.T) {
 	}
 }
 
-func TestStreamNotImplemented(t *testing.T) {
-	c, err := New(Config{APIKey: "k"})
+func TestStreamForwardsSSEDeltasAndCloses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
 	if err != nil {
 		t.Fatalf("New() err = %v", err)
 	}
-	if _, err := c.Stream(context.Background(), ports.Prompt{}); err == nil {
-		t.Fatal("Stream() err = nil, want not-implemented error")
+
+	ch, err := c.Stream(context.Background(), ports.Prompt{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream() err = %v", err)
+	}
+
+	var got []string
+	for chunk := range ch {
+		got = append(got, chunk.Text)
+	}
+	if strings.Join(got, "") != "Hello" {
+		t.Fatalf("fragments = %v, want joined 'Hello'", got)
+	}
+}
+
+func TestStreamNonOKStatusReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"overloaded"}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	if _, err := c.Stream(context.Background(), ports.Prompt{User: "x"}); err == nil {
+		t.Fatal("Stream() err = nil, want error on non-200")
 	}
 }

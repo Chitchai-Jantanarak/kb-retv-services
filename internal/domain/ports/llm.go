@@ -3,12 +3,21 @@ package ports
 import "context"
 
 type Prompt struct {
-	System  string
-	User    string
-	Vars    map[string]string
-	MaxToks int
-	Temp    float32
-	Stop    []string
+	System      string
+	User        string
+	Vars        map[string]string
+	MaxToks     int
+	Temp        float32
+	Stop        []string
+	Attachments []Attachment
+}
+
+type Attachment struct {
+	ID         string
+	MIMEType   string
+	StorageKey string
+	URL        string
+	SizeBytes  int64
 }
 
 type Completion struct {

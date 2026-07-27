@@ -26,7 +26,10 @@ type InboundHandler struct {
 	normalizers *omnichannel.NormalizerRegistry
 	secret      []byte
 	maxBody     int64
+	verifiers   map[string]SignatureVerifier
 }
+
+type SignatureVerifier func(req *http.Request, raw []byte) error
 
 type InboundOption func(*InboundHandler)
 
@@ -55,6 +58,15 @@ func WithInboundMaxBodyBytes(n int64) InboundOption {
 	}
 }
 
+func WithChannelVerifier(channel string, v SignatureVerifier) InboundOption {
+	return func(h *InboundHandler) {
+		if h.verifiers == nil {
+			h.verifiers = make(map[string]SignatureVerifier)
+		}
+		h.verifiers[strings.ToLower(strings.TrimSpace(channel))] = v
+	}
+}
+
 func (h *InboundHandler) Receive(c *echo.Context) error {
 	channel := c.Param("channel")
 	if channel == "" {
@@ -74,7 +86,11 @@ func (h *InboundHandler) Receive(c *echo.Context) error {
 		return response.WriteError(c, apperr.Wrap(apperr.CodeInvalidInput, "read body", err))
 	}
 
-	if err := h.verifySignature(c.Request(), raw); err != nil {
+	if verifier, ok := h.verifiers[strings.ToLower(channel)]; ok {
+		if err := verifier(c.Request(), raw); err != nil {
+			return response.WriteError(c, err)
+		}
+	} else if err := h.verifySignature(c.Request(), raw); err != nil {
 		return response.WriteError(c, err)
 	}
 

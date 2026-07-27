@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
@@ -77,6 +79,15 @@ type chatRequest struct {
 	MaxTokens      int             `json:"max_tokens,omitempty"`
 	Stop           []string        `json:"stop,omitempty"`
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	Stream         bool            `json:"stream,omitempty"`
+}
+
+type chatStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+		} `json:"delta"`
+	} `json:"choices"`
 }
 
 type chatChoice struct {
@@ -108,11 +119,78 @@ func (c *Client) GenerateJSON(ctx context.Context, p ports.Prompt) (ports.Comple
 }
 
 func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Completion, error) {
-	return nil, errors.New("openai: Stream not implemented")
+	body, err := c.buildBody(p, nil, true)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("openai: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "text/event-stream")
+	if c.referrerURL != "" {
+		req.Header.Set("HTTP-Referer", c.referrerURL)
+	}
+	if c.title != "" {
+		req.Header.Set("X-Title", c.title)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai: http: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, &llmerr.ProviderError{
+			Vendor:     "openai",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
+	}
+
+	out := make(chan ports.Completion)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for scanner.Scan() {
+			trimmed := strings.TrimSpace(scanner.Text())
+			data, ok := strings.CutPrefix(trimmed, "data:")
+			if !ok {
+				continue
+			}
+			data = strings.TrimSpace(data)
+			if data == "" {
+				continue
+			}
+			if data == "[DONE]" {
+				return
+			}
+			var chunk chatStreamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+			if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
+				continue
+			}
+			select {
+			case out <- ports.Completion{Text: chunk.Choices[0].Delta.Content, Vendor: "openai"}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseFormat) (ports.Completion, error) {
-	body, err := c.buildBody(p, format)
+	body, err := c.buildBody(p, format, false)
 	if err != nil {
 		return ports.Completion{}, err
 	}
@@ -172,7 +250,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseForma
 	}, nil
 }
 
-func (c *Client) buildBody(p ports.Prompt, format *responseFormat) ([]byte, error) {
+func (c *Client) buildBody(p ports.Prompt, format *responseFormat, stream bool) ([]byte, error) {
 	msgs := make([]chatMessage, 0, 2)
 	if p.System != "" {
 		msgs = append(msgs, chatMessage{Role: "system", Content: p.System})
@@ -185,6 +263,7 @@ func (c *Client) buildBody(p ports.Prompt, format *responseFormat) ([]byte, erro
 		MaxTokens:      p.MaxToks,
 		Stop:           p.Stop,
 		ResponseFormat: format,
+		Stream:         stream,
 	}
 	if p.Temp > 0 {
 		t := p.Temp

@@ -90,6 +90,63 @@ func TestChatRequestValidateRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestChatRequestValidateAllowsAttachmentOnlyUserMessage(t *testing.T) {
+	req := ChatRequest{
+		Messages: []ChatMessage{
+			{Role: ChatRoleUser, Attachments: []AttachmentRef{{StorageKey: "s3://bucket/key.png"}}},
+		},
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil for attachment-only user message", err)
+	}
+}
+
+func TestChatRequestValidateRejectsEmptyAssistantContent(t *testing.T) {
+	req := ChatRequest{
+		Messages: []ChatMessage{
+			{Role: ChatRoleUser, Content: "hi"},
+			{Role: ChatRoleAssistant, Attachments: []AttachmentRef{{StorageKey: "s3://bucket/key.png"}}},
+		},
+	}
+	err := req.Validate()
+	appErr, ok := apperr.As(err)
+	if !ok || appErr.Code != apperr.CodeInvalidInput {
+		t.Fatalf("Validate() error = %v, want invalid_input for empty assistant content", err)
+	}
+}
+
+func TestChatRequestValidateRejectsTooManyAttachments(t *testing.T) {
+	attachments := make([]AttachmentRef, 6)
+	for i := range attachments {
+		attachments[i] = AttachmentRef{StorageKey: "s3://bucket/key.png"}
+	}
+	req := ChatRequest{
+		Messages: []ChatMessage{
+			{Role: ChatRoleUser, Attachments: attachments},
+		},
+	}
+	err := req.Validate()
+	if err == nil || !strings.Contains(err.Error(), "too many attachments") {
+		t.Fatalf("Validate() error = %v, want too many attachments", err)
+	}
+}
+
+func TestChatRequestValidatePropagatesInvalidAttachment(t *testing.T) {
+	req := ChatRequest{
+		Messages: []ChatMessage{
+			{Role: ChatRoleUser, Attachments: []AttachmentRef{{URL: "data:image/png;base64,AAAA"}}},
+		},
+	}
+	err := req.Validate()
+	appErr, ok := apperr.As(err)
+	if !ok || appErr.Code != apperr.CodeInvalidInput {
+		t.Fatalf("Validate() error = %v, want invalid_input for bad attachment url", err)
+	}
+	if !strings.Contains(err.Error(), "stored media") {
+		t.Fatalf("Validate() error = %v, want attachment url error propagated", err)
+	}
+}
+
 func TestChatRequestLastUserMessage(t *testing.T) {
 	req := ChatRequest{Messages: []ChatMessage{
 		{Role: ChatRoleUser, Content: "first"},

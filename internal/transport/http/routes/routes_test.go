@@ -247,6 +247,56 @@ func TestRegisterSkipsScalarDocsWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestRegisterUsesSearchRoute(t *testing.T) {
+	e := echo.New()
+	Register(e, handlers.NewReplyHandler(fakeWorkflow{}), Options{
+		Log:    zap.NewNop(),
+		Search: handlers.NewSearchHandler(fakeSearchWorkflow{}),
+	})
+
+	found := false
+	for _, route := range e.Router().Routes() {
+		if route.Method == http.MethodPost && route.Path == "/v1/search" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("search route not registered")
+	}
+}
+
+func TestRegisterUsesChatStreamRoute(t *testing.T) {
+	e := echo.New()
+	Register(e, handlers.NewReplyHandler(fakeWorkflow{}), Options{
+		Log:        zap.NewNop(),
+		ChatStream: handlers.NewChatStreamHandler(fakeChatStreamWorkflow{}),
+	})
+
+	found := false
+	for _, route := range e.Router().Routes() {
+		if route.Method == http.MethodPost && route.Path == "/v1/chat/stream" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("chat stream route not registered")
+	}
+}
+
+type fakeChatStreamWorkflow struct{}
+
+func (fakeChatStreamWorkflow) RunStream(context.Context, dto.ChatRequest, func(dto.ChatStreamEvent) error) error {
+	return nil
+}
+
+type fakeSearchWorkflow struct{}
+
+func (fakeSearchWorkflow) Run(context.Context, dto.SearchRequest) (dto.SearchResponse, error) {
+	return dto.SearchResponse{}, nil
+}
+
 type fakeWorkflow struct{}
 
 func (fakeWorkflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResponse, error) {

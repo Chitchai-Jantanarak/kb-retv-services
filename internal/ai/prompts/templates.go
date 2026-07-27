@@ -1,8 +1,8 @@
 package prompts
 
-// Canonical template names. These match the filenames under
-// internal/ai/prompts/templates/<name>.prompt and are also the keys
-// used by Registry.Get.
+// Canonical template names. These DO MATCH the filenames under
+// internal/ai/prompts/templates/<name>.prompt
+// The CORE key from Registry.Get
 const (
 	NameRewrite        = "rewrite"
 	NameClassifyStage1 = "classify_stage1"
@@ -14,12 +14,12 @@ const (
 	NameSelfRAG        = "self_rag"
 	NameGenerate       = "generate"
 	NameChat           = "chat"
+	NameChatStream     = "chat_stream"
 	NameIntakeExtract  = "intake_extract"
 )
 
-// canonicalNames lists every template that must be present in any
-// loaded set. Tests assert coverage; Registry construction fails when
-// a canonical template is missing from the loaded source.
+// MUST be presented along with template coveraging
+// Registry construction
 func canonicalNames() []string {
 	return []string{
 		NameRewrite,
@@ -32,6 +32,7 @@ func canonicalNames() []string {
 		NameSelfRAG,
 		NameGenerate,
 		NameChat,
+		NameChatStream,
 		NameIntakeExtract,
 	}
 }

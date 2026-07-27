@@ -81,6 +81,7 @@ func TestDefaultsCoverAllNamedTemplates(t *testing.T) {
 		NameSelfRAG,
 		NameGenerate,
 		NameChat,
+		NameChatStream,
 		NameIntakeExtract,
 	}
 	got := make([]string, 0, len(Defaults()))

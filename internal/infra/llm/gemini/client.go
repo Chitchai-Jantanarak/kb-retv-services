@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -106,10 +107,82 @@ func (c *Client) GenerateJSON(ctx context.Context, p ports.Prompt) (ports.Comple
 }
 
 func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Completion, error) {
-	return nil, errors.New("gemini: Stream not implemented")
+	req := c.buildRequest(p, "")
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: marshal: %w", err)
+	}
+
+	endpoint := fmt.Sprintf(
+		"%s/models/%s:streamGenerateContent?alt=sse&key=%s",
+		c.baseURL,
+		url.PathEscape(c.model),
+		url.QueryEscape(c.apiKey),
+	)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("gemini: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("gemini: http: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, &llmerr.ProviderError{
+			Vendor:     "gemini",
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
+	}
+
+	out := make(chan ports.Completion)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for scanner.Scan() {
+			trimmed := strings.TrimSpace(scanner.Text())
+			data, ok := strings.CutPrefix(trimmed, "data:")
+			if !ok {
+				continue
+			}
+			data = strings.TrimSpace(data)
+			if data == "" {
+				continue
+			}
+			var chunk generateResponse
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+			if len(chunk.Candidates) == 0 {
+				continue
+			}
+			var text strings.Builder
+			for _, prt := range chunk.Candidates[0].Content.Parts {
+				text.WriteString(prt.Text)
+			}
+			if text.Len() == 0 {
+				continue
+			}
+			select {
+			case out <- ports.Completion{Text: text.String(), Vendor: "gemini"}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
-func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.Completion, error) {
+func (c *Client) buildRequest(p ports.Prompt, mime string) generateRequest {
 	req := generateRequest{
 		Contents: []content{
 			{Role: "user", Parts: []part{{Text: p.User}}},
@@ -130,6 +203,11 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 		}
 		req.GenerationConfig = cfg
 	}
+	return req
+}
+
+func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.Completion, error) {
+	req := c.buildRequest(p, mime)
 
 	body, err := json.Marshal(req)
 	if err != nil {

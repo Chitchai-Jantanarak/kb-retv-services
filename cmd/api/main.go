@@ -17,6 +17,7 @@ import (
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/profile"
+	"github.com/my/app/internal/application/services/mediastore"
 	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/application/toolaudit"
 	"github.com/my/app/internal/application/toolbroker"
@@ -26,8 +27,10 @@ import (
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/application/workflows/reply"
+	searchwf "github.com/my/app/internal/application/workflows/search"
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
+	lineinfra "github.com/my/app/internal/infra/line"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/infra/memgraph"
@@ -112,6 +115,8 @@ func main() {
 	var feedbackHandler *handlers.FeedbackHandler
 	var reviewHandler *handlers.ReviewHandler
 	var chatHandler *handlers.ChatHandler
+	var chatStreamHandler *handlers.ChatStreamHandler
+	var searchHandler *handlers.SearchHandler
 	if qdb != nil {
 		reportsRepo := reportsmysql.New(qdb)
 		if resolver == nil {
@@ -171,8 +176,12 @@ func main() {
 				log.Warn("chat endpoint not configured", zap.Error(cerr))
 			} else {
 				chatHandler = handlers.NewChatHandler(cw)
+				chatStreamHandler = handlers.NewChatStreamHandler(cw)
 				log.Info("chat endpoint configured")
+				log.Info("chat stream endpoint configured")
 			}
+			searchHandler = handlers.NewSearchHandler(searchwf.NewWorkflow(ftsSource))
+			log.Info("search endpoint configured")
 		}
 		reportsHandler = handlers.NewReportsHandler(reportsRepo)
 		log.Info("reports endpoints configured")
@@ -209,6 +218,8 @@ func main() {
 		Feedback:       feedbackHandler,
 		Review:         reviewHandler,
 		Chat:           chatHandler,
+		ChatStream:     chatStreamHandler,
+		Search:         searchHandler,
 		Budget: appmiddleware.BudgetPolicy{
 			Fallback: time.Duration(cfg.Server.RequestBudgetMs) * time.Millisecond,
 			Headroom: time.Duration(cfg.Server.DeadlineHeadroomMs) * time.Millisecond,
@@ -373,10 +384,14 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		Accounts:      centralRepo,
 		Conversations: siloRepo,
 		Messages:      siloRepo,
+		Log:           log,
 	}
 	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {
 		wfCfg.Completeness = assessor
 		log.Info("email intake completeness check configured")
+	}
+	if promoter := buildLineMediaPromoter(cfg, log); promoter != nil {
+		wfCfg.MediaPromoter = promoter
 	}
 
 	wf, err := omnichannel.New(wfCfg)
@@ -390,7 +405,32 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	if err != nil {
 		return nil, err
 	}
-	return handlers.NewInboundHandler(wf, registry, handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)), nil
+	opts := []handlers.InboundOption{handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)}
+	if strings.TrimSpace(cfg.Line.ChannelSecret) != "" {
+		opts = append(opts, handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineSignatureVerifier(cfg.Line.ChannelSecret)))
+		log.Info("line webhook signature verification enabled")
+	}
+	return handlers.NewInboundHandler(wf, registry, opts...), nil
+}
+
+func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Promoter {
+	if strings.TrimSpace(cfg.Line.ChannelAccessToken) == "" ||
+		strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" ||
+		strings.TrimSpace(cfg.Laravel.BaseURL) == "" {
+		return nil
+	}
+	deliverer, err := mediastore.NewDeliverer(mediastore.DeliveryConfig{
+		BaseURL: cfg.Laravel.BaseURL,
+		Secret:  cfg.Laravel.WebhookSecret,
+		Timeout: time.Duration(cfg.Laravel.Timeout) * time.Second,
+	})
+	if err != nil {
+		log.Warn("line media promotion not configured", zap.Error(err))
+		return nil
+	}
+	contentClient := lineinfra.New("", cfg.Line.ChannelAccessToken, 0)
+	log.Info("line media promotion configured")
+	return mediastore.NewPromoter(contentClient, deliverer)
 }
 
 func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.CompanyResolver, log *zap.Logger) omnichannel.CompletenessAssessor {

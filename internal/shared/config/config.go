@@ -22,9 +22,15 @@ type Config struct {
 	Logger    Logger
 	Swagger   Swagger
 	Laravel   Laravel
+	Line      Line
 	Budget    Budget
 	Chat      Chat
 	Embedding Embedding
+}
+
+type Line struct {
+	ChannelSecret      string
+	ChannelAccessToken string
 }
 
 type Budget struct {
@@ -48,6 +54,7 @@ type Embedding struct {
 
 type Laravel struct {
 	BaseURL          string
+	HostHeader       string
 	WebhookSecret    string
 	TicketPath       string
 	Timeout          int
@@ -290,12 +297,17 @@ func LoadFrom(path string) (Config, error) {
 		},
 		Laravel: Laravel{
 			BaseURL:          v.GetString("laravel.base_url"),
+			HostHeader:       v.GetString("laravel.host_header"),
 			WebhookSecret:    v.GetString("laravel.webhook_secret"),
 			TicketPath:       firstNonEmpty(v.GetString("laravel.ticket_path"), "/api/webhooks/ai/ticket-create"),
 			Timeout:          firstNonZero(v.GetInt("laravel.timeout"), 10),
 			JWTSecret:        v.GetString("laravel.jwt_secret"),
 			JWTPublicKeyPath: v.GetString("laravel.jwt_public_key_path"),
 			JWKSURL:          v.GetString("laravel.jwks_url"),
+		},
+		Line: Line{
+			ChannelSecret:      v.GetString("line.channel_secret"),
+			ChannelAccessToken: v.GetString("line.channel_access_token"),
 		},
 		Budget: Budget{
 			MaxLLMCallsPerRequest:       v.GetInt("budget.maxLLMCallsPerRequest"),
@@ -382,12 +394,15 @@ var envBindings = []envBinding{
 	{key: "llm.breaker_cooldown_seconds", env: "LLM_BREAKER_COOLDOWN_SECONDS"},
 	{key: "llm.resolver_cache_ttl_seconds", env: "LLM_RESOLVER_CACHE_TTL_SECONDS"},
 	{key: "laravel.base_url", env: "LARAVEL_BASE_URL"},
+	{key: "laravel.host_header", env: "LARAVEL_HOST_HEADER"},
 	{key: "laravel.webhook_secret", env: "LARAVEL_WEBHOOK_SECRET"},
 	{key: "laravel.ticket_path", env: "LARAVEL_TICKET_PATH"},
 	{key: "laravel.timeout", env: "LARAVEL_TIMEOUT"},
 	{key: "laravel.jwt_secret", env: "AI_SERVICE_JWT_SECRET"},
 	{key: "laravel.jwt_public_key_path", env: "JWT_PUBLIC_KEY_PATH"},
 	{key: "laravel.jwks_url", env: "JWT_JWKS_URL"},
+	{key: "line.channel_secret", env: "LINE_CHANNEL_SECRET"},
+	{key: "line.channel_access_token", env: "LINE_CHANNEL_ACCESS_TOKEN"},
 }
 
 func loadDotEnv(v *viper.Viper, path string) error {

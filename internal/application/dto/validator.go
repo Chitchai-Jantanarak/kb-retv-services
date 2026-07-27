@@ -71,9 +71,18 @@ func (r AttachmentRef) Validate() error {
 		return apperr.New(apperr.CodeInvalidInput, "attachment reference is required")
 	}
 	if r.URL != "" {
-		parsed, err := url.ParseRequestURI(r.URL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		if strings.HasPrefix(r.URL, "//") {
 			return apperr.New(apperr.CodeInvalidInput, "attachment url is invalid")
+		}
+		if strings.HasPrefix(r.URL, "/") {
+			if _, err := url.Parse(r.URL); err != nil {
+				return apperr.New(apperr.CodeInvalidInput, "attachment url is invalid")
+			}
+		} else {
+			parsed, err := url.ParseRequestURI(r.URL)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return apperr.New(apperr.CodeInvalidInput, "attachment url is invalid")
+			}
 		}
 	}
 	if err := validateStruct(r); err != nil {

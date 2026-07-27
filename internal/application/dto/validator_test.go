@@ -113,6 +113,64 @@ func TestRAGQueryRequestValidateClampsLimit(t *testing.T) {
 	}
 }
 
+func TestAttachmentRefValidateAcceptsRootRelativeSignedURL(t *testing.T) {
+	req := ReplyRequest{
+		CustomerID: "customer-demo",
+		Message:    "see image",
+		Attachments: []AttachmentRef{
+			{URL: "/api/ai/attachments/fetch?key=x&signature=y"},
+		},
+	}
+
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestAttachmentRefValidateAcceptsAbsoluteHTTPSURL(t *testing.T) {
+	req := ReplyRequest{
+		CustomerID: "customer-demo",
+		Message:    "see image",
+		Attachments: []AttachmentRef{
+			{URL: "https://app.local/x"},
+		},
+	}
+
+	if err := req.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestAttachmentRefValidateRejectsJavascriptScheme(t *testing.T) {
+	req := ReplyRequest{
+		CustomerID: "customer-demo",
+		Message:    "see image",
+		Attachments: []AttachmentRef{
+			{URL: "javascript:alert(1)"},
+		},
+	}
+
+	err := req.Validate()
+	if !hasCode(err, apperr.CodeInvalidInput) {
+		t.Fatalf("Validate() error = %v, want invalid_input", err)
+	}
+}
+
+func TestAttachmentRefValidateRejectsProtocolRelativeURL(t *testing.T) {
+	req := ReplyRequest{
+		CustomerID: "customer-demo",
+		Message:    "see image",
+		Attachments: []AttachmentRef{
+			{URL: "//evil.com/x"},
+		},
+	}
+
+	err := req.Validate()
+	if !hasCode(err, apperr.CodeInvalidInput) {
+		t.Fatalf("Validate() error = %v, want invalid_input", err)
+	}
+}
+
 func hasCode(err error, code apperr.Code) bool {
 	var appErr *apperr.AppError
 	return errors.As(err, &appErr) && appErr.Code == code

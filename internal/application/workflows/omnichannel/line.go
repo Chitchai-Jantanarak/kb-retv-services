@@ -55,12 +55,25 @@ func (n LineNormalizer) Normalize(raw []byte) (Normalized, error) {
 	if strings.TrimSpace(ev.Message.ID) == "" {
 		return Normalized{}, errors.New("line: event has no message id")
 	}
+
+	body := ev.Message.Text
+	var attachments []dto.AttachmentRef
+	switch ev.Message.Type {
+	case "image":
+		body = ""
+		attachments = []dto.AttachmentRef{{ID: ev.Message.ID, MIMEType: "image/jpeg"}}
+	case "audio":
+		body = ""
+		attachments = []dto.AttachmentRef{{ID: ev.Message.ID, MIMEType: "audio/m4a"}}
+	}
+
 	return Normalized{
 		Request: dto.InboundMessageRequest{
 			Channel:           ChannelLine,
 			ExternalMessageID: ev.Message.ID,
 			CustomerID:        sender,
-			Body:              ev.Message.Text,
+			Body:              body,
+			Attachments:       attachments,
 		},
 		ExternalSender:    sender,
 		AccountExternalID: strings.TrimSpace(w.Destination),

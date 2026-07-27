@@ -217,6 +217,63 @@ func TestResilientHalfOpenFailureReopens(t *testing.T) {
 	}
 }
 
+type streamStubProvider struct {
+	calls  atomic.Int64
+	err    error
+	chunks []ports.Completion
+}
+
+func (s *streamStubProvider) Generate(_ context.Context, _ ports.Prompt) (ports.Completion, error) {
+	return ports.Completion{}, nil
+}
+
+func (s *streamStubProvider) GenerateJSON(_ context.Context, _ ports.Prompt) (ports.Completion, error) {
+	return ports.Completion{}, nil
+}
+
+func (s *streamStubProvider) Stream(_ context.Context, _ ports.Prompt) (<-chan ports.Completion, error) {
+	s.calls.Add(1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	ch := make(chan ports.Completion, len(s.chunks))
+	for _, c := range s.chunks {
+		ch <- c
+	}
+	close(ch)
+	return ch, nil
+}
+
+func TestResilientStreamDelegatesWithoutRetryOnError(t *testing.T) {
+	inner := &streamStubProvider{err: &llmerr.ProviderError{Vendor: "gemini", Status: 503}}
+	r := NewResilient(inner, ResilientOptions{MaxRetries: 3, RetryBaseBackoff: time.Millisecond})
+
+	_, err := r.Stream(context.Background(), ports.Prompt{})
+	if err == nil {
+		t.Fatal("Stream() err = nil, want error")
+	}
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("inner.calls = %d, want 1 (stream failures must not be retried)", got)
+	}
+}
+
+func TestResilientStreamForwardsChunksFromInner(t *testing.T) {
+	inner := &streamStubProvider{chunks: []ports.Completion{{Text: "a"}, {Text: "b"}}}
+	r := NewResilient(inner, ResilientOptions{})
+
+	ch, err := r.Stream(context.Background(), ports.Prompt{})
+	if err != nil {
+		t.Fatalf("Stream() err = %v", err)
+	}
+	var got []string
+	for c := range ch {
+		got = append(got, c.Text)
+	}
+	if strings.Join(got, "") != "ab" {
+		t.Fatalf("chunks = %v, want a,b", got)
+	}
+}
+
 func TestResilientRateLimitWaitFailsOnCancelledContext(t *testing.T) {
 	inner := &stubProvider{}
 	r := NewResilient(inner, ResilientOptions{RequestsPerSec: 0.0001, Burst: 1})

@@ -132,6 +132,34 @@ func TestRunReturnsReplySourcesAndCase(t *testing.T) {
 	}
 }
 
+func TestRunPassesLastUserAttachmentsToPrompt(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"ok","case":null}`}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	_, err = wf.Run(ctx, dto.ChatRequest{
+		Messages: []dto.ChatMessage{
+			{Role: dto.ChatRoleUser, Content: "here is a photo", Attachments: []dto.AttachmentRef{
+				{ID: "att-1", MIMEType: "image/png", StorageKey: "s3://bucket/key.png", URL: "https://cdn.example.com/key.png", SizeBytes: 1024},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(provider.prompt.Attachments) != 1 {
+		t.Fatalf("prompt.Attachments = %+v, want 1 converted attachment", provider.prompt.Attachments)
+	}
+	got := provider.prompt.Attachments[0]
+	want := ports.Attachment{ID: "att-1", MIMEType: "image/png", StorageKey: "s3://bucket/key.png", URL: "https://cdn.example.com/key.png", SizeBytes: 1024}
+	if got != want {
+		t.Fatalf("Attachments[0] = %+v, want %+v", got, want)
+	}
+}
+
 func TestRunDebugSurfacesChatStageTimings(t *testing.T) {
 	provider := &stubProvider{text: `{"reply":"summary","case":null}`}
 	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix"}}}

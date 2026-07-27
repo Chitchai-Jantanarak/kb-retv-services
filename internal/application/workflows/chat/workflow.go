@@ -33,15 +33,16 @@ type CaseSource interface {
 }
 
 type Workflow struct {
-	tmpl     prompts.Template
-	resolve  rag.ProviderForCompany
-	fts      FTSSource
-	profile  ProfileSource
-	cases    CaseSource
-	router   *intent.Router
-	orch     toolRunner
-	cache    ports.Cache
-	cacheTTL time.Duration
+	tmpl       prompts.Template
+	streamTmpl prompts.Template
+	resolve    rag.ProviderForCompany
+	fts        FTSSource
+	profile    ProfileSource
+	cases      CaseSource
+	router     *intent.Router
+	orch       toolRunner
+	cache      ports.Cache
+	cacheTTL   time.Duration
 }
 
 type Option func(*Workflow)
@@ -90,7 +91,11 @@ func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSour
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
-	w := &Workflow{tmpl: tmpl, resolve: resolve, fts: fts}
+	streamTmpl, err := registry.Get(prompts.NameChatStream)
+	if err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
+	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, resolve: resolve, fts: fts}
 	for _, opt := range opts {
 		opt(w)
 	}
@@ -102,60 +107,15 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		return dto.ChatResponse{}, err
 	}
 	timings := chatTimings(req.Debug)
-	companyID, ok := ctxkey.CompanyID(ctx)
-	if !ok || companyID <= 0 {
-		return dto.ChatResponse{}, apperr.New(apperr.CodeUnauthorized, "company scope is required")
-	}
-	lastUser := req.LastUserMessage()
-	if lastUser == "" {
-		return dto.ChatResponse{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
-	}
 
-	if w.router != nil {
-		fastGuardHit := false
-		timedChat(timings, "fast_guard", func() {
-			fastGuardHit = fastGuardOffDomain(lastUser)
-		})
-		if fastGuardHit {
-			return withChatTimings(dto.ChatResponse{
-				Reply:    offDomainReply(req.Locale),
-				Status:   dto.ChatStatusOffDomain,
-				Activity: activity(req.Locale, "request_checked"),
-			}, timings), nil
-		}
+	pre, err := w.prepare(ctx, req, timings)
+	if err != nil {
+		return dto.ChatResponse{}, err
 	}
-
-	if w.router != nil {
-		var decision intent.Decision
-		err := timedChatErr(timings, "router", func() error {
-			var err error
-			decision, err = w.router.Route(ctx, lastUser)
-			return err
-		})
-		if err != nil {
-			return dto.ChatResponse{}, err
-		}
-		if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff {
-			var toolResp skeleton.Response
-			var toolErr error
-			timedChat(timings, "tool", func() {
-				toolResp, toolErr = w.orch.Handle(ctx, toolActor(ctx, companyID), lastUser)
-			})
-			if toolErr == nil && toolResp.Matched {
-				return withChatTimings(toolChatResponse(req.Locale, toolResp), timings), nil
-			}
-			if authoritativeIntent(decision.Intent) {
-				return withChatTimings(dto.ChatResponse{
-					Reply:    handoffReply(req.Locale),
-					Status:   dto.ChatStatusHandoff,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				}, timings), nil
-			}
-		}
-		if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-			return withChatTimings(resp, timings), nil
-		}
+	if pre.handled {
+		return withChatTimings(pre.resp, timings), nil
 	}
+	companyID, lastUser := pre.companyID, pre.lastUser
 
 	key := cacheKey(companyID, req)
 	var (
@@ -187,7 +147,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	}
 
 	var prompt ports.Prompt
-	err := timedChatErr(timings, "render", func() error {
+	err = timedChatErr(timings, "render", func() error {
 		var err error
 		prompt, err = w.tmpl.Render(map[string]string{
 			"language":   promptLanguage(req.Locale),
@@ -200,6 +160,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	if err != nil {
 		return dto.ChatResponse{}, fmt.Errorf("chat: render prompt: %w", err)
 	}
+	prompt.Attachments = toPromptAttachments(lastUserAttachments(req))
 
 	var provider ports.LLMProvider
 	err = timedChatErr(timings, "resolve", func() error {
@@ -253,6 +214,91 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		w.storeResponse(ctx, key, resp)
 	})
 	return withChatTimings(resp, timings), nil
+}
+
+type chatPreamble struct {
+	companyID int64
+	lastUser  string
+	resp      dto.ChatResponse
+	handled   bool
+}
+
+// prepare runs the pre-stages shared by Run and RunStream: request scope
+// checks, the fast off-domain guard, intent routing, and the tool
+// orchestrator short-circuit. It returns handled=true when the caller
+// should use resp as the final answer without touching the LLM.
+func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map[string]int64) (chatPreamble, error) {
+	companyID, ok := ctxkey.CompanyID(ctx)
+	if !ok || companyID <= 0 {
+		return chatPreamble{}, apperr.New(apperr.CodeUnauthorized, "company scope is required")
+	}
+	lastUser := req.LastUserMessage()
+	if lastUser == "" {
+		return chatPreamble{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
+	}
+
+	if w.router == nil {
+		return chatPreamble{companyID: companyID, lastUser: lastUser}, nil
+	}
+
+	fastGuardHit := false
+	timedChat(timings, "fast_guard", func() {
+		fastGuardHit = fastGuardOffDomain(lastUser)
+	})
+	if fastGuardHit {
+		return chatPreamble{
+			companyID: companyID,
+			lastUser:  lastUser,
+			handled:   true,
+			resp: dto.ChatResponse{
+				Reply:    offDomainReply(req.Locale),
+				Status:   dto.ChatStatusOffDomain,
+				Activity: activity(req.Locale, "request_checked"),
+			},
+		}, nil
+	}
+
+	var decision intent.Decision
+	err := timedChatErr(timings, "router", func() error {
+		var err error
+		decision, err = w.router.Route(ctx, lastUser)
+		return err
+	})
+	if err != nil {
+		return chatPreamble{}, err
+	}
+	if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff {
+		var toolResp skeleton.Response
+		var toolErr error
+		timedChat(timings, "tool", func() {
+			toolResp, toolErr = w.orch.Handle(ctx, toolActor(ctx, companyID), lastUser)
+		})
+		if toolErr == nil && toolResp.Matched {
+			return chatPreamble{
+				companyID: companyID,
+				lastUser:  lastUser,
+				handled:   true,
+				resp:      toolChatResponse(req.Locale, toolResp),
+			}, nil
+		}
+		if authoritativeIntent(decision.Intent) {
+			return chatPreamble{
+				companyID: companyID,
+				lastUser:  lastUser,
+				handled:   true,
+				resp: dto.ChatResponse{
+					Reply:    handoffReply(req.Locale),
+					Status:   dto.ChatStatusHandoff,
+					Activity: activity(req.Locale, "request_checked", "permission_checked"),
+				},
+			}, nil
+		}
+	}
+	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
+		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, resp: resp}, nil
+	}
+
+	return chatPreamble{companyID: companyID, lastUser: lastUser}, nil
 }
 
 func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
@@ -317,6 +363,32 @@ func handoffReply(locale string) string {
 		return "I am routing you to a staff member. Please describe your issue and they will follow up."
 	}
 	return "กำลังส่งต่อให้เจ้าหน้าที่ กรุณาอธิบายปัญหาของคุณ แล้วเจ้าหน้าที่จะติดต่อกลับ"
+}
+
+func lastUserAttachments(req dto.ChatRequest) []dto.AttachmentRef {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == dto.ChatRoleUser {
+			return req.Messages[i].Attachments
+		}
+	}
+	return nil
+}
+
+func toPromptAttachments(attachments []dto.AttachmentRef) []ports.Attachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]ports.Attachment, len(attachments))
+	for i, a := range attachments {
+		out[i] = ports.Attachment{
+			ID:         a.ID,
+			MIMEType:   a.MIMEType,
+			StorageKey: a.StorageKey,
+			URL:        a.URL,
+			SizeBytes:  a.SizeBytes,
+		}
+	}
+	return out
 }
 
 func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]dto.ChatSource, string) {

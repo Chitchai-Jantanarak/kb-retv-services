@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/shared/ctxkey"
 )
@@ -42,6 +44,7 @@ type StoredMessage struct {
 	SenderExternal    string
 	Body              string
 	RawPayload        []byte
+	Attachments       []dto.AttachmentRef
 }
 
 type MessageStore interface {
@@ -62,12 +65,18 @@ type CompletenessAssessor interface {
 	Assess(ctx context.Context, companyID, conversationID int64, subject, body string) (Completeness, error)
 }
 
+type MediaPromoter interface {
+	Promote(ctx context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error
+}
+
 type Workflow struct {
 	accounts      AccountResolver
 	conversations ConversationStore
 	messages      MessageStore
 	tickets       TicketEnqueuer
 	completeness  CompletenessAssessor
+	mediaPromoter MediaPromoter
+	log           *zap.Logger
 }
 
 type Config struct {
@@ -76,6 +85,8 @@ type Config struct {
 	Messages      MessageStore
 	Tickets       TicketEnqueuer
 	Completeness  CompletenessAssessor
+	MediaPromoter MediaPromoter
+	Log           *zap.Logger
 }
 
 func New(cfg Config) (*Workflow, error) {
@@ -88,12 +99,18 @@ func New(cfg Config) (*Workflow, error) {
 	if cfg.Messages == nil {
 		return nil, errors.New("omnichannel: message store is required")
 	}
+	log := cfg.Log
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &Workflow{
 		accounts:      cfg.Accounts,
 		conversations: cfg.Conversations,
 		messages:      cfg.Messages,
 		tickets:       cfg.Tickets,
 		completeness:  cfg.Completeness,
+		mediaPromoter: cfg.MediaPromoter,
+		log:           log,
 	}, nil
 }
 
@@ -161,9 +178,23 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		SenderExternal:    customer,
 		Body:              req.Body,
 		RawPayload:        raw,
+		Attachments:       req.Attachments,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("omnichannel: insert message: %w", err)
+	}
+
+	if w.mediaPromoter != nil && req.Channel == ChannelLine && len(req.Attachments) > 0 {
+		for _, ref := range req.Attachments {
+			if perr := w.mediaPromoter.Promote(ctx, account.CompanyID, convoID, msgID, ref); perr != nil {
+				w.log.Warn("omnichannel: media promotion failed",
+					zap.Int64("company_id", account.CompanyID),
+					zap.Int64("conversation_id", convoID),
+					zap.Int64("message_id", msgID),
+					zap.String("attachment_id", ref.ID),
+					zap.Error(perr))
+			}
+		}
 	}
 
 	res := Result{

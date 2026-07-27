@@ -51,6 +51,61 @@ func TestLineNormalizerHappyPath(t *testing.T) {
 	}
 }
 
+func TestLineNormalizerImageMessageProducesAttachment(t *testing.T) {
+	raw := `{
+		"destination": "Ucompany123",
+		"events": [
+			{"type":"message","timestamp":1718000000,"source":{"type":"user","userId":"Uabc"},"message":{"id":"line-msg-img-1","type":"image"}}
+		]
+	}`
+	got, err := LineNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if got.Request.Body != "" {
+		t.Fatalf("body = %q, want empty for image message", got.Request.Body)
+	}
+	if len(got.Request.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want 1", got.Request.Attachments)
+	}
+	att := got.Request.Attachments[0]
+	if att.ID != "line-msg-img-1" {
+		t.Fatalf("attachment id = %q, want line-msg-img-1", att.ID)
+	}
+	if att.MIMEType != "image/jpeg" {
+		t.Fatalf("attachment mime = %q, want image/jpeg", att.MIMEType)
+	}
+	if err := got.Request.Validate(); err != nil {
+		t.Fatalf("Validate: %v, want image-only message to pass requireBodyOrAttachment", err)
+	}
+}
+
+func TestLineNormalizerAudioMessageProducesAttachment(t *testing.T) {
+	raw := `{
+		"destination": "Ucompany123",
+		"events": [
+			{"type":"message","timestamp":1718000000,"source":{"type":"user","userId":"Uabc"},"message":{"id":"line-msg-audio-1","type":"audio"}}
+		]
+	}`
+	got, err := LineNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if len(got.Request.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want 1", got.Request.Attachments)
+	}
+	att := got.Request.Attachments[0]
+	if att.ID != "line-msg-audio-1" {
+		t.Fatalf("attachment id = %q", att.ID)
+	}
+	if att.MIMEType != "audio/m4a" {
+		t.Fatalf("attachment mime = %q, want audio/m4a", att.MIMEType)
+	}
+	if err := got.Request.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestEmailNormalizerFailureCases(t *testing.T) {
 	cases := []struct {
 		name    string

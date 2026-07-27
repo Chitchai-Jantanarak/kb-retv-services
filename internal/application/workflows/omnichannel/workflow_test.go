@@ -34,6 +34,39 @@ func (s *ctxCapturingMessages) FindByExternalID(context.Context, string) (int64,
 	return 0, 0, false, nil
 }
 
+type attachmentCapturingMessages struct {
+	id  int64
+	got StoredMessage
+}
+
+func (s *attachmentCapturingMessages) InsertMessage(_ context.Context, m StoredMessage) (int64, error) {
+	s.got = m
+	return s.id, nil
+}
+func (s *attachmentCapturingMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
+	return 0, 0, false, nil
+}
+
+func TestRunPassesRequestAttachmentsToStoredMessage(t *testing.T) {
+	msgs := &attachmentCapturingMessages{id: 200}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := validNorm("Uabc")
+	norm.Request.Attachments = []dto.AttachmentRef{{StorageKey: "s3://bucket/key.png"}}
+	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(msgs.got.Attachments) != 1 || msgs.got.Attachments[0].StorageKey != "s3://bucket/key.png" {
+		t.Fatalf("StoredMessage.Attachments = %+v, want 1 with s3://bucket/key.png", msgs.got.Attachments)
+	}
+}
+
 type foundMessages struct {
 	convoID, msgID int64
 	insertCalled   bool
@@ -157,6 +190,96 @@ func validNorm(sender string) Normalized {
 		Request:           validReq(),
 		ExternalSender:    sender,
 		AccountExternalID: "Ubot-dest",
+	}
+}
+
+type promoterCall struct {
+	companyID, conversationID, messageID int64
+	ref                                   dto.AttachmentRef
+}
+
+type capturingPromoter struct {
+	calls []promoterCall
+	err   error
+}
+
+func (p *capturingPromoter) Promote(_ context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error {
+	p.calls = append(p.calls, promoterCall{companyID, conversationID, messageID, ref})
+	return p.err
+}
+
+func lineAttachmentNorm() Normalized {
+	norm := validNorm("Uabc")
+	norm.Request.Body = ""
+	norm.Request.Attachments = []dto.AttachmentRef{{ID: "line-msg-1", MIMEType: "image/jpeg"}}
+	return norm
+}
+
+func TestRunPromotesLineImageAttachmentsAfterInsert(t *testing.T) {
+	promoter := &capturingPromoter{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		MediaPromoter: promoter,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), lineAttachmentNorm(), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(promoter.calls) != 1 {
+		t.Fatalf("promoter calls = %d, want 1", len(promoter.calls))
+	}
+	call := promoter.calls[0]
+	if call.companyID != 7 || call.conversationID != 100 || call.messageID != 200 {
+		t.Fatalf("promoter call ids = %+v", call)
+	}
+	if call.ref.ID != "line-msg-1" {
+		t.Fatalf("promoter call ref = %+v", call.ref)
+	}
+}
+
+func TestRunMediaPromotionFailureDoesNotFailRun(t *testing.T) {
+	promoter := &capturingPromoter{err: errors.New("line api down")}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		MediaPromoter: promoter,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), lineAttachmentNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run must not fail when media promotion fails: %v", err)
+	}
+	if res.MessageID != 200 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(promoter.calls) != 1 {
+		t.Fatalf("promoter calls = %d, want 1", len(promoter.calls))
+	}
+}
+
+func TestRunSkipsMediaPromotionOnDuplicateMessage(t *testing.T) {
+	promoter := &capturingPromoter{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &foundMessages{convoID: 77, msgID: 88},
+		MediaPromoter: promoter,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), lineAttachmentNorm(), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(promoter.calls) != 0 {
+		t.Fatalf("promoter calls = %d, want 0 for dedup short-circuit", len(promoter.calls))
 	}
 }
 

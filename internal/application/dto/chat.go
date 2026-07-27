@@ -17,11 +17,13 @@ const (
 const (
 	chatMaxMessages        = 12
 	chatMaxTranscriptChars = 16000
+	chatMaxAttachments     = 5
 )
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role        string          `json:"role"`
+	Content     string          `json:"content"`
+	Attachments []AttachmentRef `json:"attachments,omitempty"`
 }
 
 type ChatRequest struct {
@@ -53,8 +55,14 @@ func (r *ChatRequest) Validate() error {
 		if m.Role != ChatRoleUser && m.Role != ChatRoleAssistant {
 			return apperr.New(apperr.CodeInvalidInput, "role must be user or assistant")
 		}
-		if m.Content == "" {
+		if len(m.Attachments) > chatMaxAttachments {
+			return apperr.New(apperr.CodeInvalidInput, "too many attachments")
+		}
+		if m.Content == "" && (m.Role != ChatRoleUser || len(m.Attachments) == 0) {
 			return apperr.New(apperr.CodeInvalidInput, "content is required")
+		}
+		if err := validateAttachmentRefs(m.Attachments); err != nil {
+			return err
 		}
 		total += len(m.Content)
 	}
@@ -129,4 +137,21 @@ type ChatResponse struct {
 	Case           *ChatCaseDraft   `json:"case,omitempty"`
 	SearchResults  []ChatCaseResult `json:"search_results,omitempty"`
 	StageTimingsMS map[string]int64 `json:"stage_timings_ms,omitempty"`
+}
+
+const (
+	ChatStreamEventDelta = "delta"
+	ChatStreamEventDone  = "done"
+	ChatStreamEventError = "error"
+)
+
+type ChatStreamEvent struct {
+	Type          string           `json:"-"`
+	Text          string           `json:"text,omitempty"`
+	Status        string           `json:"status,omitempty"`
+	Sources       []ChatSource     `json:"sources,omitempty"`
+	Activity      []ChatActivity   `json:"activity,omitempty"`
+	SearchResults []ChatCaseResult `json:"search_results,omitempty"`
+	Code          string           `json:"code,omitempty"`
+	Message       string           `json:"message,omitempty"`
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -113,6 +114,56 @@ func TestGenerateJSONAppendsJSONOnlySystemInstruction(t *testing.T) {
 	}
 	if !strings.Contains(captured.System, "be precise") || !strings.Contains(captured.System, "JSON") {
 		t.Fatalf("system did not combine both prompts: %q", captured.System)
+	}
+}
+
+func TestStreamForwardsSSEDeltasAndCloses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "event: content_block_delta\ndata: {\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		fmt.Fprint(w, "event: message_stop\ndata: {}\n\n")
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+
+	ch, err := c.Stream(context.Background(), ports.Prompt{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream() err = %v", err)
+	}
+
+	var got []string
+	for chunk := range ch {
+		got = append(got, chunk.Text)
+	}
+	if strings.Join(got, "") != "Hello" {
+		t.Fatalf("fragments = %v, want joined 'Hello'", got)
+	}
+}
+
+func TestStreamNonOKStatusReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"type":"overloaded_error","message":"overloaded"}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	if _, err := c.Stream(context.Background(), ports.Prompt{User: "x"}); err == nil {
+		t.Fatal("Stream() err = nil, want error on non-200")
 	}
 }
 

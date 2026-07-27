@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 )
 
@@ -55,6 +56,43 @@ func TestUpsertConversationStoresSubject(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("subject value not passed as arg: %v", q.execArgs)
+	}
+}
+
+func TestInsertMessageDoesNotWriteAttachmentsColumn(t *testing.T) {
+	q := &fakeQuerier{}
+	repo := New(q)
+
+	if _, err := repo.InsertMessage(context.Background(), omnichannel.StoredMessage{
+		ConversationID: 5,
+		Body:           "hello",
+		Attachments:    []dto.AttachmentRef{{StorageKey: "s3://bucket/key.png"}},
+	}); err != nil {
+		t.Fatalf("InsertMessage: %v", err)
+	}
+	if strings.Contains(q.execSQL, "attachments") {
+		t.Fatalf("INSERT must not reference attachments column, got: %s", q.execSQL)
+	}
+	for _, a := range q.execArgs {
+		if s, ok := a.(string); ok && strings.Contains(s, "s3://bucket/key.png") {
+			t.Fatalf("attachment payload must not be passed as insert arg: %v", q.execArgs)
+		}
+	}
+}
+
+func TestInsertMessageWritesNullAttachmentsWhenEmpty(t *testing.T) {
+	q := &fakeQuerier{}
+	repo := New(q)
+
+	if _, err := repo.InsertMessage(context.Background(), omnichannel.StoredMessage{
+		ConversationID: 5,
+		SenderExternal: "cust-1",
+		Body:           "hello",
+	}); err != nil {
+		t.Fatalf("InsertMessage: %v", err)
+	}
+	if len(q.execArgs) != 5 {
+		t.Fatalf("expected 5 insert args, got %d in %v", len(q.execArgs), q.execArgs)
 	}
 }
 
