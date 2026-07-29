@@ -95,7 +95,7 @@ func TestRunRequiresUserMessage(t *testing.T) {
 
 func TestRunReturnsReplySourcesAndCase(t *testing.T) {
 	provider := &stubProvider{text: `{"reply":"summary","case":{"problem":"p","detail":"d","product":"x","ready":true}}`}
-	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix"}}}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix", Relevance: 7.5}}}
 	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -271,10 +271,11 @@ func TestNormalizeCaseDraft(t *testing.T) {
 
 func TestRunServesRepeatFromCache(t *testing.T) {
 	provider := &stubProvider{text: `{"reply":"cached answer","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "printer reset steps", Relevance: 7.5}}}
 	wf, err := New(
 		prompts.MustNewRegistry(),
 		resolverFor(provider),
-		nil,
+		fts,
 		WithCache(memcache.New(16), time.Minute),
 	)
 	if err != nil {
@@ -302,10 +303,11 @@ func TestRunServesRepeatFromCache(t *testing.T) {
 
 func TestRunDebugCacheHitSurfacesCacheTimingOnlyAfterRouter(t *testing.T) {
 	provider := &stubProvider{text: `{"reply":"cached answer","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "printer reset steps", Relevance: 7.5}}}
 	wf, err := New(
 		prompts.MustNewRegistry(),
 		resolverFor(provider),
-		nil,
+		fts,
 		WithCache(memcache.New(16), time.Minute),
 	)
 	if err != nil {
@@ -520,17 +522,23 @@ func (s *stubProfile) Build(context.Context, int64) (string, error) {
 
 type stubCaseSearch struct {
 	results []dto.ChatCaseResult
+	err     error
 	query   string
 	product string
 	status  string
+	limit   int
 	calls   int
 }
 
-func (s *stubCaseSearch) SearchCases(_ context.Context, _ []int64, query, product, status string, _ int) ([]dto.ChatCaseResult, error) {
+func (s *stubCaseSearch) SearchCases(_ context.Context, _ []int64, query, product, status string, limit int) ([]dto.ChatCaseResult, error) {
 	s.calls++
 	s.query = query
 	s.product = product
 	s.status = status
+	s.limit = limit
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.results, nil
 }
 
@@ -605,6 +613,47 @@ func TestRunSkipsSearchWhenTurnHasNone(t *testing.T) {
 	}
 	if len(resp.SearchResults) != 0 {
 		t.Fatalf("SearchResults = %+v, want empty", resp.SearchResults)
+	}
+}
+
+func TestRunSearchNoResultsSetsStatusAndReply(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"Looking up the latest incoming cases for you.","case":null,"search":{"query":"latest incoming cases"}}`}
+	cases := &stubCaseSearch{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithCaseSearch(cases))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "give me 3 latest incoming cases"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Status != dto.ChatStatusNoResults {
+		t.Fatalf("status = %q, want no_results", resp.Status)
+	}
+	if resp.Reply == "Looking up the latest incoming cases for you." {
+		t.Fatal("reply must not surface the LLM's blind prose when the search returned zero rows")
+	}
+}
+
+func TestRunSearchErrorSetsToolFailedStatus(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"here you go","case":null,"search":{"query":"printer"}}`}
+	cases := &stubCaseSearch{err: apperr.New(apperr.CodeInternal, "db timeout")}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithCaseSearch(cases))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "find my printer case"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if resp.Status != dto.ChatStatusToolFailed {
+		t.Fatalf("status = %q, want tool_failed", resp.Status)
 	}
 }
 
@@ -688,6 +737,25 @@ func TestRunKBSearchReturnsStructuredSources(t *testing.T) {
 	}
 	if len(resp.Activity) == 0 {
 		t.Fatal("activity is empty")
+	}
+}
+
+func TestRunGatesLowRelevanceKnowledge(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"hi","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "unrelated report", Content: "contains the word hello", Relevance: 4.07}}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(resp.Sources) != 0 {
+		t.Fatalf("Sources = %+v, want empty for a below-floor relevance match", resp.Sources)
 	}
 }
 

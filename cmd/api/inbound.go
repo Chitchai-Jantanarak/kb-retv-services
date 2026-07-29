@@ -1,0 +1,106 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/my/app/internal/ai/prompts"
+	"github.com/my/app/internal/application/services/mediastore"
+	"github.com/my/app/internal/application/workflows/intake"
+	"github.com/my/app/internal/application/workflows/omnichannel"
+	lineinfra "github.com/my/app/internal/infra/line"
+	"github.com/my/app/internal/infra/llm"
+	"github.com/my/app/internal/infra/tenant"
+	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
+	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
+	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
+	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/transport/http/handlers"
+)
+
+func buildInboundHandler(cfg config.Config, central, router tenant.Querier, resolver *llm.CompanyResolver, log *zap.Logger) (*handlers.InboundHandler, error) {
+	if cfg.App.IsProduction() && strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" {
+		return nil, errors.New("inbound webhook secret is required in production")
+	}
+	centralRepo := channelsmysql.New(central)
+	siloRepo := channelsmysql.New(router)
+	wfCfg := omnichannel.Config{
+		Accounts:      centralRepo,
+		Conversations: siloRepo,
+		Messages:      siloRepo,
+		Log:           log,
+	}
+	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {
+		wfCfg.Completeness = assessor
+		log.Info("email intake completeness check configured")
+	}
+	if promoter := buildLineMediaPromoter(cfg, log); promoter != nil {
+		wfCfg.MediaPromoter = promoter
+	}
+
+	wf, err := omnichannel.New(wfCfg)
+	if err != nil {
+		return nil, err
+	}
+	registry, err := omnichannel.NewNormalizerRegistry(
+		omnichannel.LineNormalizer{},
+		omnichannel.EmailNormalizer{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	opts := []handlers.InboundOption{handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)}
+	if strings.TrimSpace(cfg.Line.ChannelSecret) != "" {
+		opts = append(opts, handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineSignatureVerifier(cfg.Line.ChannelSecret)))
+		log.Info("line webhook signature verification enabled")
+	}
+	return handlers.NewInboundHandler(wf, registry, opts...), nil
+}
+
+func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Promoter {
+	if strings.TrimSpace(cfg.Line.ChannelAccessToken) == "" ||
+		strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" ||
+		strings.TrimSpace(cfg.Laravel.BaseURL) == "" {
+		return nil
+	}
+	deliverer, err := mediastore.NewDeliverer(mediastore.DeliveryConfig{
+		BaseURL: cfg.Laravel.BaseURL,
+		Secret:  cfg.Laravel.WebhookSecret,
+		Timeout: time.Duration(cfg.Laravel.Timeout) * time.Second,
+	})
+	if err != nil {
+		log.Warn("line media promotion not configured", zap.Error(err))
+		return nil
+	}
+	contentClient := lineinfra.New("", cfg.Line.ChannelAccessToken, 0)
+	log.Info("line media promotion configured")
+	return mediastore.NewPromoter(contentClient, deliverer)
+}
+
+func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.CompanyResolver, log *zap.Logger) omnichannel.CompletenessAssessor {
+	if router == nil || resolver == nil {
+		log.Warn("email intake completeness check not configured: llm resolver unavailable")
+		return nil
+	}
+	registry, err := prompts.NewRegistry()
+	if err != nil {
+		log.Warn("email intake completeness check not configured", zap.Error(err))
+		return nil
+	}
+	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
+		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
+		intake.WithProducts(intakeProducts{repo: profilemysql.New(router)}),
+	)
+	if err != nil {
+		log.Warn("email intake completeness check not configured", zap.Error(err))
+		return nil
+	}
+	return intakeAssessor{svc: intake.NewService(extractor, sink, log)}
+}
+
+func inboundChannels() []string {
+	return []string{omnichannel.ChannelLine, omnichannel.ChannelEmail}
+}

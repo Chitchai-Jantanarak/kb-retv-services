@@ -11,6 +11,18 @@ import (
 
 var replyRe = regexp.MustCompile(`"reply"\s*:\s*"((?:[^"\\]|\\.)*)`)
 
+var caseCodeRe = regexp.MustCompile(`(?i)\b(REP-\d+)\b`)
+
+func searchQueryText(raw string) string {
+	if m := caseCodeRe.FindString(raw); m != "" {
+		return strings.ToUpper(m)
+	}
+	if len(strings.Fields(raw)) > searchQueryMaxWords {
+		return ""
+	}
+	return raw
+}
+
 type llmTurn struct {
 	Reply  string                 `json:"reply"`
 	Case   *dto.ChatCaseDraft     `json:"case"`
@@ -53,6 +65,10 @@ func normalizeSearch(req *dto.ChatSearchRequest) *dto.ChatSearchRequest {
 	req.Status = strings.ToLower(strings.TrimSpace(req.Status))
 	if req.IsZero() {
 		return nil
+	}
+	req.Query = searchQueryText(req.Query)
+	if req.Limit <= 0 || req.Limit > chatSearchMaxLimit {
+		req.Limit = chatSearchLimit
 	}
 	return req
 }

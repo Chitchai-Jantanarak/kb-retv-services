@@ -3,34 +3,15 @@ package chat
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
-	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
-	apperr "github.com/my/app/internal/shared/errors"
 )
-
-type toolRunner interface {
-	Handle(ctx context.Context, actor skeleton.Actor, msg string) (skeleton.Response, error)
-}
-
-type FTSSource interface {
-	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]rag.FTSChunk, error)
-}
-
-type ProfileSource interface {
-	Build(ctx context.Context, companyID int64) (string, error)
-}
-
-type CaseSource interface {
-	SearchCases(ctx context.Context, coverage []int64, query, product, status string, limit int) ([]dto.ChatCaseResult, error)
-}
 
 type Workflow struct {
 	tmpl        prompts.Template
@@ -45,50 +26,6 @@ type Workflow struct {
 	cacheTTL    time.Duration
 	fetcher     ports.AttachmentFetcher
 	transcriber ports.Transcriber
-}
-
-type Option func(*Workflow)
-
-func WithCache(cache ports.Cache, ttl time.Duration) Option {
-	return func(w *Workflow) {
-		if cache != nil && ttl > 0 {
-			w.cache = cache
-			w.cacheTTL = ttl
-		}
-	}
-}
-
-func WithRouter(router *intent.Router) Option {
-	return func(w *Workflow) { w.router = router }
-}
-
-func WithOrchestrator(orch toolRunner) Option {
-	return func(w *Workflow) { w.orch = orch }
-}
-
-func WithProfile(profile ProfileSource) Option {
-	return func(w *Workflow) {
-		if profile != nil {
-			w.profile = profile
-		}
-	}
-}
-
-func WithCaseSearch(cases CaseSource) Option {
-	return func(w *Workflow) {
-		if cases != nil {
-			w.cases = cases
-		}
-	}
-}
-
-func WithTranscription(fetcher ports.AttachmentFetcher, transcriber ports.Transcriber) Option {
-	return func(w *Workflow) {
-		if fetcher != nil && transcriber != nil {
-			w.fetcher = fetcher
-			w.transcriber = transcriber
-		}
-	}
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
@@ -130,7 +67,8 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
-	key := cacheKey(companyID, req)
+	principal, _ := ctxkey.PrincipalFrom(ctx)
+	key := cacheKey(companyID, principal, req)
 	var (
 		cachedResp dto.ChatResponse
 		cachedOK   bool
@@ -159,275 +97,17 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		})
 	}
 
-	var prompt ports.Prompt
-	err = timedChatErr(timings, "render", func() error {
-		var err error
-		prompt, err = w.tmpl.Render(map[string]string{
-			"language":   promptLanguage(req.Locale),
-			"transcript": buildTranscript(req.Messages),
-			"knowledge":  knowledgeSection(knowledge),
-			"profile":    profileSection(profileBlock),
-		})
-		return err
-	})
-	if err != nil {
-		return dto.ChatResponse{}, fmt.Errorf("chat: render prompt: %w", err)
-	}
-	prompt.Attachments = toPromptAttachments(lastUserAttachments(req))
-
-	var provider ports.LLMProvider
-	err = timedChatErr(timings, "resolve", func() error {
-		var err error
-		provider, err = w.resolve(ctx, companyID)
-		return err
-	})
-	if err != nil {
-		return dto.ChatResponse{}, fmt.Errorf("chat: resolve provider: %w", err)
-	}
-	var completion ports.Completion
-	err = timedChatErr(timings, "generate", func() error {
-		var err error
-		completion, err = provider.GenerateJSON(ctx, prompt)
-		return err
-	})
+	turn, err := w.generateTurn(ctx, req, companyID, knowledge, profileBlock, timings)
 	if err != nil {
 		return dto.ChatResponse{}, err
 	}
 
-	var turn llmTurn
-	var structuredOK bool
-	timedChat(timings, "parse", func() {
-		turn, structuredOK = parseTurn(completion.Text)
-	})
-	if !structuredOK && strings.TrimSpace(completion.Text) != "" {
-		repair := prompt
-		repair.User = prompt.User + "\n\nYour previous output was not a single JSON object. Reply again with ONLY the JSON object described above."
-		if retry, rerr := provider.GenerateJSON(ctx, repair); rerr == nil {
-			if rt, ok := parseTurn(retry.Text); ok {
-				turn, structuredOK = rt, true
-			}
-		}
-	}
-	resp := dto.ChatResponse{
-		Reply:      turn.Reply,
-		Status:     dto.ChatStatusAnswered,
-		Sources:    sources,
-		Activity:   activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
-		Case:       normalizeCaseDraft(turn.Case),
-		Transcript: pre.transcript,
-	}
-	if search := normalizeSearch(turn.Search); search != nil && w.cases != nil {
-		timedChat(timings, "search", func() {
-			coverage := ctxkey.CoverageOrSelf(ctx, companyID)
-			if results, serr := w.cases.SearchCases(ctx, coverage, search.Query, search.Product, search.Status, chatSearchLimit); serr == nil {
-				resp.SearchResults = results
-			}
-		})
-	}
+	resp := buildChatResponse(req, pre.transcript, turn, sources)
+	w.applyCaseSearch(ctx, req.Locale, companyID, turn.Search, &resp, timings)
 	timedChat(timings, "store_cache", func() {
 		w.storeResponse(ctx, key, resp)
 	})
 	return withChatTimings(resp, timings), nil
-}
-
-type chatPreamble struct {
-	companyID  int64
-	lastUser   string
-	resp       dto.ChatResponse
-	handled    bool
-	transcript string
-}
-
-// prepare runs the pre-stages shared by Run and RunStream: request scope
-// checks, audio transcription, the fast off-domain guard, intent routing,
-// and the tool orchestrator short-circuit. It returns handled=true when the
-// caller should use resp as the final answer without touching the LLM.
-func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map[string]int64) (chatPreamble, error) {
-	companyID, ok := ctxkey.CompanyID(ctx)
-	if !ok || companyID <= 0 {
-		return chatPreamble{}, apperr.New(apperr.CodeUnauthorized, "company scope is required")
-	}
-
-	transcript, err := w.transcribeLastUserAudio(ctx, req)
-	if err != nil {
-		return chatPreamble{}, err
-	}
-
-	lastUser := req.LastUserMessage()
-	if lastUser == "" {
-		return chatPreamble{}, apperr.New(apperr.CodeInvalidInput, "a user message is required")
-	}
-
-	if w.router == nil {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
-	}
-
-	fastGuardHit := false
-	timedChat(timings, "fast_guard", func() {
-		fastGuardHit = fastGuardOffDomain(lastUser)
-	})
-	if fastGuardHit {
-		return chatPreamble{
-			companyID:  companyID,
-			lastUser:   lastUser,
-			handled:    true,
-			transcript: transcript,
-			resp: dto.ChatResponse{
-				Reply:    offDomainReply(req.Locale),
-				Status:   dto.ChatStatusOffDomain,
-				Activity: activity(req.Locale, "request_checked"),
-			},
-		}, nil
-	}
-
-	var decision intent.Decision
-	err = timedChatErr(timings, "router", func() error {
-		var err error
-		decision, err = w.router.Route(ctx, lastUser)
-		return err
-	})
-	if err != nil {
-		return chatPreamble{}, err
-	}
-	if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff {
-		var toolResp skeleton.Response
-		var toolErr error
-		timedChat(timings, "tool", func() {
-			toolResp, toolErr = w.orch.Handle(ctx, toolActor(ctx, companyID), lastUser)
-		})
-		if toolErr == nil && toolResp.Matched {
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				transcript: transcript,
-				resp:       toolChatResponse(req.Locale, toolResp),
-			}, nil
-		}
-		if authoritativeIntent(decision.Intent) {
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				transcript: transcript,
-				resp: dto.ChatResponse{
-					Reply:    handoffReply(req.Locale),
-					Status:   dto.ChatStatusHandoff,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				},
-			}, nil
-		}
-	}
-	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, transcript: transcript, resp: resp}, nil
-	}
-
-	return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
-}
-
-// transcribeLastUserAudio finds the first audio attachment on the last user
-// message, fetches and transcribes it, and mutates req.Messages in place
-// with the effective text per the dumb rule: audio-only replaces content,
-// audio+text appends the transcript as a quoted block. req.Messages shares
-// its backing array with the caller, so this mutation is visible to Run and
-// RunStream once prepare returns.
-func (w *Workflow) transcribeLastUserAudio(ctx context.Context, req dto.ChatRequest) (string, error) {
-	if w.transcriber == nil || w.fetcher == nil {
-		return "", nil
-	}
-
-	idx := -1
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == dto.ChatRoleUser {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return "", nil
-	}
-
-	var audioAtt *dto.AttachmentRef
-	for i := range req.Messages[idx].Attachments {
-		if strings.HasPrefix(strings.ToLower(req.Messages[idx].Attachments[i].MIMEType), "audio/") {
-			audioAtt = &req.Messages[idx].Attachments[i]
-			break
-		}
-	}
-	if audioAtt == nil {
-		return "", nil
-	}
-
-	data, err := w.fetcher.Fetch(ctx, toPromptAttachment(*audioAtt))
-	if err != nil {
-		return "", err
-	}
-	result, err := w.transcriber.Transcribe(ctx, ports.AudioInput{
-		Bytes:      data.Bytes,
-		MIMEType:   data.MIMEType,
-		LocaleHint: req.Locale,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	transcript := strings.TrimSpace(result.Text)
-	if strings.TrimSpace(req.Messages[idx].Content) == "" {
-		req.Messages[idx].Content = transcript
-	} else {
-		req.Messages[idx].Content = req.Messages[idx].Content + "\n\n> " + transcript
-	}
-	return transcript, nil
-}
-
-func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
-	switch d.Intent {
-	case intent.OffDomain:
-		return dto.ChatResponse{
-			Reply:    offDomainReply(locale),
-			Status:   dto.ChatStatusOffDomain,
-			Activity: activity(locale, "request_checked"),
-		}, true
-	case intent.Handoff:
-		return dto.ChatResponse{
-			Reply:    handoffReply(locale),
-			Status:   dto.ChatStatusHandoff,
-			Activity: activity(locale, "request_checked", "permission_checked"),
-		}, true
-	default:
-		return dto.ChatResponse{}, false
-	}
-}
-
-func authoritativeIntent(i intent.Intent) bool {
-	switch i {
-	case intent.CaseStatus, intent.OpenCase:
-		return true
-	default:
-		return false
-	}
-}
-
-func toolActor(ctx context.Context, companyID int64) skeleton.Actor {
-	principal, _ := ctxkey.PrincipalFrom(ctx)
-	return skeleton.Actor{
-		CompanyID: companyID,
-		UserID:    principal.UserID,
-		Perms:     principal.Perms,
-		Coverage:  ctxkey.CoverageOrSelf(ctx, companyID),
-	}
-}
-
-func toolChatResponse(locale string, r skeleton.Response) dto.ChatResponse {
-	reply := r.Headline
-	if len(r.Lines) > 0 {
-		reply = r.Headline + "\n" + strings.Join(r.Lines, "\n")
-	}
-	return dto.ChatResponse{
-		Reply:    reply,
-		Status:   dto.ChatStatusAnswered,
-		Activity: activity(locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
-	}
 }
 
 func offDomainReply(locale string) string {
@@ -444,67 +124,16 @@ func handoffReply(locale string) string {
 	return "กำลังส่งต่อให้เจ้าหน้าที่ กรุณาอธิบายปัญหาของคุณ แล้วเจ้าหน้าที่จะติดต่อกลับ"
 }
 
-func lastUserAttachments(req dto.ChatRequest) []dto.AttachmentRef {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == dto.ChatRoleUser {
-			return req.Messages[i].Attachments
-		}
+func noResultsReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I could not find any cases matching that."
 	}
-	return nil
+	return "ไม่พบเคสที่ตรงกับที่ค้นหา"
 }
 
-func toPromptAttachments(attachments []dto.AttachmentRef) []ports.Attachment {
-	if len(attachments) == 0 {
-		return nil
+func toolFailedReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I could not complete that lookup. Please try again."
 	}
-	out := make([]ports.Attachment, len(attachments))
-	for i, a := range attachments {
-		out[i] = toPromptAttachment(a)
-	}
-	return out
-}
-
-func toPromptAttachment(a dto.AttachmentRef) ports.Attachment {
-	return ports.Attachment{
-		ID:         a.ID,
-		MIMEType:   a.MIMEType,
-		StorageKey: a.StorageKey,
-		URL:        a.URL,
-		SizeBytes:  a.SizeBytes,
-	}
-}
-
-func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query string) ([]dto.ChatSource, string) {
-	if w.fts == nil {
-		return nil, ""
-	}
-	chunks, err := w.fts.SearchChunks(ctx, []int64{companyID}, query, knowledgeChunkLimit)
-	if err != nil {
-		return nil, ""
-	}
-
-	var (
-		sources []dto.ChatSource
-		block   strings.Builder
-	)
-	for _, chunk := range chunks {
-		title := strings.TrimSpace(chunk.Title)
-		snippet := strings.TrimSpace(chunk.Content)
-		if len(snippet) > knowledgeSnippetMaxChars {
-			snippet = snippet[:knowledgeSnippetMaxChars]
-		}
-		if title != "" || snippet != "" {
-			sources = append(sources, dto.ChatSource{
-				ID:      fmt.Sprintf("chunk:%d", chunk.ChunkID),
-				Title:   title,
-				Snippet: snippet,
-				Source:  "fts",
-				Score:   chunk.Relevance,
-			})
-		}
-		if snippet != "" {
-			fmt.Fprintf(&block, "- %s: %s\n", title, snippet)
-		}
-	}
-	return sources, block.String()
+	return "ไม่สามารถดำเนินการค้นหาได้ กรุณาลองใหม่อีกครั้ง"
 }

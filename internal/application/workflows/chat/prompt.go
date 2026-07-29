@@ -11,6 +11,10 @@ const (
 	knowledgeChunkLimit      = 3
 	knowledgeSnippetMaxChars = 600
 	chatSearchLimit          = 5
+	chatSearchMaxLimit       = 20
+	searchQueryMaxWords      = 2
+	knowledgeMinRelevance    = 5.0
+	knowledgeMinRatio        = 0.5
 )
 
 func promptLanguage(locale string) string {

@@ -5,20 +5,43 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/shared/ctxkey"
 )
 
-func cacheKey(companyID int64, req dto.ChatRequest) string {
-	parts := make([]string, 0, len(req.Messages)*2+2)
-	parts = append(parts, strconv.FormatInt(companyID, 10), req.Locale)
+func cacheKey(companyID int64, principal ctxkey.Principal, req dto.ChatRequest) string {
+	parts := make([]string, 0, len(req.Messages)*2+8)
+	parts = append(parts,
+		strconv.FormatInt(companyID, 10),
+		strconv.FormatInt(principal.UserID, 10),
+		principal.Role,
+		req.Locale,
+		strings.Join(principal.Perms, ","),
+		coverageKey(principal.Coverage),
+	)
 	for _, m := range req.Messages {
 		parts = append(parts, m.Role, m.Content)
+		for _, a := range m.Attachments {
+			parts = append(parts, a.ID, a.StorageKey)
+		}
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return "chat:" + hex.EncodeToString(sum[:])
+}
+
+func coverageKey(coverage []int64) string {
+	ids := make([]int64, len(coverage))
+	copy(ids, coverage)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (w *Workflow) cachedResponse(ctx context.Context, key string) (dto.ChatResponse, bool) {
@@ -37,18 +60,19 @@ func (w *Workflow) cachedResponse(ctx context.Context, key string) (dto.ChatResp
 	return resp, true
 }
 
-func sanitizeForCache(resp dto.ChatResponse) dto.ChatResponse {
-	resp.StageTimingsMS = nil
-	resp.SearchResults = nil
-	resp.Case = nil
-	return resp
+func cacheable(resp dto.ChatResponse) bool {
+	return resp.Status == dto.ChatStatusAnswered &&
+		resp.Case == nil &&
+		len(resp.SearchResults) == 0 &&
+		len(resp.Sources) > 0
 }
 
 func (w *Workflow) storeResponse(ctx context.Context, key string, resp dto.ChatResponse) {
-	if w.cache == nil || strings.TrimSpace(resp.Reply) == "" {
+	if w.cache == nil || strings.TrimSpace(resp.Reply) == "" || !cacheable(resp) {
 		return
 	}
-	raw, err := json.Marshal(sanitizeForCache(resp))
+	resp.StageTimingsMS = nil
+	raw, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}

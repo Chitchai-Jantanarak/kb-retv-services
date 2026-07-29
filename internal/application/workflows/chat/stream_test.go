@@ -53,7 +53,7 @@ func (p *streamStubProvider) Stream(_ context.Context, prompt ports.Prompt) (<-c
 
 func TestRunStreamForwardsDeltasThenDone(t *testing.T) {
 	provider := &streamStubProvider{chunks: []string{"Hel", "lo"}}
-	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix"}}}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix", Relevance: 7.5}}}
 	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
