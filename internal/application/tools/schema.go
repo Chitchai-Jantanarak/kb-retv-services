@@ -17,6 +17,8 @@ type Tool struct {
 	EnabledBy   string            `json:"enabled_by"`
 }
 
+func (t Tool) IsWrite() bool { return t.Kind == "write" }
+
 type Thresholds struct {
 	Accept float64 `json:"accept"`
 	Floor  float64 `json:"floor"`

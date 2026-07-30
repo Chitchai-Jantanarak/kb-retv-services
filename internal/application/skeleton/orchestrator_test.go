@@ -2,6 +2,7 @@ package skeleton
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -14,11 +15,29 @@ func (f fakeSelector) Select(_ context.Context, _ string, _ []string) (tools.Sel
 	return f.sel, nil
 }
 
-type fakeHandler struct{ got Query }
+type fakeHandler struct {
+	got   Query
+	calls int
+}
 
 func (f *fakeHandler) Run(_ context.Context, q Query) ([]Row, error) {
 	f.got = q
+	f.calls++
 	return []Row{{"code": "R1"}, {"code": "R2"}}, nil
+}
+
+type failHandler struct{ calls int }
+
+func (f *failHandler) Run(_ context.Context, _ Query) ([]Row, error) {
+	f.calls++
+	return nil, fmt.Errorf("handler boom")
+}
+
+type failAuditor struct{ calls int }
+
+func (f *failAuditor) Log(_ context.Context, _ string, _ Actor, _ string) error {
+	f.calls++
+	return fmt.Errorf("audit boom")
 }
 
 type fakeAuditor struct {
@@ -40,6 +59,16 @@ func findTool() tools.Tool {
 		Handler: "reports.find",
 		Audit:   "ai.find_cases",
 		Compose: tools.Compose{Headline: "{n} cases match", Row: "{code}", Cite: "code"},
+	}
+}
+
+func writeTool() tools.Tool {
+	return tools.Tool{
+		ID:      "f5_close_case",
+		Kind:    "write",
+		Handler: "reports.close",
+		Audit:   "ai.close_case",
+		Compose: tools.Compose{Headline: "{n} cases closed", Row: "{code}", Cite: "code"},
 	}
 }
 
@@ -102,5 +131,59 @@ func TestNoMatchSkipsHandlerAndAudit(t *testing.T) {
 	}
 	if h.got.Tool.ID != "" || h.got.Text != "" || h.got.Coverage != nil {
 		t.Fatalf("handler must not run on no-match")
+	}
+}
+
+func TestHandleDoesNotRunHandlerWhenAuditFails(t *testing.T) {
+	h := &fakeHandler{}
+	a := &failAuditor{}
+	sel := fakeSelector{sel: tools.Selection{ToolID: "f1_find_cases", Matched: true}}
+	o := New(sel, []tools.Tool{findTool()}, map[string]Handler{"reports.find": h}, a)
+
+	actor := Actor{CompanyID: 7, Perms: []string{"report.view"}, Coverage: []int64{7, 8}}
+	_, err := o.Handle(context.Background(), actor, "close case R1")
+	if err == nil {
+		t.Fatalf("expected error when audit fails")
+	}
+	if h.calls != 0 {
+		t.Fatalf("handler must NEVER run when audit fails, got %d calls", h.calls)
+	}
+	if a.calls != 1 {
+		t.Fatalf("expected audit to be attempted once, got %d", a.calls)
+	}
+}
+
+func TestHandleReturnsKindOnHandlerError(t *testing.T) {
+	h := &failHandler{}
+	a := &fakeAuditor{}
+	sel := fakeSelector{sel: tools.Selection{ToolID: "f5_close_case", Matched: true}}
+	o := New(sel, []tools.Tool{writeTool()}, map[string]Handler{"reports.close": h}, a)
+
+	actor := Actor{CompanyID: 7, Perms: []string{"report.close"}, Coverage: []int64{7}}
+	resp, err := o.Handle(context.Background(), actor, "close case R1")
+	if err == nil {
+		t.Fatalf("expected error from handler")
+	}
+	if resp.Kind != "write" {
+		t.Fatalf("expected Kind %q on handler-error response, got %q", "write", resp.Kind)
+	}
+}
+
+func TestHandleReturnsKindOnSuccess(t *testing.T) {
+	h := &fakeHandler{}
+	a := &fakeAuditor{}
+	sel := fakeSelector{sel: tools.Selection{ToolID: "f5_close_case", Matched: true}}
+	o := New(sel, []tools.Tool{writeTool()}, map[string]Handler{"reports.close": h}, a)
+
+	actor := Actor{CompanyID: 7, Perms: []string{"report.close"}, Coverage: []int64{7}}
+	resp, err := o.Handle(context.Background(), actor, "close case R1")
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !resp.Matched {
+		t.Fatalf("expected match")
+	}
+	if resp.Kind != "write" {
+		t.Fatalf("expected Kind %q on success response, got %q", "write", resp.Kind)
 	}
 }

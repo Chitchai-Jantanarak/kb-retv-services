@@ -95,6 +95,8 @@ const (
 	ChatStatusOffDomain          = "off_domain"
 	ChatStatusHandoff            = "handoff"
 	ChatStatusNeedsClarification = "needs_clarification"
+	ChatStatusNoResults          = "no_results"
+	ChatStatusToolFailed         = "tool_failed"
 )
 
 type ChatSource struct {
@@ -109,6 +111,7 @@ type ChatSearchRequest struct {
 	Query   string `json:"query,omitempty"`
 	Product string `json:"product,omitempty"`
 	Status  string `json:"status,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
 }
 
 func (r ChatSearchRequest) IsZero() bool {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestPostmanReviewCallbackScriptsUseTimestampedHMAC(t *testing.T) {
-	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_collection.json")
+	specBytes, err := os.ReadFile("../../docs/api-collection/onlinesupport-go-ai-tests.postman_collection.json")
 	if err != nil {
 		t.Fatalf("read postman collection: %v", err)
 	}
@@ -23,9 +23,9 @@ func TestPostmanReviewCallbackScriptsUseTimestampedHMAC(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"POST review queue callback - valid signed",
-		"POST review queue callback - idempotent replay",
-		"POST review queue callback - stale signature rejected",
+		"review callback: valid signed",
+		"review callback: idempotent replay",
+		"review callback: stale signature rejected",
 	} {
 		item := postmanItem(t, callbacks, name)
 		script := postmanScript(t, item, "prerequest")
@@ -43,7 +43,7 @@ func TestPostmanReviewCallbackScriptsUseTimestampedHMAC(t *testing.T) {
 }
 
 func TestPostmanEnvironmentDocumentsCallbackVariables(t *testing.T) {
-	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_environment.json")
+	specBytes, err := os.ReadFile("../../docs/api-collection/onlinesupport-go-ai.postman_environment.json")
 	if err != nil {
 		t.Fatalf("read postman environment: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestPostmanEnvironmentDocumentsCallbackVariables(t *testing.T) {
 }
 
 func TestPostmanCollectionIncludesRAGFoundationDebugSet(t *testing.T) {
-	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_collection.json")
+	specBytes, err := os.ReadFile("../../docs/api-collection/onlinesupport-go-ai-tests.postman_collection.json")
 	if err != nil {
 		t.Fatalf("read postman collection: %v", err)
 	}
@@ -81,11 +81,11 @@ func TestPostmanCollectionIncludesRAGFoundationDebugSet(t *testing.T) {
 
 	rag := postmanFolder(t, collection, "RAG Foundation Debug")
 	for _, name := range []string{
-		"POST reply - debug trace baseline",
-		"POST reply - graph anchor confirmed symptom",
-		"POST reply - AI symptom confidence gate",
-		"POST reply - low confidence graph skipped",
-		"POST reply - parent context expansion smoke",
+		"reply: debug trace baseline",
+		"reply: graph anchor confirmed symptom",
+		"reply: AI symptom confidence gate",
+		"reply: low confidence graph skipped",
+		"reply: parent context expansion smoke",
 	} {
 		item := postmanItem(t, rag, name)
 		script := postmanScript(t, item, "test")
@@ -96,7 +96,7 @@ func TestPostmanCollectionIncludesRAGFoundationDebugSet(t *testing.T) {
 }
 
 func TestPostmanCollectionIncludesChatDebugTimingSet(t *testing.T) {
-	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_collection.json")
+	specBytes, err := os.ReadFile("../../docs/api-collection/onlinesupport-go-ai-tests.postman_collection.json")
 	if err != nil {
 		t.Fatalf("read postman collection: %v", err)
 	}
@@ -108,22 +108,22 @@ func TestPostmanCollectionIncludesChatDebugTimingSet(t *testing.T) {
 
 	chat := postmanFolder(t, collection, "Chat Debug Timing")
 	tests := map[string][]string{
-		"POST chat - fast guard timing": {
+		"chat: fast guard timing": {
 			"stage_timings_ms",
 			"fast_guard",
 			"generate",
 		},
-		"POST chat - handoff router timing": {
+		"chat: handoff router timing": {
 			"stage_timings_ms",
 			"router",
 			"generate",
 		},
-		"POST chat - KB cold timing": {
+		"chat: KB cold timing": {
 			"stage_timings_ms",
 			"generate",
 			"knowledge",
 		},
-		"POST chat - KB repeat cache timing": {
+		"chat: KB repeat cache timing": {
 			"stage_timings_ms",
 			"cache",
 			"generate",
@@ -141,7 +141,7 @@ func TestPostmanCollectionIncludesChatDebugTimingSet(t *testing.T) {
 }
 
 func TestPostmanEnvironmentDocumentsRAGFoundationVariables(t *testing.T) {
-	specBytes, err := os.ReadFile("../../docs/postman/onlinesupport-go-ai.postman_environment.json")
+	specBytes, err := os.ReadFile("../../docs/api-collection/onlinesupport-go-ai.postman_environment.json")
 	if err != nil {
 		t.Fatalf("read postman environment: %v", err)
 	}

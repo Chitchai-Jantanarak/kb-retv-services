@@ -56,9 +56,9 @@ func BuildArticleBody(report ReportRecord) string {
 	add("Status", report.StatusName)
 	add("Work type", report.WorkTypeName)
 	add("Severity", report.SeverityName)
-	add("Problem", htmltext.StripInlineImages(report.ProblemFull))
-	add("Detail", htmltext.StripInlineImages(report.ProblemDetail))
-	add("Resolution", htmltext.StripInlineImages(report.FixProblem))
+	add("Problem", htmltext.RedactSecrets(htmltext.StripInlineImages(report.ProblemFull)))
+	add("Detail", htmltext.RedactSecrets(htmltext.StripInlineImages(report.ProblemDetail)))
+	add("Resolution", htmltext.RedactSecrets(htmltext.StripInlineImages(report.FixProblem)))
 
 	return strings.Join(parts, "\n")
 }

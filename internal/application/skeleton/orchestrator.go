@@ -40,6 +40,7 @@ type Auditor interface {
 type Response struct {
 	Matched  bool
 	ToolID   string
+	Kind     string
 	Headline string
 	Lines    []string
 }
@@ -78,18 +79,16 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 		return Response{}, fmt.Errorf("skeleton: no handler %q for tool %q", tool.Handler, tool.ID)
 	}
 
+	if err := o.auditor.Log(ctx, tool.Audit, actor, tool.ID); err != nil {
+		return Response{Kind: tool.Kind}, fmt.Errorf("skeleton: audit: %w", err)
+	}
+
 	rows, err := handler.Run(ctx, Query{Tool: tool, Text: msg, Coverage: actor.Coverage, Actor: actor})
 	if err != nil {
-		return Response{}, fmt.Errorf("skeleton: handler %q: %w", tool.Handler, err)
+		return Response{Kind: tool.Kind}, fmt.Errorf("skeleton: handler %q: %w", tool.Handler, err)
 	}
 
-	resp := compose(tool, rows)
-
-	if err := o.auditor.Log(ctx, tool.Audit, actor, tool.ID); err != nil {
-		return Response{}, fmt.Errorf("skeleton: audit: %w", err)
-	}
-
-	return resp, nil
+	return compose(tool, rows), nil
 }
 
 func compose(tool tools.Tool, rows []Row) Response {
@@ -104,5 +103,5 @@ func compose(tool tools.Tool, rows []Row) Response {
 		lines = append(lines, line)
 	}
 
-	return Response{Matched: true, ToolID: tool.ID, Headline: headline, Lines: lines}
+	return Response{Matched: true, ToolID: tool.ID, Kind: tool.Kind, Headline: headline, Lines: lines}
 }

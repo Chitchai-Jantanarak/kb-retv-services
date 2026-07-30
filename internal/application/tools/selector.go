@@ -80,6 +80,7 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 	query := normalize(vecs[0])
 
 	best := Selection{}
+	nearMiss := Selection{}
 	for _, t := range s.tools {
 		if !perms.Can(granted, t.perm) {
 			continue
@@ -92,9 +93,21 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 			}
 		}
 
-		if score > best.Score {
-			best = Selection{ToolID: t.id, Score: score, Matched: score >= t.accept}
+		if score > nearMiss.Score {
+			nearMiss = Selection{ToolID: t.id, Score: score}
 		}
+
+		if score < t.accept {
+			continue
+		}
+
+		if !best.Matched || score > best.Score {
+			best = Selection{ToolID: t.id, Score: score, Matched: true}
+		}
+	}
+
+	if !best.Matched {
+		return nearMiss, nil
 	}
 
 	return best, nil

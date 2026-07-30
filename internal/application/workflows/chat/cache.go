@@ -20,7 +20,7 @@ func cacheKey(companyID int64, principal ctxkey.Principal, req dto.ChatRequest) 
 		strconv.FormatInt(principal.UserID, 10),
 		principal.Role,
 		req.Locale,
-		strings.Join(principal.Perms, ","),
+		permsKey(principal.Perms),
 		coverageKey(principal.Coverage),
 	)
 	for _, m := range req.Messages {
@@ -31,6 +31,13 @@ func cacheKey(companyID int64, principal ctxkey.Principal, req dto.ChatRequest) 
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return "chat:" + hex.EncodeToString(sum[:])
+}
+
+func permsKey(perms []string) string {
+	sorted := make([]string, len(perms))
+	copy(sorted, perms)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
 }
 
 func coverageKey(coverage []int64) string {
