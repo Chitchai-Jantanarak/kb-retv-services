@@ -14,6 +14,7 @@ import (
 	lineinfra "github.com/my/app/internal/infra/line"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/tenant"
+	activitymysql "github.com/my/app/internal/repositories/activity/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
@@ -31,6 +32,7 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		Accounts:      centralRepo,
 		Conversations: siloRepo,
 		Messages:      siloRepo,
+		Activity:      activitymysql.New(router),
 		Log:           log,
 	}
 	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {

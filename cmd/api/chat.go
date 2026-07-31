@@ -14,6 +14,7 @@ import (
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/activityaudit"
 	"github.com/my/app/internal/application/toolaudit"
 	"github.com/my/app/internal/application/toolbroker"
 	"github.com/my/app/internal/application/tools"
@@ -24,6 +25,7 @@ import (
 	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/infra/tenant"
 	transcribegemini "github.com/my/app/internal/infra/transcribe/gemini"
+	activitymysql "github.com/my/app/internal/repositories/activity/mysql"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	customermysql "github.com/my/app/internal/repositories/customer/mysql"
@@ -169,7 +171,10 @@ func appendChatIntelligenceOptions(
 		selector,
 		bound,
 		broker.Handlers(),
-		toolaudit.New(mysqlai.NewActionRecorder(qdb), agentIDLookup(resolver, log)),
+		toolaudit.New(
+			activityaudit.NewAIAction(mysqlai.NewActionRecorder(qdb), activitymysql.New(qdb), log),
+			agentIDLookup(resolver, log),
+		),
 	)
 	chatOpts = append(chatOpts, chatwf.WithOrchestrator(orch))
 	log.Info("tool orchestrator configured",

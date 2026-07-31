@@ -10,6 +10,7 @@ import (
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
+	"github.com/my/app/internal/application/activityaudit"
 	"github.com/my/app/internal/application/workflows/reply"
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
@@ -18,6 +19,7 @@ import (
 	"github.com/my/app/internal/infra/memgraph"
 	"github.com/my/app/internal/infra/qdrant"
 	"github.com/my/app/internal/infra/tenant"
+	activitymysql "github.com/my/app/internal/repositories/activity/mysql"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
 	"github.com/my/app/internal/repositories/graph"
 	"github.com/my/app/internal/repositories/kb/memory"
@@ -66,7 +68,10 @@ func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger,
 	opts = append(
 		opts,
 		reply.WithThresholdFor(thresholdLookup(resolver, log)),
-		reply.WithActionRecorder(mysqlai.NewActionRecorder(db), agentIDLookup(resolver, log)),
+		reply.WithActionRecorder(
+			activityaudit.NewAIAction(mysqlai.NewActionRecorder(db), activitymysql.New(db), log),
+			agentIDLookup(resolver, log),
+		),
 	)
 	log.Info("per-company confidence threshold lookup configured")
 	log.Info("ai_actions recorder configured")

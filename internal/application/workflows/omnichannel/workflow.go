@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 )
 
@@ -76,6 +77,7 @@ type Workflow struct {
 	tickets       TicketEnqueuer
 	completeness  CompletenessAssessor
 	mediaPromoter MediaPromoter
+	activity      ports.ActivityRecorder
 	log           *zap.Logger
 }
 
@@ -86,6 +88,7 @@ type Config struct {
 	Tickets       TicketEnqueuer
 	Completeness  CompletenessAssessor
 	MediaPromoter MediaPromoter
+	Activity      ports.ActivityRecorder
 	Log           *zap.Logger
 }
 
@@ -110,6 +113,7 @@ func New(cfg Config) (*Workflow, error) {
 		tickets:       cfg.Tickets,
 		completeness:  cfg.Completeness,
 		mediaPromoter: cfg.MediaPromoter,
+		activity:      cfg.Activity,
 		log:           log,
 	}, nil
 }
@@ -194,6 +198,29 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 					zap.String("attachment_id", ref.ID),
 					zap.Error(perr))
 			}
+		}
+	}
+
+	if w.activity != nil {
+		entry := ports.ActivityEntry{
+			CompanyID:     account.CompanyID,
+			ActorType:     ports.ActorTypeChannel,
+			ActorExternal: customer,
+			SubjectType:   "message",
+			SubjectID:     msgID,
+			Action:        ports.ActivityCreate,
+			Context: map[string]any{
+				"channel":            req.Channel,
+				"channel_account_id": account.ID,
+				"conversation_id":    convoID,
+			},
+		}
+		if aerr := w.activity.RecordActivity(ctx, entry); aerr != nil {
+			w.log.Warn("omnichannel: activity record failed",
+				zap.Int64("company_id", account.CompanyID),
+				zap.Int64("conversation_id", convoID),
+				zap.Int64("message_id", msgID),
+				zap.Error(aerr))
 		}
 	}
 
