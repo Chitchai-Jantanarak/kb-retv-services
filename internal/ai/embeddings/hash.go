@@ -3,8 +3,9 @@ package embeddings
 import (
 	"context"
 	"hash/fnv"
-	"math"
 	"strings"
+
+	"github.com/my/app/internal/shared/vec"
 )
 
 type HashProvider struct {
@@ -39,7 +40,7 @@ func (p *HashProvider) embedOne(text string) []float32 {
 		index := hashTerm(term) % uint64(p.dim)
 		vector[index]++
 	}
-	normalize(vector)
+	vec.NormalizeInPlace(vector)
 	return vector
 }
 
@@ -47,18 +48,4 @@ func hashTerm(term string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(term))
 	return h.Sum64()
-}
-
-func normalize(vector []float32) {
-	var sum float64
-	for _, value := range vector {
-		sum += float64(value * value)
-	}
-	if sum == 0 {
-		return
-	}
-	norm := float32(math.Sqrt(sum))
-	for i := range vector {
-		vector[i] = vector[i] / norm
-	}
 }

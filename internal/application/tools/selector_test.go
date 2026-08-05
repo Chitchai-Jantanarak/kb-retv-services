@@ -30,10 +30,10 @@ func twoTools() []Tool {
 
 func emb() fakeEmbedder {
 	return fakeEmbedder{table: map[string][]float32{
-		"cases":          {1, 0},
-		"workload":       {0, 1},
-		"show me cases":  {1, 0},
-		"team workload":  {0, 1},
+		"cases":         {1, 0},
+		"workload":      {0, 1},
+		"show me cases": {1, 0},
+		"team workload": {0, 1},
 	}}
 }
 
@@ -137,5 +137,99 @@ func TestSelectReturnsNearMissWhenNothingClears(t *testing.T) {
 	}
 	if got.Score <= 0 {
 		t.Fatalf("want near-miss Score to be surfaced (nonzero), got %+v", got)
+	}
+}
+
+func TestSelectMarksPermFiltered(t *testing.T) {
+	s, err := NewSelector(context.Background(), emb(), twoTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "show me cases", nil)
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Matched || !got.PermFiltered {
+		t.Fatalf("want unmatched + PermFiltered with no grants, got %+v", got)
+	}
+
+	got, err = s.Select(context.Background(), "show me cases", []string{"report.view", "team.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.PermFiltered {
+		t.Fatalf("PermFiltered should be false when tools passed perms, got %+v", got)
+	}
+}
+
+func caseTools() []Tool {
+	codeParam := Param{Name: "code", Required: true, Pattern: `(?i)\bREP-?\d+\b`}
+	return []Tool{
+		{ID: "f1_find", Anchors: []string{"latest cases"}, Thresholds: Thresholds{Accept: 0.55}, RBAC: RBAC{RequiresPermission: "report.view"},
+			Params: []Param{{Name: "status", Map: map[string]string{"waiting": "waiting", "done": "done"}}}},
+		{ID: "f2_track", Anchors: []string{"case status"}, Thresholds: Thresholds{Accept: 0.55}, RBAC: RBAC{RequiresPermission: "report.view"},
+			Params: []Param{codeParam}},
+	}
+}
+
+func caseEmb() fakeEmbedder {
+	return fakeEmbedder{table: map[string][]float32{
+		"latest cases":                 {1, 0},
+		"case status":                  {0.8, 0.6},
+		"give me the latest cases":     {0.99, 0.14},
+		"status of REP-606":            {0.85, 0.53},
+		"what is the status of a case": {0.85, 0.53},
+	}}
+}
+
+func TestSelectExcludesUnsatisfiableTool(t *testing.T) {
+	s, err := NewSelector(context.Background(), caseEmb(), caseTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "what is the status of a case", []string{"report.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.ToolID != "f1_find" || !got.Matched {
+		t.Fatalf("want f1_find (f2 unsatisfiable without code), got %+v", got)
+	}
+}
+
+func TestSelectPrefersMoreSpecificSatisfiableTool(t *testing.T) {
+	s, err := NewSelector(context.Background(), caseEmb(), caseTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "status of REP-606", []string{"report.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.ToolID != "f2_track" || !got.Matched {
+		t.Fatalf("want f2_track to beat f1 on specificity when a code is present, got %+v", got)
+	}
+	if got.Params["code"] != "REP-606" {
+		t.Fatalf("params = %v, want code REP-606", got.Params)
+	}
+}
+
+func TestSelectSurfacesOptionalParams(t *testing.T) {
+	s, err := NewSelector(context.Background(), caseEmb(), caseTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "give me the latest cases", []string{"report.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.ToolID != "f1_find" {
+		t.Fatalf("want f1_find, got %+v", got)
+	}
+	if len(got.Params) != 0 {
+		t.Fatalf("params = %v, want empty when no keyword present", got.Params)
 	}
 }

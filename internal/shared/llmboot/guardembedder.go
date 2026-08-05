@@ -19,16 +19,18 @@ type thresholdSource interface {
 	Thresholds() (floor, accept, margin float64)
 }
 
-func GuardEmbedder(cfg config.Config, fallback ports.EmbeddingProvider) (ports.EmbeddingProvider, GuardThresholds, string) {
+func GuardEmbedder(cfg config.Config, fallback ports.EmbeddingProvider) (ports.EmbeddingProvider, GuardThresholds, string, error) {
 	if cfg.Chat.GuardEmbedderProvider != "static-local" {
-		return fallback, GuardThresholds{}, "guard embedder disabled; using shared embedder"
+		return fallback, GuardThresholds{}, "guard embedder disabled; using shared embedder", nil
 	}
 	_, _, prov, err := embeddings.NewProvider(embeddings.ProviderSettings{
 		Provider: "static-local",
 		BaseURL:  cfg.Chat.GuardEmbedderAssetDir,
 	})
 	if err != nil {
-		return fallback, GuardThresholds{}, fmt.Sprintf("guard embedder load failed: %v; using shared embedder", err)
+		return nil, GuardThresholds{}, "", fmt.Errorf(
+			"guard embedder: static-local was requested but %q failed to load: %w",
+			cfg.Chat.GuardEmbedderAssetDir, err)
 	}
 	th := GuardThresholds{}
 	if ts, ok := prov.(thresholdSource); ok {
@@ -37,5 +39,5 @@ func GuardEmbedder(cfg config.Config, fallback ports.EmbeddingProvider) (ports.E
 			th = GuardThresholds{Floor: f, Accept: a, Margin: m, HasValues: true}
 		}
 	}
-	return prov, th, "guard embedder: static-local"
+	return prov, th, "guard embedder: static-local", nil
 }

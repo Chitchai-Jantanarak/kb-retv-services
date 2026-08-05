@@ -1,9 +1,14 @@
 package embeddings
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	"github.com/my/app/internal/shared/vec"
+)
 
 type tokenizerEncoder interface {
-	EncodeIDs(text string) []uint32
+	EncodeIDs(text string) ([]uint32, error)
 }
 
 type StaticLocalProvider struct {
@@ -23,7 +28,11 @@ func (p *StaticLocalProvider) Embed(ctx context.Context, texts []string) ([][]fl
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		out = append(out, p.embedIDs(p.enc.EncodeIDs(text)))
+		ids, err := p.enc.EncodeIDs(text)
+		if err != nil {
+			return nil, fmt.Errorf("guard embedder: encode: %w", err)
+		}
+		out = append(out, p.embedIDs(ids))
 	}
 	return out, nil
 }
@@ -46,6 +55,6 @@ func (p *StaticLocalProvider) embedIDs(ids []uint32) []float32 {
 	for i := range sum {
 		sum[i] *= inv
 	}
-	normalize(sum)
+	vec.NormalizeInPlace(sum)
 	return sum
 }

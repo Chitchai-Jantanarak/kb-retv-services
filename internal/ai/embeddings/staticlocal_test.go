@@ -11,7 +11,7 @@ import (
 
 type stubEncoder struct{ ids map[string][]uint32 }
 
-func (s stubEncoder) EncodeIDs(text string) []uint32 { return s.ids[text] }
+func (s stubEncoder) EncodeIDs(text string) ([]uint32, error) { return s.ids[text], nil }
 
 func writeFixtureTable(t *testing.T) string {
 	t.Helper()
