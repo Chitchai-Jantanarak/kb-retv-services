@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/my/app/internal/shared/debugtrace"
 )
 
 func buildLatestCasesQuery(coverage []int64, status string, limit int) (string, []any) {
@@ -80,11 +84,47 @@ func (r *Repository) CaseByCode(ctx context.Context, coverage []int64, code stri
 	query, args := buildCaseByCodeQuery(coverage, code)
 
 	var codeVal, title, statusCode sql.NullString
-	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+	start := time.Now()
+	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode)
+	state := "completed"
+	errorCode := ""
+	safeError := ""
+	rowCount := "1"
+	if scanErr != nil {
+		state = "failed"
+		errorCode = "query_failed"
+		safeError = "The parameterized case lookup failed."
+		rowCount = "0"
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			state = "not_found"
+			errorCode = "not_found"
+			safeError = "No case matched the supplied code inside the permitted company scope."
+		}
+	}
+	debugtrace.Add(ctx, debugtrace.Event{
+		Stage:      "repository.reports.case_by_code",
+		State:      state,
+		Label:      "query case status from MySQL",
+		DurationMS: debugtrace.Since(start),
+		ErrorCode:  errorCode,
+		Error:      safeError,
+		Context: map[string]string{
+			"repository":      "internal/repositories/reports/mysql",
+			"method":          "CaseByCode",
+			"operation":       "SELECT",
+			"tables":          "reports, report_statuses",
+			"scope":           "company coverage",
+			"parameterized":   "true",
+			"parameter_count": strconv.Itoa(len(args)),
+			"limit":           "1",
+			"rows":            rowCount,
+		},
+	})
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
 			return CaseRow{}, fmt.Errorf("reports: case %q not found", code)
 		}
-		return CaseRow{}, fmt.Errorf("reports: case by code: %w", err)
+		return CaseRow{}, fmt.Errorf("reports: case by code: %w", scanErr)
 	}
 	return CaseRow{Code: codeVal.String, Title: title.String, Status: statusCode.String}, nil
 }
@@ -103,8 +143,7 @@ func buildCasesByProductQuery(coverage []int64, product string, limit int) (stri
 	query := fmt.Sprintf(`
 SELECT r.code, r.title, COALESCE(s.code, '')
 FROM reports r
-JOIN report_node rn ON rn.report_id = r.id
-JOIN nodes n ON n.id = rn.node_id
+JOIN nodes n ON n.id = r.product_node_id
 LEFT JOIN report_statuses s ON s.id = r.status_id
 WHERE r.company_id IN (%s) AND n.title LIKE ?
 ORDER BY r.created_at DESC

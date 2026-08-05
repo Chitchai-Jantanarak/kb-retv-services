@@ -62,6 +62,19 @@ func TestBuildLatestCasesQueryWithStatusFilter(t *testing.T) {
 	}
 }
 
+func TestBuildCasesByProductQueryMatchesProductNode(t *testing.T) {
+	query, args := buildCasesByProductQuery([]int64{3}, "Bella Bot", 20)
+	if !strings.Contains(query, "JOIN nodes n ON n.id = r.product_node_id") {
+		t.Fatalf("query = %q, want join on reports.product_node_id", query)
+	}
+	if strings.Contains(query, "report_node") {
+		t.Fatalf("query = %q, report_node is the problem-type link, not the product", query)
+	}
+	if args[len(args)-2] != "%Bella Bot%" {
+		t.Fatalf("args = %v, want product LIKE pattern", args)
+	}
+}
+
 func TestBuildSearchCasesQueryScopesAndFilters(t *testing.T) {
 	query, args := buildSearchCasesQuery([]int64{3, 4}, "printer", "Router X", "waiting", 5)
 	if !strings.Contains(query, "r.company_id IN (?,?)") {
@@ -70,8 +83,8 @@ func TestBuildSearchCasesQueryScopesAndFilters(t *testing.T) {
 	if !strings.Contains(query, "r.title LIKE ? OR r.problem_detail LIKE ?") {
 		t.Fatalf("query = %q, want keyword filter over title+detail", query)
 	}
-	if !strings.Contains(query, "EXISTS (SELECT 1 FROM report_node") {
-		t.Fatalf("query = %q, want product EXISTS filter (no join duplication)", query)
+	if !strings.Contains(query, "EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.product_node_id") {
+		t.Fatalf("query = %q, want product EXISTS filter on reports.product_node_id", query)
 	}
 	if !strings.Contains(query, "AND s.code = ?") {
 		t.Fatalf("query = %q, want status filter", query)

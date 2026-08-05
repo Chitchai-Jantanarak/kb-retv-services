@@ -27,7 +27,7 @@ func buildSearchCasesQuery(coverage []int64, query, product, status string, limi
 		args = append(args, "%"+query+"%", "%"+query+"%")
 	}
 	if product != "" {
-		filters.WriteString(" AND EXISTS (SELECT 1 FROM report_node rn JOIN nodes n ON n.id = rn.node_id WHERE rn.report_id = r.id AND n.title LIKE ?)")
+		filters.WriteString(" AND EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.product_node_id AND n.title LIKE ?)")
 		args = append(args, "%"+product+"%")
 	}
 	if status != "" {
