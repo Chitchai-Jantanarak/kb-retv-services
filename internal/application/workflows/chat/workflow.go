@@ -16,6 +16,8 @@ import (
 type Workflow struct {
 	tmpl        prompts.Template
 	streamTmpl  prompts.Template
+	summaryTmpl prompts.Template
+	clarifyTmpl prompts.Template
 	resolve     rag.ProviderForCompany
 	fts         FTSSource
 	profile     ProfileSource
@@ -26,6 +28,8 @@ type Workflow struct {
 	cacheTTL    time.Duration
 	fetcher     ports.AttachmentFetcher
 	transcriber ports.Transcriber
+	sessions    SessionStore
+	turns       TurnRecorder
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
@@ -43,7 +47,15 @@ func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSour
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
-	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, resolve: resolve, fts: fts}
+	summaryTmpl, err := registry.Get(prompts.NameToolSummary)
+	if err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
+	clarifyTmpl, err := registry.Get(prompts.NameClarify)
+	if err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
+	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, summaryTmpl: summaryTmpl, clarifyTmpl: clarifyTmpl, resolve: resolve, fts: fts}
 	for _, opt := range opts {
 		opt(w)
 	}
@@ -54,7 +66,11 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	if err := req.Validate(); err != nil {
 		return dto.ChatResponse{}, err
 	}
+	principal, _ := ctxkey.PrincipalFrom(ctx)
+	req.Debug = authorizeChatDebug(principal, req.Debug)
+	req.Messages = append([]dto.ChatMessage(nil), req.Messages...)
 	timings := chatTimings(req.Debug)
+	started := time.Now()
 
 	pre, err := w.prepare(ctx, req, timings)
 	if err != nil {
@@ -63,11 +79,17 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	if pre.handled {
 		resp := pre.resp
 		resp.Transcript = pre.transcript
-		return withChatTimings(resp, timings), nil
+		w.persistTurns(ctx, pre.companyID, req, &resp, pre.tool)
+		w.recordTurn(ctx, pre.companyID, resp, pre.decision, TurnAudit{
+			ToolID:       toolIDOf(pre.tool),
+			ResolvedFrom: resolvedFrom(paramsOf(pre.tool), pre.candidates),
+			LatencyMS:    int(time.Since(started).Milliseconds()),
+		})
+		resp = withChatTimings(resp, timings)
+		return attachChatDebug(resp, pre.toolDebug, timings, false), nil
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
-	principal, _ := ctxkey.PrincipalFrom(ctx)
 	key := cacheKey(companyID, principal, req)
 	var (
 		cachedResp dto.ChatResponse
@@ -77,7 +99,8 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		cachedResp, cachedOK = w.cachedResponse(ctx, key)
 	})
 	if cachedOK {
-		return withChatTimings(cachedResp, timings), nil
+		cachedResp = withChatTimings(cachedResp, timings)
+		return attachChatDebug(cachedResp, pre.toolDebug, timings, true), nil
 	}
 
 	var (
@@ -104,10 +127,19 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 
 	resp := buildChatResponse(req, pre.transcript, turn, sources)
 	w.applyCaseSearch(ctx, req.Locale, companyID, turn.Search, &resp, timings)
+	w.persistTurns(ctx, companyID, req, &resp, pre.tool)
+	w.recordTurn(ctx, companyID, resp, pre.decision, TurnAudit{
+		ToolID:       toolIDOf(pre.tool),
+		ResolvedFrom: resolvedFrom(paramsOf(pre.tool), pre.candidates),
+		LatencyMS:    int(time.Since(started).Milliseconds()),
+		TokensIn:     turn.TokensIn,
+		TokensOut:    turn.TokensOut,
+	})
 	timedChat(timings, "store_cache", func() {
 		w.storeResponse(ctx, key, resp)
 	})
-	return withChatTimings(resp, timings), nil
+	resp = withChatTimings(resp, timings)
+	return attachChatDebug(resp, pre.toolDebug, timings, false), nil
 }
 
 func offDomainReply(locale string) string {
@@ -115,6 +147,13 @@ func offDomainReply(locale string) string {
 		return "I can only help with support cases, knowledge references, case status, and staff handoff for this service."
 	}
 	return "ฉันช่วยได้เฉพาะเรื่องเคสบริการ แหล่งอ้างอิง สถานะเคส และการติดต่อเจ้าหน้าที่ในระบบนี้"
+}
+
+func socialReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "Hello. I can look up support cases, case status, team workload, products, customers, and knowledge articles. What would you like to check?"
+	}
+	return "สวัสดีครับ ผมช่วยดูเคสบริการ สถานะเคส ภาระงานทีม สินค้า ลูกค้า และคลังความรู้ได้ ต้องการให้ช่วยเรื่องไหนครับ"
 }
 
 func handoffReply(locale string) string {
@@ -129,6 +168,27 @@ func noResultsReply(locale string) string {
 		return "I could not find any cases matching that."
 	}
 	return "ไม่พบเคสที่ตรงกับที่ค้นหา"
+}
+
+func confirmActionReply(locale, summary string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "Please confirm this action: " + summary
+	}
+	return "กรุณายืนยันการดำเนินการ: " + summary
+}
+
+func permissionDeniedReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "You do not have permission for that lookup. Ask an administrator for access."
+	}
+	return "คุณไม่มีสิทธิ์ใช้งานคำสั่งนี้ กรุณาติดต่อผู้ดูแลระบบ"
+}
+
+func clarifyReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I could not tell which case, employee, or product you meant. Please include the case code or the exact name."
+	}
+	return "ไม่แน่ใจว่าหมายถึงเคส พนักงาน หรือสินค้าใด กรุณาระบุรหัสเคสหรือชื่อที่ชัดเจน"
 }
 
 func toolFailedReply(locale string) string {

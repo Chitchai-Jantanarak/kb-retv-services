@@ -9,7 +9,14 @@ import (
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/domain/ports"
+	chatsession "github.com/my/app/internal/repositories/chatsession/mysql"
 )
+
+type SessionStore interface {
+	EnsureSession(ctx context.Context, companyID, userID, sessionID int64) (int64, error)
+	LastCites(ctx context.Context, companyID, userID, sessionID int64) (string, []string, error)
+	AppendTurn(ctx context.Context, turn chatsession.Turn) error
+}
 
 type toolRunner interface {
 	Handle(ctx context.Context, actor skeleton.Actor, msg string) (skeleton.Response, error)
@@ -40,6 +47,14 @@ func WithCache(cache ports.Cache, ttl time.Duration) Option {
 
 func WithRouter(router *intent.Router) Option {
 	return func(w *Workflow) { w.router = router }
+}
+
+func WithTurnRecorder(rec TurnRecorder) Option {
+	return func(w *Workflow) { w.turns = rec }
+}
+
+func WithSessions(store SessionStore) Option {
+	return func(w *Workflow) { w.sessions = store }
 }
 
 func WithOrchestrator(orch toolRunner) Option {

@@ -11,6 +11,7 @@ import (
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/tools"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/shared/ctxkey"
@@ -51,6 +52,15 @@ func resolverFor(provider ports.LLMProvider) rag.ProviderForCompany {
 	return func(context.Context, int64) (ports.LLMProvider, error) {
 		return provider, nil
 	}
+}
+
+func privilegedChatContext(companyID int64) context.Context {
+	ctx := ctxkey.WithCompanyID(context.Background(), companyID)
+	return ctxkey.WithPrincipal(ctx, ctxkey.Principal{
+		CompanyID: companyID,
+		UserID:    9,
+		Perms:     []string{chatDebugPermission},
+	})
 }
 
 func TestNewRequiresRegistryAndResolver(t *testing.T) {
@@ -168,7 +178,7 @@ func TestRunDebugSurfacesChatStageTimings(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+	resp, err := wf.Run(privilegedChatContext(7), dto.ChatRequest{
 		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broke"}},
 		Locale:   dto.ChatLocaleEnglish,
 		Debug:    true,
@@ -180,6 +190,26 @@ func TestRunDebugSurfacesChatStageTimings(t *testing.T) {
 		if _, ok := resp.StageTimingsMS[stage]; !ok {
 			t.Fatalf("stage %q missing from timings: %+v", stage, resp.StageTimingsMS)
 		}
+	}
+}
+
+func TestRunRejectsDebugForUnprivilegedPrincipal(t *testing.T) {
+	provider := &stubProvider{text: dto.ChatStatusAnswered}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	ctx = ctxkey.WithPrincipal(ctx, ctxkey.Principal{CompanyID: 7, UserID: 3, Perms: []string{string('*')}})
+	resp, err := wf.Run(ctx, dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: dto.ChatStatusAnswered}}, Debug: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StageTimingsMS != nil {
+		t.Fail()
+	}
+	if resp.Debug != nil {
+		t.Fail()
 	}
 }
 
@@ -314,7 +344,7 @@ func TestRunDebugCacheHitSurfacesCacheTimingOnlyAfterRouter(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	ctx := privilegedChatContext(7)
 	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "how to reset printer"}}}
 	if _, err := wf.Run(ctx, req); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -416,15 +446,18 @@ func routerForTest(t *testing.T, fts FTSSource) *intent.Router {
 		"เปิดเคสใหม่":       {0, 0, 1},
 		"robot broken":      {0, 0, 0, 1},
 		"ติดต่อ":            {1, 0, 0},
+		"ขอสูตรอาหาร":       {0, 0, 0, 0, 1},
+		"สวัสดี":            {0, 0, 0, 0, 0, 1},
 	}}
 	r, err := intent.New(context.Background(), emb, newFTSScorer(fts),
 		intent.WithAnchors(map[intent.Intent][]string{
 			intent.Handoff:    {"ติดต่อเจ้าหน้าที่"},
 			intent.CaseStatus: {"ตรวจสอบสถานะเคส"},
 			intent.OpenCase:   {"เปิดเคสใหม่"},
+			intent.OffDomain:  {"ขอสูตรอาหาร"},
+			intent.Social:     {"สวัสดี"},
 		}),
 		intent.WithThresholds(0.4, 0.6),
-		intent.WithRetrievalMin(1.0),
 	)
 	if err != nil {
 		t.Fatalf("intent.New: %v", err)
@@ -464,6 +497,56 @@ func TestRunToolMatchSkipsLLM(t *testing.T) {
 	}
 	if !strings.Contains(resp.Reply, "2 cases match") {
 		t.Fatalf("reply = %q, want the tool headline", resp.Reply)
+	}
+}
+
+func TestToolHitCarriesToolResult(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"unused","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	table := &skeleton.ToolTable{
+		ToolID:  "f1_find_cases",
+		Columns: []tools.ToolColumn{{Key: "code", Type: "case_ref", Primary: true}, {Key: "status", Type: "status"}},
+		Rows:    []map[string]string{{"code": "REP-1", "status": "waiting"}},
+	}
+	orch := stubOrch{resp: skeleton.Response{Matched: true, ToolID: "f1_find_cases", Headline: "1 cases match", Lines: []string{"REP-1|waiting"}, Table: table}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if resp.ToolResult == nil {
+		t.Fatal("ToolResult is nil")
+	}
+	if resp.ToolResult.ToolID != "f1_find_cases" || len(resp.ToolResult.Columns) != 2 || resp.ToolResult.Rows[0]["code"] != "REP-1" {
+		t.Fatalf("tool result = %+v", resp.ToolResult)
+	}
+	if resp.Model != "" || resp.Vendor != "" {
+		t.Fatalf("tool-only response must not claim an LLM model; model=%q vendor=%q", resp.Model, resp.Vendor)
+	}
+
+	var done dto.ChatStreamEvent
+	err = wf.RunStream(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	}, func(ev dto.ChatStreamEvent) error {
+		if ev.Type == dto.ChatStreamEventDone {
+			done = ev
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunStream: %v", err)
+	}
+	if done.ToolResult == nil || done.ToolResult.ToolID != "f1_find_cases" {
+		t.Fatalf("stream done tool result = %+v", done.ToolResult)
+	}
+	if done.Model != "" || done.Vendor != "" {
+		t.Fatalf("tool-only stream must not claim an LLM model; model=%q vendor=%q", done.Model, done.Vendor)
 	}
 }
 
@@ -697,7 +780,7 @@ func TestRunDebugHandoffSurfacesRouterTimingAndSkipsGenerate(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+	resp, err := wf.Run(privilegedChatContext(3), dto.ChatRequest{
 		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "à¸•à¸´à¸”à¸•à¹ˆà¸­"}},
 		Debug:    true,
 	})

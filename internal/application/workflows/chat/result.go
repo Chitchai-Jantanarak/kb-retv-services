@@ -17,6 +17,8 @@ func buildChatResponse(req dto.ChatRequest, transcript string, turn llmTurn, sou
 	return dto.ChatResponse{
 		Reply:      turn.Reply,
 		Status:     dto.ChatStatusAnswered,
+		Model:      turn.Model,
+		Vendor:     turn.Vendor,
 		Sources:    sources,
 		Activity:   activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
 		Case:       normalizeCaseDraft(turn.Case),
@@ -55,6 +57,7 @@ func (w *Workflow) applyCaseSearch(
 			return
 		}
 		log.Info("chat: case search", zap.Int("rows", len(results)))
+		resp.Activity = append(resp.Activity, activity(locale, "searched_cases")...)
 		if len(results) == 0 {
 			resp.Status = dto.ChatStatusNoResults
 			resp.Reply = noResultsReply(locale)
@@ -66,15 +69,40 @@ func (w *Workflow) applyCaseSearch(
 }
 
 func toolChatResponse(locale string, r skeleton.Response) dto.ChatResponse {
+	if r.Pending != nil {
+		return dto.ChatResponse{
+			Reply:  confirmActionReply(locale, r.Pending.Summary),
+			Status: dto.ChatStatusConfirmAction,
+			PendingAction: &dto.ChatPendingAction{
+				ID:      r.Pending.ID,
+				ToolID:  r.ToolID,
+				Summary: r.Pending.Summary,
+				Params:  r.Params,
+			},
+			Activity: activity(locale, "request_checked", "permission_checked"),
+		}
+	}
 	reply := r.Headline
-	if len(r.Lines) > 0 {
+	if len(r.Lines) > 0 && r.Table == nil {
 		reply = r.Headline + "\n" + strings.Join(r.Lines, "\n")
 	}
 	return dto.ChatResponse{
-		Reply:    reply,
-		Status:   dto.ChatStatusAnswered,
-		Activity: activity(locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+		Reply:      reply,
+		Status:     dto.ChatStatusAnswered,
+		Activity:   activity(locale, "request_checked", "permission_checked", "used_tool", "answer_prepared"),
+		ToolResult: toChatToolResult(r.Table),
 	}
+}
+
+func toChatToolResult(table *skeleton.ToolTable) *dto.ChatToolResult {
+	if table == nil {
+		return nil
+	}
+	columns := make([]dto.ChatToolColumn, 0, len(table.Columns))
+	for _, col := range table.Columns {
+		columns = append(columns, dto.ChatToolColumn{Key: col.Key, Type: col.Type, Primary: col.Primary})
+	}
+	return &dto.ChatToolResult{ToolID: table.ToolID, Columns: columns, Rows: table.Rows}
 }
 
 func lastUserAttachments(req dto.ChatRequest) []dto.AttachmentRef {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
 
@@ -16,8 +17,12 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	if err := req.Validate(); err != nil {
 		return err
 	}
+	principal, _ := ctxkey.PrincipalFrom(ctx)
+	req.Debug = authorizeChatDebug(principal, req.Debug)
+	req.Messages = append([]dto.ChatMessage(nil), req.Messages...)
+	timings := chatTimings(req.Debug)
 
-	pre, err := w.prepare(ctx, req, nil)
+	pre, err := w.prepare(ctx, req, timings)
 	if err != nil {
 		return err
 	}
@@ -26,25 +31,46 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 			return err
 		}
 	}
+	if req.Debug && pre.toolDebug != nil {
+		if err := emit(dto.ChatStreamEvent{
+			Type:  dto.ChatStreamEventDebug,
+			Debug: attachChatDebug(dto.ChatResponse{}, pre.toolDebug, timings, false).Debug,
+		}); err != nil {
+			return err
+		}
+	}
 	if pre.handled {
-		return emitFinal(emit, pre.resp, pre.transcript)
+		resp := withChatTimings(pre.resp, timings)
+		resp = attachChatDebug(resp, pre.toolDebug, timings, false)
+		return emitFinal(emit, resp, pre.transcript)
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
-	sources, knowledge := w.knowledgeContext(ctx, companyID, lastUser)
+	var sources []dto.ChatSource
+	var knowledge string
+	timedChat(timings, "knowledge", func() {
+		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
+	})
 
 	var profileBlock string
 	if w.profile != nil {
-		if block, perr := w.profile.Build(ctx, companyID); perr == nil {
-			profileBlock = block
-		}
+		timedChat(timings, "profile", func() {
+			if block, perr := w.profile.Build(ctx, companyID); perr == nil {
+				profileBlock = block
+			}
+		})
 	}
 
-	prompt, err := w.streamTmpl.Render(map[string]string{
-		"language":   promptLanguage(req.Locale),
-		"transcript": buildTranscript(req.Messages),
-		"knowledge":  knowledgeSection(knowledge),
-		"profile":    profileSection(profileBlock),
+	var prompt ports.Prompt
+	err = timedChatErr(timings, "render", func() error {
+		var renderErr error
+		prompt, renderErr = w.streamTmpl.Render(map[string]string{
+			"language":   promptLanguage(req.Locale),
+			"transcript": buildTranscript(req.Messages),
+			"knowledge":  knowledgeSection(knowledge),
+			"profile":    profileSection(profileBlock),
+		})
+		return renderErr
 	})
 	if err != nil {
 		return emit(dto.ChatStreamEvent{
@@ -55,7 +81,12 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	}
 	prompt.Attachments = toPromptAttachments(lastUserAttachments(req))
 
-	provider, err := w.resolve(ctx, companyID)
+	var provider ports.LLMProvider
+	err = timedChatErr(timings, "resolve", func() error {
+		var resolveErr error
+		provider, resolveErr = w.resolve(ctx, companyID)
+		return resolveErr
+	})
 	if err != nil {
 		return emit(dto.ChatStreamEvent{
 			Type:    dto.ChatStreamEventError,
@@ -64,35 +95,50 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 		})
 	}
 
-	doneEvent := func() dto.ChatStreamEvent {
+	doneEvent := func(model string, vendor string) dto.ChatStreamEvent {
 		return dto.ChatStreamEvent{
 			Type:       dto.ChatStreamEventDone,
 			Status:     dto.ChatStatusAnswered,
+			Model:      model,
+			Vendor:     vendor,
 			Sources:    sources,
 			Activity:   activity(req.Locale, "request_checked", "permission_checked", "searched_knowledge", "answer_prepared"),
+			Debug:      attachChatDebug(dto.ChatResponse{}, pre.toolDebug, timings, false).Debug,
 			Transcript: pre.transcript,
 		}
 	}
 
-	ch, streamErr := provider.Stream(ctx, prompt)
+	var ch <-chan ports.Completion
+	streamErr := timedChatErr(timings, "generate", func() error {
+		var generateErr error
+		ch, generateErr = provider.Stream(ctx, prompt)
+		return generateErr
+	})
 	if streamErr != nil {
 		return w.streamFallback(ctx, provider, prompt, emit, doneEvent)
 	}
 
+	var model, vendor string
 	for chunk := range ch {
 		if chunk.Text == "" {
 			continue
+		}
+		if chunk.Model != "" {
+			model = chunk.Model
+		}
+		if chunk.Vendor != "" {
+			vendor = chunk.Vendor
 		}
 		if err := emit(dto.ChatStreamEvent{Type: dto.ChatStreamEventDelta, Text: chunk.Text}); err != nil {
 			return err
 		}
 	}
 
-	return emit(doneEvent())
+	return emit(doneEvent(model, vendor))
 }
 
 // streamFallback LLM generated w/ fallback messages
-func (w *Workflow) streamFallback(ctx context.Context, provider ports.LLMProvider, prompt ports.Prompt, emit func(dto.ChatStreamEvent) error, doneEvent func() dto.ChatStreamEvent) error {
+func (w *Workflow) streamFallback(ctx context.Context, provider ports.LLMProvider, prompt ports.Prompt, emit func(dto.ChatStreamEvent) error, doneEvent func(string, string) dto.ChatStreamEvent) error {
 	completion, err := provider.Generate(ctx, prompt)
 	if err != nil || strings.TrimSpace(completion.Text) == "" {
 		return emit(dto.ChatStreamEvent{
@@ -104,7 +150,7 @@ func (w *Workflow) streamFallback(ctx context.Context, provider ports.LLMProvide
 	if err := emit(dto.ChatStreamEvent{Type: dto.ChatStreamEventDelta, Text: completion.Text}); err != nil {
 		return err
 	}
-	return emit(doneEvent())
+	return emit(doneEvent(completion.Model, completion.Vendor))
 }
 
 // Turns a pre-stage short-circuit response <Tools>
@@ -117,9 +163,14 @@ func emitFinal(emit func(dto.ChatStreamEvent) error, resp dto.ChatResponse, tran
 	return emit(dto.ChatStreamEvent{
 		Type:          dto.ChatStreamEventDone,
 		Status:        resp.Status,
+		Model:         resp.Model,
+		Vendor:        resp.Vendor,
 		Sources:       resp.Sources,
 		Activity:      resp.Activity,
 		SearchResults: resp.SearchResults,
+		ToolResult:    resp.ToolResult,
+		PendingAction: resp.PendingAction,
+		Debug:         resp.Debug,
 		Transcript:    transcript,
 	})
 }

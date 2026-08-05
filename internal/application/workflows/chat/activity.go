@@ -6,12 +6,16 @@ func activityLabel(locale, code string) string {
 	th := map[string]string{
 		"request_checked":    "ตรวจสอบคำขอ",
 		"permission_checked": "ตรวจสอบสิทธิ์",
+		"used_tool":          "ใช้เครื่องมือค้นข้อมูล",
+		"searched_cases":     "ค้นหาเคส",
 		"searched_knowledge": "ค้นหาแหล่งอ้างอิง",
 		"answer_prepared":    "เตรียมคำตอบ",
 	}
 	en := map[string]string{
 		"request_checked":    "Checked request",
 		"permission_checked": "Checked permission",
+		"used_tool":          "Looked up data",
+		"searched_cases":     "Searched cases",
 		"searched_knowledge": "Searched references",
 		"answer_prepared":    "Prepared answer",
 	}

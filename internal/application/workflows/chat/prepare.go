@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"go.uber.org/zap"
@@ -9,8 +10,11 @@ import (
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/tools"
 	"github.com/my/app/internal/domain/ports"
+	chatsession "github.com/my/app/internal/repositories/chatsession/mysql"
 	"github.com/my/app/internal/shared/ctxkey"
+	"github.com/my/app/internal/shared/debugtrace"
 	apperr "github.com/my/app/internal/shared/errors"
 	"github.com/my/app/internal/shared/logger"
 )
@@ -20,7 +24,11 @@ type chatPreamble struct {
 	lastUser   string
 	resp       dto.ChatResponse
 	handled    bool
+	toolDebug  *dto.ChatToolDebug
 	transcript string
+	tool       *skeleton.Response
+	decision   intent.Decision
+	candidates []string
 }
 
 // prepare runs the pre-stages shared by Run and RunStream: request scope
@@ -47,24 +55,6 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
 	}
 
-	fastGuardHit := false
-	timedChat(timings, "fast_guard", func() {
-		fastGuardHit = fastGuardOffDomain(lastUser)
-	})
-	if fastGuardHit {
-		return chatPreamble{
-			companyID:  companyID,
-			lastUser:   lastUser,
-			handled:    true,
-			transcript: transcript,
-			resp: dto.ChatResponse{
-				Reply:    offDomainReply(req.Locale),
-				Status:   dto.ChatStatusOffDomain,
-				Activity: activity(req.Locale, "request_checked"),
-			},
-		}, nil
-	}
-
 	var decision intent.Decision
 	err = timedChatErr(timings, "router", func() error {
 		var err error
@@ -74,56 +64,109 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 	if err != nil {
 		return chatPreamble{}, err
 	}
-	if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff {
+	var selectedToolDebug *dto.ChatToolDebug
+	if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff && decision.Intent != intent.Social {
 		var toolResp skeleton.Response
 		var toolErr error
+		toolCtx := ctx
+		var traceCollector *debugtrace.Collector
+		if req.Debug {
+			toolCtx, traceCollector = debugtrace.WithCollector(ctx)
+		}
+		candidates := w.citeCandidates(ctx, companyID, req)
+		toolCtx = ctxkey.WithCiteCandidates(toolCtx, candidates)
 		timedChat(timings, "tool", func() {
-			toolResp, toolErr = w.orch.Handle(ctx, toolActor(ctx, companyID), lastUser)
+			toolResp, toolErr = w.orch.Handle(toolCtx, toolActor(ctx, companyID), lastUser)
 		})
+		if req.Debug {
+			selectedToolDebug = buildToolDebug(toolResp, toolErr, timings["tool"], traceCollector.Events())
+			if selectedToolDebug != nil {
+				selectedToolDebug.RouterIntent = string(decision.Intent)
+				selectedToolDebug.RouterConfidence = decision.Confidence
+				selectedToolDebug.RetrievalScore = decision.RetrievalScore
+			}
+		}
 		if toolErr != nil {
 			logger.FromContext(ctx).Error("chat: tool orchestrator failed", zap.Int64("company_id", companyID), zap.Error(toolErr))
 		}
-		if toolErr != nil && toolResp.Kind == "write" {
+		if toolErr != nil && errors.Is(toolErr, skeleton.ErrNeedsParam) {
+			reply := clarifyReply(req.Locale)
+			if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, missingFields(toolErr), toolResp.Params); ok {
+				reply = modelReply
+			}
 			return chatPreamble{
 				companyID:  companyID,
 				lastUser:   lastUser,
 				handled:    true,
+				toolDebug:  selectedToolDebug,
+				transcript: transcript,
+				resp: dto.ChatResponse{
+					Reply:    reply,
+					Status:   dto.ChatStatusNeedsClarification,
+					Activity: activity(req.Locale, "request_checked", "permission_checked"),
+				},
+				decision: decision,
+			}, nil
+		}
+		if toolErr != nil && (toolResp.Kind == "write" || authoritativeIntent(decision.Intent)) {
+			return chatPreamble{
+				companyID:  companyID,
+				lastUser:   lastUser,
+				handled:    true,
+				toolDebug:  selectedToolDebug,
 				transcript: transcript,
 				resp: dto.ChatResponse{
 					Reply:    toolFailedReply(req.Locale),
 					Status:   dto.ChatStatusToolFailed,
 					Activity: activity(req.Locale, "request_checked", "permission_checked"),
 				},
+				decision: decision,
 			}, nil
 		}
 		if toolErr == nil && toolResp.Matched {
+			resp := toolChatResponse(req.Locale, toolResp)
+			if summaryComposeMode(toolResp) {
+				if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
+					resp.Reply = summary
+				}
+			}
 			return chatPreamble{
 				companyID:  companyID,
 				lastUser:   lastUser,
 				handled:    true,
+				toolDebug:  selectedToolDebug,
 				transcript: transcript,
-				resp:       toolChatResponse(req.Locale, toolResp),
+				resp:       resp,
+				tool:       &toolResp,
+				decision:   decision,
+				candidates: candidates,
 			}, nil
 		}
 		if authoritativeIntent(decision.Intent) {
+			reply, status := clarifyReply(req.Locale), dto.ChatStatusNeedsClarification
+			if toolResp.PermFiltered {
+				reply, status = permissionDeniedReply(req.Locale), dto.ChatStatusPermissionDenied
+			}
 			return chatPreamble{
 				companyID:  companyID,
 				lastUser:   lastUser,
 				handled:    true,
+				toolDebug:  selectedToolDebug,
 				transcript: transcript,
 				resp: dto.ChatResponse{
-					Reply:    handoffReply(req.Locale),
-					Status:   dto.ChatStatusHandoff,
+					Reply:    reply,
+					Status:   status,
 					Activity: activity(req.Locale, "request_checked", "permission_checked"),
 				},
+				decision: decision,
 			}, nil
 		}
 	}
 	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, transcript: transcript, resp: resp}, nil
+		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, toolDebug: selectedToolDebug, transcript: transcript, resp: resp, decision: decision}, nil
 	}
 
-	return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
+	return chatPreamble{companyID: companyID, lastUser: lastUser, toolDebug: selectedToolDebug, transcript: transcript, decision: decision}, nil
 }
 
 // transcribeLastUserAudio finds the first audio attachment on the last user
@@ -181,6 +224,81 @@ func (w *Workflow) transcribeLastUserAudio(ctx context.Context, req dto.ChatRequ
 	return transcript, nil
 }
 
+func priorAssistantTurns(messages []dto.ChatMessage) []string {
+	out := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.Role != dto.ChatRoleAssistant {
+			continue
+		}
+		if content := strings.TrimSpace(m.Content); content != "" {
+			out = append(out, content)
+		}
+	}
+	return out
+}
+
+func (w *Workflow) citeCandidates(ctx context.Context, companyID int64, req dto.ChatRequest) []string {
+	if w.sessions != nil && req.ConversationID > 0 {
+		principal, _ := ctxkey.PrincipalFrom(ctx)
+		_, values, err := w.sessions.LastCites(ctx, companyID, principal.UserID, req.ConversationID)
+		if err != nil {
+			logger.FromContext(ctx).Warn("chat: load prior cites", zap.Error(err))
+		}
+		if len(values) > 0 {
+			return values
+		}
+	}
+	return citeCandidatesFromReplies(priorAssistantTurns(req.Messages))
+}
+
+func citeCandidatesFromReplies(turns []string) []string {
+	for _, pattern := range citeFallbackPatterns {
+		if found := tools.CiteCandidatesFromTurns(turns, pattern); len(found) > 0 {
+			return found
+		}
+	}
+	return nil
+}
+
+var citeFallbackPatterns = []string{`REP-\d+`}
+
+func (w *Workflow) persistTurns(ctx context.Context, companyID int64, req dto.ChatRequest, resp *dto.ChatResponse, tool *skeleton.Response) {
+	if w.sessions == nil || req.ConversationID <= 0 {
+		return
+	}
+	principal, _ := ctxkey.PrincipalFrom(ctx)
+	log := logger.FromContext(ctx)
+
+	sessionID, err := w.sessions.EnsureSession(ctx, companyID, principal.UserID, req.ConversationID)
+	if err != nil {
+		log.Warn("chat: ensure session", zap.Error(err))
+		return
+	}
+	resp.ConversationID = sessionID
+
+	if err := w.sessions.AppendTurn(ctx, chatsession.Turn{
+		SessionID: sessionID,
+		Role:      "user",
+		Body:      req.LastUserMessage(),
+	}); err != nil {
+		log.Warn("chat: append user turn", zap.Error(err))
+		return
+	}
+
+	turn := chatsession.Turn{
+		SessionID: sessionID,
+		Role:      "assistant",
+		Body:      resp.Reply,
+		Outcome:   resp.Status,
+	}
+	if tool != nil {
+		turn.CiteKey, turn.CiteValues, turn.ToolID = tool.Cite, tool.CiteValues, tool.ToolID
+	}
+	if err := w.sessions.AppendTurn(ctx, turn); err != nil {
+		log.Warn("chat: append assistant turn", zap.Error(err))
+	}
+}
+
 func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
 	switch d.Intent {
 	case intent.OffDomain:
@@ -194,6 +312,12 @@ func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatRespo
 			Reply:    handoffReply(locale),
 			Status:   dto.ChatStatusHandoff,
 			Activity: activity(locale, "request_checked", "permission_checked"),
+		}, true
+	case intent.Social:
+		return dto.ChatResponse{
+			Reply:    socialReply(locale),
+			Status:   dto.ChatStatusAnswered,
+			Activity: activity(locale, "request_checked"),
 		}, true
 	default:
 		return dto.ChatResponse{}, false

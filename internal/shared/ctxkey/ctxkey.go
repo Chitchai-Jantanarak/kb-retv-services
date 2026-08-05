@@ -10,6 +10,7 @@ const (
 	loggerKey
 	principalKey
 	coverageKey
+	citeCandidatesKey
 )
 
 type Principal struct {
@@ -109,4 +110,16 @@ func NormalizeCoverage(set []int64, companyID int64) []int64 {
 		return nil
 	}
 	return out
+}
+
+func WithCiteCandidates(ctx context.Context, candidates []string) context.Context {
+	if len(candidates) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, citeCandidatesKey, candidates)
+}
+
+func CiteCandidates(ctx context.Context) []string {
+	candidates, _ := ctx.Value(citeCandidatesKey).([]string)
+	return candidates
 }

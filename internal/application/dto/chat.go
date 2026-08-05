@@ -27,9 +27,10 @@ type ChatMessage struct {
 }
 
 type ChatRequest struct {
-	Messages []ChatMessage `json:"messages"`
-	Locale   string        `json:"locale"`
-	Debug    bool          `json:"debug,omitempty"`
+	Messages       []ChatMessage `json:"messages"`
+	Locale         string        `json:"locale"`
+	Debug          bool          `json:"debug,omitempty"`
+	ConversationID int64         `json:"conversation_id,omitempty"`
 }
 
 func (r *ChatRequest) Normalize() {
@@ -97,6 +98,8 @@ const (
 	ChatStatusNeedsClarification = "needs_clarification"
 	ChatStatusNoResults          = "no_results"
 	ChatStatusToolFailed         = "tool_failed"
+	ChatStatusPermissionDenied   = "permission_denied"
+	ChatStatusConfirmAction      = "confirm_action"
 )
 
 type ChatSource struct {
@@ -132,32 +135,106 @@ type ChatActivity struct {
 	Label string `json:"label"`
 }
 
-type ChatResponse struct {
-	Reply          string           `json:"reply"`
-	Status         string           `json:"status"`
-	Sources        []ChatSource     `json:"sources"`
-	Activity       []ChatActivity   `json:"activity,omitempty"`
-	Case           *ChatCaseDraft   `json:"case,omitempty"`
-	SearchResults  []ChatCaseResult `json:"search_results,omitempty"`
+type ChatToolDebug struct {
+	ToolID             string            `json:"tool_id,omitempty"`
+	Handler            string            `json:"handler,omitempty"`
+	Kind               string            `json:"kind,omitempty"`
+	RequiredPermission string            `json:"required_permission,omitempty"`
+	PermissionFiltered bool              `json:"permission_filtered,omitempty"`
+	Params             map[string]string `json:"params,omitempty"`
+	Matched            bool              `json:"matched"`
+	Called             bool              `json:"called"`
+	Mutates            bool              `json:"mutates"`
+	Outcome            string            `json:"outcome"`
+	SelectionScore     float64           `json:"selection_score,omitempty"`
+	RouterConfidence   float64           `json:"router_confidence,omitempty"`
+	RouterIntent       string            `json:"router_intent,omitempty"`
+	RetrievalScore     float64           `json:"retrieval_score,omitempty"`
+	DurationMS         int64             `json:"duration_ms,omitempty"`
+	RowCount           int               `json:"row_count,omitempty"`
+	ErrorCode          string            `json:"error_code,omitempty"`
+	Error              string            `json:"error,omitempty"`
+	TraceEvents        []ChatDebugEvent  `json:"-"`
+}
+
+type ChatDebugEvent struct {
+	Stage      string            `json:"stage"`
+	State      string            `json:"state"`
+	Label      string            `json:"label"`
+	Context    map[string]string `json:"context,omitempty"`
+	DurationMS int64             `json:"duration_ms,omitempty"`
+	ErrorCode  string            `json:"error_code,omitempty"`
+	Error      string            `json:"error,omitempty"`
+}
+
+type ChatDebug struct {
+	Tool           *ChatToolDebug   `json:"tool,omitempty"`
+	Events         []ChatDebugEvent `json:"events,omitempty"`
 	StageTimingsMS map[string]int64 `json:"stage_timings_ms,omitempty"`
-	Transcript     string           `json:"transcript,omitempty"`
+	CacheHit       bool             `json:"cache_hit,omitempty"`
+}
+
+type ChatToolColumn struct {
+	Key     string `json:"key"`
+	Type    string `json:"type"`
+	Primary bool   `json:"primary,omitempty"`
+}
+
+type ChatToolResult struct {
+	ToolID  string              `json:"tool_id"`
+	Columns []ChatToolColumn    `json:"columns"`
+	Rows    []map[string]string `json:"rows"`
+}
+
+type ChatPendingAction struct {
+	ID      string            `json:"id"`
+	ToolID  string            `json:"tool_id"`
+	Summary string            `json:"summary"`
+	Params  map[string]string `json:"params,omitempty"`
+}
+
+type ChatConfirmRequest struct {
+	ActionID string `json:"action_id"`
+}
+
+type ChatResponse struct {
+	Reply          string             `json:"reply"`
+	Status         string             `json:"status"`
+	Model          string             `json:"model,omitempty"`
+	Vendor         string             `json:"vendor,omitempty"`
+	Sources        []ChatSource       `json:"sources"`
+	Activity       []ChatActivity     `json:"activity,omitempty"`
+	Case           *ChatCaseDraft     `json:"case,omitempty"`
+	SearchResults  []ChatCaseResult   `json:"search_results,omitempty"`
+	ToolResult     *ChatToolResult    `json:"tool_result,omitempty"`
+	PendingAction  *ChatPendingAction `json:"pending_action,omitempty"`
+	StageTimingsMS map[string]int64   `json:"stage_timings_ms,omitempty"`
+	Debug          *ChatDebug         `json:"debug,omitempty"`
+	Transcript     string             `json:"transcript,omitempty"`
+	ConversationID int64              `json:"conversation_id,omitempty"`
 }
 
 const (
 	ChatStreamEventDelta      = "delta"
+	ChatStreamEventDebug      = "debug"
 	ChatStreamEventDone       = "done"
 	ChatStreamEventError      = "error"
 	ChatStreamEventTranscript = "transcript"
 )
 
 type ChatStreamEvent struct {
-	Type          string           `json:"-"`
-	Text          string           `json:"text,omitempty"`
-	Status        string           `json:"status,omitempty"`
-	Sources       []ChatSource     `json:"sources,omitempty"`
-	Activity      []ChatActivity   `json:"activity,omitempty"`
-	SearchResults []ChatCaseResult `json:"search_results,omitempty"`
-	Transcript    string           `json:"transcript,omitempty"`
-	Code          string           `json:"code,omitempty"`
-	Message       string           `json:"message,omitempty"`
+	Type          string             `json:"-"`
+	Text          string             `json:"text,omitempty"`
+	Status        string             `json:"status,omitempty"`
+	Model         string             `json:"model,omitempty"`
+	Vendor        string             `json:"vendor,omitempty"`
+	Sources       []ChatSource       `json:"sources,omitempty"`
+	Activity      []ChatActivity     `json:"activity,omitempty"`
+	SearchResults []ChatCaseResult   `json:"search_results,omitempty"`
+	ToolResult    *ChatToolResult    `json:"tool_result,omitempty"`
+	PendingAction *ChatPendingAction `json:"pending_action,omitempty"`
+	Debug         *ChatDebug         `json:"debug,omitempty"`
+	Transcript    string             `json:"transcript,omitempty"`
+	Code          string             `json:"code,omitempty"`
+	Message       string             `json:"message,omitempty"`
 }

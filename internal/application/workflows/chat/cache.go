@@ -64,6 +64,7 @@ func (w *Workflow) cachedResponse(ctx context.Context, key string) (dto.ChatResp
 		return dto.ChatResponse{}, false
 	}
 	resp.StageTimingsMS = nil
+	resp.Debug = nil
 	return resp, true
 }
 
@@ -79,6 +80,7 @@ func (w *Workflow) storeResponse(ctx context.Context, key string, resp dto.ChatR
 		return
 	}
 	resp.StageTimingsMS = nil
+	resp.Debug = nil
 	raw, err := json.Marshal(resp)
 	if err != nil {
 		return

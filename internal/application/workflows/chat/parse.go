@@ -24,9 +24,13 @@ func searchQueryText(raw string) string {
 }
 
 type llmTurn struct {
-	Reply  string                 `json:"reply"`
-	Case   *dto.ChatCaseDraft     `json:"case"`
-	Search *dto.ChatSearchRequest `json:"search"`
+	Reply     string                 `json:"reply"`
+	Case      *dto.ChatCaseDraft     `json:"case"`
+	Search    *dto.ChatSearchRequest `json:"search"`
+	Model     string                 `json:"-"`
+	Vendor    string                 `json:"-"`
+	TokensIn  int                    `json:"-"`
+	TokensOut int                    `json:"-"`
 }
 
 func parseTurn(raw string) (llmTurn, bool) {

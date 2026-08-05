@@ -5,8 +5,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"math"
 	"slices"
+
+	"github.com/my/app/internal/shared/vec"
 )
 
 type Intent string
@@ -18,6 +19,7 @@ const (
 	OpenCase       Intent = "open_case"
 	GeneralSupport Intent = "general_support"
 	OffDomain      Intent = "off_domain"
+	Social         Intent = "social"
 )
 
 type Reason string
@@ -28,13 +30,13 @@ const (
 	ReasonInDomainNoKB    Reason = "in_domain_no_kb"
 	ReasonOffDomainFloor  Reason = "off_domain_floor"
 	ReasonOffDomainAnchor Reason = "off_domain_anchor"
+	ReasonSocialAnchor    Reason = "social_anchor"
 )
 
 const (
-	defaultFloor        = 0.35
-	defaultAccept       = 0.55
-	defaultRetrievalMin = 1.0
-	defaultMargin       = 0.05
+	defaultFloor  = 0.35
+	defaultAccept = 0.55
+	defaultMargin = 0.05
 )
 
 type Embedder interface {
@@ -58,21 +60,19 @@ type anchor struct {
 }
 
 type Router struct {
-	emb          Embedder
-	scorer       RetrievalScorer
-	anchors      []anchor
-	floor        float64
-	accept       float64
-	retrievalMin float64
-	margin       float64
+	emb     Embedder
+	scorer  RetrievalScorer
+	anchors []anchor
+	floor   float64
+	accept  float64
+	margin  float64
 }
 
 type config struct {
-	anchors      map[Intent][]string
-	floor        float64
-	accept       float64
-	retrievalMin float64
-	margin       float64
+	anchors map[Intent][]string
+	floor   float64
+	accept  float64
+	margin  float64
 }
 
 type Option func(*config)
@@ -92,12 +92,6 @@ func WithThresholds(floor, accept float64) Option {
 	}
 }
 
-func WithRetrievalMin(min float64) Option {
-	return func(c *config) {
-		c.retrievalMin = min
-	}
-}
-
 func WithMargin(margin float64) Option {
 	return func(c *config) {
 		c.margin = margin
@@ -112,12 +106,15 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 		return nil, fmt.Errorf("intent: retrieval scorer is required")
 	}
 
+	defaultAnchors, err := loadAnchors(anchorsJSON)
+	if err != nil {
+		return nil, err
+	}
 	cfg := config{
-		anchors:      defaultAnchors,
-		floor:        defaultFloor,
-		accept:       defaultAccept,
-		retrievalMin: defaultRetrievalMin,
-		margin:       defaultMargin,
+		anchors: defaultAnchors,
+		floor:   defaultFloor,
+		accept:  defaultAccept,
+		margin:  defaultMargin,
 	}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -126,6 +123,12 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 	phrases, owners := flatten(cfg.anchors)
 	if len(phrases) == 0 {
 		return nil, fmt.Errorf("intent: at least one anchor is required")
+	}
+	if len(cfg.anchors[Social]) == 0 {
+		return nil, fmt.Errorf("intent: social anchors are required; without them neutral messages fall through to the tool layer")
+	}
+	if len(cfg.anchors[OffDomain]) == 0 {
+		return nil, fmt.Errorf("intent: off_domain anchors are required; without them the negative guard silently passes everything")
 	}
 
 	vecs, err := emb.Embed(ctx, phrases)
@@ -138,16 +141,15 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 
 	anchors := make([]anchor, len(phrases))
 	for i := range phrases {
-		anchors[i] = anchor{intent: owners[i], vec: normalize(vecs[i])}
+		anchors[i] = anchor{intent: owners[i], vec: vec.Normalize(vecs[i])}
 	}
 	return &Router{
-		emb:          emb,
-		scorer:       scorer,
-		anchors:      anchors,
-		floor:        cfg.floor,
-		accept:       cfg.accept,
-		retrievalMin: cfg.retrievalMin,
-		margin:       cfg.margin,
+		emb:     emb,
+		scorer:  scorer,
+		anchors: anchors,
+		floor:   cfg.floor,
+		accept:  cfg.accept,
+		margin:  cfg.margin,
 	}, nil
 }
 
@@ -159,11 +161,15 @@ func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
 	if len(vecs) != 1 {
 		return Decision{}, fmt.Errorf("intent: query embedding count %d != 1", len(vecs))
 	}
-	query := normalize(vecs[0])
+	query := vec.Normalize(vecs[0])
 
 	pos, neg := r.scoreAnchors(query)
 	if neg >= pos.score+r.margin {
 		return Decision{Intent: OffDomain, Reason: ReasonOffDomainAnchor, Confidence: pos.score}, nil
+	}
+
+	if pos.intent == Social && pos.score >= r.accept {
+		return Decision{Intent: Social, Reason: ReasonSocialAnchor, Confidence: pos.score}, nil
 	}
 
 	if isAction(pos.intent) && pos.score >= r.accept {
@@ -176,7 +182,7 @@ func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
 	}
 
 	switch {
-	case score >= r.retrievalMin:
+	case score > 0:
 		return Decision{Intent: KBSearch, Reason: ReasonRetrievalHit, Confidence: pos.score, RetrievalScore: score}, nil
 	case pos.score >= r.floor:
 		return Decision{Intent: GeneralSupport, Reason: ReasonInDomainNoKB, Confidence: pos.score, RetrievalScore: score}, nil
@@ -193,7 +199,7 @@ type scored struct {
 func (r *Router) scoreAnchors(query []float32) (scored, float64) {
 	best := make(map[Intent]float64, len(r.anchors))
 	for _, a := range r.anchors {
-		s := dot(query, a.vec)
+		s := vec.Dot(query, a.vec)
 		if cur, ok := best[a.intent]; !ok || s > cur {
 			best[a.intent] = s
 		}
@@ -242,40 +248,13 @@ func flatten(anchors map[Intent][]string) ([]string, []Intent) {
 	return phrases, owners
 }
 
-func normalize(vec []float32) []float32 {
-	var sum float64
-	for _, v := range vec {
-		sum += float64(v) * float64(v)
-	}
-	if sum == 0 {
-		return vec
-	}
-	norm := math.Sqrt(sum)
-	out := make([]float32, len(vec))
-	for i, v := range vec {
-		out[i] = float32(float64(v) / norm)
-	}
-	return out
-}
-
-func dot(a, b []float32) float64 {
-	n := min(len(a), len(b))
-	var sum float64
-	for i := range n {
-		sum += float64(a[i]) * float64(b[i])
-	}
-	return sum
-}
-
 //go:embed anchors.json
 var anchorsJSON []byte
 
-var defaultAnchors = mustLoadAnchors(anchorsJSON)
-
-func mustLoadAnchors(raw []byte) map[Intent][]string {
+func loadAnchors(raw []byte) (map[Intent][]string, error) {
 	var anchors map[Intent][]string
 	if err := json.Unmarshal(raw, &anchors); err != nil {
-		panic(fmt.Sprintf("intent: invalid anchors.json: %v", err))
+		return nil, fmt.Errorf("intent: invalid anchors.json: %w", err)
 	}
-	return anchors
+	return anchors, nil
 }

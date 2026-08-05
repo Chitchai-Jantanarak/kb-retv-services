@@ -11,10 +11,10 @@ import (
 	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
+	"github.com/my/app/internal/application/activityaudit"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/skeleton"
-	"github.com/my/app/internal/application/activityaudit"
 	"github.com/my/app/internal/application/toolaudit"
 	"github.com/my/app/internal/application/toolbroker"
 	"github.com/my/app/internal/application/tools"
@@ -28,8 +28,10 @@ import (
 	activitymysql "github.com/my/app/internal/repositories/activity/mysql"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
+	chatsessionmysql "github.com/my/app/internal/repositories/chatsession/mysql"
 	customermysql "github.com/my/app/internal/repositories/customer/mysql"
 	employeemysql "github.com/my/app/internal/repositories/employee/mysql"
+	gazetteermysql "github.com/my/app/internal/repositories/gazetteer/mysql"
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
@@ -39,9 +41,10 @@ import (
 )
 
 type chatEndpoints struct {
-	chat   *handlers.ChatHandler
-	stream *handlers.ChatStreamHandler
-	search *handlers.SearchHandler
+	chat    *handlers.ChatHandler
+	stream  *handlers.ChatStreamHandler
+	search  *handlers.SearchHandler
+	confirm *handlers.ChatConfirmHandler
 }
 
 func buildChatEndpoints(
@@ -77,11 +80,22 @@ func buildChatEndpoints(
 	}
 	ftsSource := rag.NewMySQLFTSSource(qdb)
 
-	chatOpts = appendChatIntelligenceOptions(cfg, qdb, resolver, reportsRepo, ftsSource, chatOpts, log)
+	chatOpts, guardErr := appendChatIntelligenceOptions(cfg, qdb, resolver, reportsRepo, ftsSource, chatOpts, log, &endpoints.confirm)
+	if guardErr != nil {
+		log.Error("chat endpoints disabled: local routing guard unavailable and no provider substitution is permitted",
+			zap.Error(guardErr))
+		endpoints.search = handlers.NewSearchHandler(searchwf.NewWorkflow(ftsSource))
+		log.Info("search endpoint configured")
+		return endpoints
+	}
 
 	chatOpts = append(chatOpts,
 		chatwf.WithProfile(profile.NewAssembler(profilemysql.New(qdb))),
 		chatwf.WithCaseSearch(chatCaseSearch{repo: reportsRepo}),
+		chatwf.WithSessions(chatsessionmysql.New(qdb)),
+		chatwf.WithTurnRecorder(toolaudit.NewChatTurn(
+			activityaudit.NewAIAction(mysqlai.NewActionRecorder(qdb), activitymysql.New(qdb), log),
+			agentIDLookup(resolver, log))),
 	)
 
 	if geminiKey := llmboot.LLMSettings(cfg).GeminiKey; geminiKey != "" {
@@ -123,14 +137,18 @@ func appendChatIntelligenceOptions(
 	ftsSource *rag.MySQLFTSSource,
 	chatOpts []chatwf.Option,
 	log *zap.Logger,
-) []chatwf.Option {
+	confirm **handlers.ChatConfirmHandler,
+) ([]chatwf.Option, error) {
 	_, _, sharedEmbedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
 	if err != nil {
 		log.Warn("chat intent router not configured", zap.Error(err))
-		return chatOpts
+		return chatOpts, nil
 	}
 
-	guardEmbedder, guardTh, guardReason := llmboot.GuardEmbedder(cfg, sharedEmbedder)
+	guardEmbedder, guardTh, guardReason, guardErr := llmboot.GuardEmbedder(cfg, sharedEmbedder)
+	if guardErr != nil {
+		return chatOpts, guardErr
+	}
 	log.Info("chat guard embedder resolved", zap.String("reason", guardReason))
 	routerOpts := []intent.Option{}
 	if guardTh.HasValues {
@@ -149,7 +167,7 @@ func appendChatIntelligenceOptions(
 	catalog, err := tools.Load(os.DirFS("config/tools"), perms.Set())
 	if err != nil {
 		log.Warn("tool orchestrator not configured", zap.Error(err))
-		return chatOpts
+		return chatOpts, nil
 	}
 
 	broker := toolbroker.New(toolbroker.Deps{
@@ -161,10 +179,11 @@ func appendChatIntelligenceOptions(
 		Customers: customermysql.New(qdb),
 	})
 	bound := broker.Bound(catalog)
-	selector, err := tools.NewSelector(context.Background(), sharedEmbedder, bound)
+	selector, err := tools.NewSelector(context.Background(), guardEmbedder, bound,
+		tools.WithNameSource(gazetteermysql.NewSource(qdb)))
 	if err != nil {
 		log.Warn("tool orchestrator not configured", zap.Error(err))
-		return chatOpts
+		return chatOpts, nil
 	}
 
 	orch := skeleton.New(
@@ -175,11 +194,13 @@ func appendChatIntelligenceOptions(
 			activityaudit.NewAIAction(mysqlai.NewActionRecorder(qdb), activitymysql.New(qdb), log),
 			agentIDLookup(resolver, log),
 		),
+		skeleton.WithPendingStore(skeleton.NewPendingStore()),
 	)
 	chatOpts = append(chatOpts, chatwf.WithOrchestrator(orch))
+	*confirm = handlers.NewChatConfirmHandler(orch)
 	log.Info("tool orchestrator configured",
 		zap.Int("bound", len(bound)),
 		zap.Strings("unbound", broker.UnboundIDs(catalog)))
 
-	return chatOpts
+	return chatOpts, nil
 }

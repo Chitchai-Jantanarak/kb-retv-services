@@ -46,16 +46,19 @@ func newFixture(t *testing.T, score float64, scorerErr error) (*Router, *stubEmb
 	t.Helper()
 
 	emb := &stubEmbedder{vecs: map[string][]float32{
-		"ติดต่อเจ้าหน้าที่":     {1, 0, 0, 0},
-		"ตรวจสอบสถานะเคส":       {0, 1, 0, 0},
-		"เปิดเคสใหม่":            {0, 0, 1, 0},
-		"ใช้งานระบบนี้อย่างไร":  {0, 0, 0, 1},
+		"ติดต่อเจ้าหน้าที่":    {1, 0, 0, 0},
+		"ตรวจสอบสถานะเคส":      {0, 1, 0, 0},
+		"เปิดเคสใหม่":          {0, 0, 1, 0},
+		"ใช้งานระบบนี้อย่างไร": {0, 0, 0, 1},
 
-		"ขอสายเจ้าหน้าที่":     {1, 0, 0, 0},
-		"เช็คสถานะเคส":          {0, 1, 0, 0},
-		"แจ้งเปิดเคส":           {0, 0, 1, 0},
-		"ถามวิธีใช้ระบบ":        {0, 0, 0, 1},
-		"หุ่นยนต์พังแก้ยังไง":  {0, 0, 0, 0, 1},
+		"ขอสายเจ้าหน้าที่":    {1, 0, 0, 0},
+		"เช็คสถานะเคส":        {0, 1, 0, 0},
+		"แจ้งเปิดเคส":         {0, 0, 1, 0},
+		"ถามวิธีใช้ระบบ":      {0, 0, 0, 1},
+		"หุ่นยนต์พังแก้ยังไง": {0, 0, 0, 0, 1},
+
+		"ขอสูตรอาหาร": {0, 0, 0, 0, 0, 1},
+		"สวัสดี":      {0, 0, 0, 0, 0, 0, 1},
 	}}
 	scorer := &stubScorer{score: score, err: scorerErr}
 
@@ -65,9 +68,10 @@ func newFixture(t *testing.T, score float64, scorerErr error) (*Router, *stubEmb
 			CaseStatus:     {"ตรวจสอบสถานะเคส"},
 			OpenCase:       {"เปิดเคสใหม่"},
 			GeneralSupport: {"ใช้งานระบบนี้อย่างไร"},
+			OffDomain:      {"ขอสูตรอาหาร"},
+			Social:         {"สวัสดี"},
 		}),
 		WithThresholds(0.4, 0.6),
-		WithRetrievalMin(1.0),
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -90,7 +94,8 @@ func TestRouterRoute(t *testing.T) {
 		{name: "case status action anchor", query: "เช็คสถานะเคส", wantIntent: CaseStatus, wantReason: ReasonActionAnchor, wantScorerCalled: false},
 		{name: "open case action anchor", query: "แจ้งเปิดเคส", wantIntent: OpenCase, wantReason: ReasonActionAnchor, wantScorerCalled: false},
 		{name: "kb question rescued by retrieval hit", query: "หุ่นยนต์พังแก้ยังไง", retrievalScore: 5.0, wantIntent: KBSearch, wantReason: ReasonRetrievalHit, wantScorerCalled: true},
-		{name: "in domain but no kb hit", query: "ถามวิธีใช้ระบบ", retrievalScore: 0.2, wantIntent: GeneralSupport, wantReason: ReasonInDomainNoKB, wantScorerCalled: true},
+		{name: "in domain but no kb hit", query: "ถามวิธีใช้ระบบ", retrievalScore: 0.0, wantIntent: GeneralSupport, wantReason: ReasonInDomainNoKB, wantScorerCalled: true},
+		{name: "any boolean match counts as a kb hit", query: "หุ่นยนต์พังแก้ยังไง", retrievalScore: 0.2, wantIntent: KBSearch, wantReason: ReasonRetrievalHit, wantScorerCalled: true},
 		{name: "off domain below floor and no kb", query: "หุ่นยนต์พังแก้ยังไง", retrievalScore: 0.0, wantIntent: OffDomain, wantReason: ReasonOffDomainFloor, wantScorerCalled: true},
 	}
 

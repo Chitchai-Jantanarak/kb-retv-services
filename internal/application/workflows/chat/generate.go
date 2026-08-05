@@ -64,9 +64,14 @@ func (w *Workflow) generateTurn(
 		if retry, rerr := provider.GenerateJSON(ctx, repair); rerr == nil {
 			if repairedTurn, ok := parseTurn(retry.Text); ok {
 				turn = repairedTurn
+				completion = retry
 			}
 		}
 	}
 
+	turn.Model = completion.Model
+	turn.Vendor = completion.Vendor
+	turn.TokensIn = completion.Usage.Input
+	turn.TokensOut = completion.Usage.Output
 	return turn, nil
 }
