@@ -16,6 +16,7 @@ type Config struct {
 	Budget    Budget
 	Chat      Chat
 	Embedding Embedding
+	Reply     Reply
 }
 
 func Load() (Config, error) {

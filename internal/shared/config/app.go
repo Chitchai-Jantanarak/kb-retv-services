@@ -51,3 +51,7 @@ type Embedding struct {
 	RefreshBatchSize  int
 	LargeRunThreshold int
 }
+
+type Reply struct {
+	DefaultMode string
+}

@@ -44,6 +44,10 @@ func buildKnowledge(db tenant.Querier) ports.KnowledgeRepository {
 
 func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger, resolver *llm.CompanyResolver) []reply.Option {
 	opts := make([]reply.Option, 0, 8)
+	if cfg.Reply.DefaultMode == "fast_draft" {
+		opts = append(opts, reply.WithDefaultMode(rag.ModeFastDraft))
+		log.Info("server-defaulted reply mode configured", zap.String("mode", rag.ModeFastDraft))
+	}
 	opts = append(opts, reply.WithBudget(budget.New(budget.Config{
 		Cache:                    memcache.New(4096),
 		MaxCallsPerRequest:       cfg.Budget.MaxLLMCallsPerRequest,

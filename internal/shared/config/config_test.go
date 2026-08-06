@@ -187,10 +187,29 @@ func TestChatCacheDefaults(t *testing.T) {
 		t.Fatalf("LoadFrom() error = %v", err)
 	}
 
+	if !cfg.LLM.Enabled {
+		t.Fatal("LLM.Enabled = false, want true by default")
+	}
 	if cfg.Chat.CacheTTLSeconds != 300 {
 		t.Fatalf("Chat.CacheTTLSeconds = %d, want 300", cfg.Chat.CacheTTLSeconds)
 	}
 	if cfg.Chat.CacheMaxEntries != 4096 {
 		t.Fatalf("Chat.CacheMaxEntries = %d, want 4096", cfg.Chat.CacheMaxEntries)
+	}
+	if cfg.Reply.DefaultMode != "full" {
+		t.Fatalf("Reply.DefaultMode = %q, want full", cfg.Reply.DefaultMode)
+	}
+}
+
+func TestReplyDefaultModeReadsEnv(t *testing.T) {
+	t.Setenv("REPLY_DEFAULT_MODE", "fast_draft")
+
+	cfg, err := LoadFrom("")
+	if err != nil {
+		t.Fatalf("LoadFrom() error = %v", err)
+	}
+
+	if cfg.Reply.DefaultMode != "fast_draft" {
+		t.Fatalf("Reply.DefaultMode = %q, want fast_draft", cfg.Reply.DefaultMode)
 	}
 }

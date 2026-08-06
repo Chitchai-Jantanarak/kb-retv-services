@@ -14,13 +14,16 @@ import (
 
 const intentGeneralSupport = "general-support"
 
+const weakConfidenceThreshold = 0.60
+
 type AgentIDLookup func(ctx context.Context, companyID int64) (int64, bool)
 
 type Workflow struct {
-	pipeline   *rag.Pipeline
-	actions    ports.AIActionRecorder
-	agentIDFor AgentIDLookup
-	anchorer   SymptomAnchorer
+	pipeline    *rag.Pipeline
+	actions     ports.AIActionRecorder
+	agentIDFor  AgentIDLookup
+	anchorer    SymptomAnchorer
+	defaultMode string
 }
 
 type Option func(*options)
@@ -38,6 +41,7 @@ type options struct {
 	actions      ports.AIActionRecorder
 	agentIDFor   AgentIDLookup
 	anchorer     SymptomAnchorer
+	defaultMode  string
 }
 
 func WithRetriever(retriever rag.Retriever) Option {
@@ -127,6 +131,12 @@ func WithActionRecorder(rec ports.AIActionRecorder, agentIDFor AgentIDLookup) Op
 	}
 }
 
+func WithDefaultMode(mode string) Option {
+	return func(opts *options) {
+		opts.defaultMode = mode
+	}
+}
+
 func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow {
 	cfg := options{}
 	for _, opt := range opts {
@@ -158,9 +168,10 @@ func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow 
 			Budget:                 cfg.budget,
 			Workers:                len(retrievers),
 		}),
-		actions:    cfg.actions,
-		agentIDFor: cfg.agentIDFor,
-		anchorer:   cfg.anchorer,
+		actions:     cfg.actions,
+		agentIDFor:  cfg.agentIDFor,
+		anchorer:    cfg.anchorer,
+		defaultMode: cfg.defaultMode,
 	}
 }
 
@@ -176,12 +187,20 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 
 	start := time.Now()
 	metadata := applySymptomAnchor(ctx, w.anchorer, cid, req.Message, req.Metadata)
+
+	mode := req.Mode
+	serverDefaulted := false
+	if mode == "" && w.defaultMode == rag.ModeFastDraft {
+		mode = rag.ModeFastDraft
+		serverDefaulted = true
+	}
+
 	result, err := w.pipeline.Run(ctx, rag.Query{
 		CompanyID: cid,
 		Coverage:  ctxkey.CoverageOrSelf(ctx, cid),
 		Text:      req.Message,
 		Limit:     3,
-		Mode:      req.Mode,
+		Mode:      mode,
 		Debug:     req.Debug,
 		Metadata:  metadata,
 	})
@@ -189,11 +208,28 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 		return dto.ReplyResponse{}, fmt.Errorf("run rag pipeline: %w", err)
 	}
 
+	escalated := false
+	if serverDefaulted && mode == rag.ModeFastDraft && isWeakResult(result) {
+		retryResult, retryErr := w.pipeline.Run(ctx, rag.Query{
+			CompanyID: cid,
+			Coverage:  ctxkey.CoverageOrSelf(ctx, cid),
+			Text:      req.Message,
+			Limit:     3,
+			Mode:      rag.ModeFullReview,
+			Debug:     req.Debug,
+			Metadata:  metadata,
+		})
+		if retryErr == nil {
+			result = retryResult
+			escalated = true
+		}
+	}
+
 	suggestion := selectSuggestion(result)
 
 	var actionID int64
 	if w.actions != nil && w.agentIDFor != nil {
-		actionID = w.recordAction(ctx, cid, req.Message, suggestion, result, time.Since(start))
+		actionID = w.recordAction(ctx, cid, req.Message, suggestion, result, time.Since(start), escalated)
 	}
 
 	return dto.ReplyResponse{
@@ -211,7 +247,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 	}, nil
 }
 
-func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, draft string, result rag.Result, elapsed time.Duration) int64 {
+func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, draft string, result rag.Result, elapsed time.Duration, escalated bool) int64 {
 	agentID, ok := w.agentIDFor(ctx, companyID)
 	if !ok || agentID <= 0 {
 		return 0
@@ -220,6 +256,9 @@ func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, dra
 		"draft":    draft,
 		"decision": string(result.Decision),
 		"sources":  toActionSources(result.Candidates),
+	}
+	if escalated {
+		output["escalated_to_full"] = true
 	}
 	if result.Critique.Refusal != "" || len(result.Critique.Hallucinations) > 0 {
 		output["critique"] = map[string]any{
@@ -267,6 +306,12 @@ func buildSuggestion(candidates []rag.Candidate) string {
 	}
 
 	return fmt.Sprintf("Suggested reply: %s", htmltext.StripInlineImages(candidates[0].Content))
+}
+
+func isWeakResult(result rag.Result) bool {
+	return result.Decision == rag.DecisionEscalate ||
+		result.CRAG.Verdict == rag.VerdictIrrelevant ||
+		result.Confidence < weakConfidenceThreshold
 }
 
 func selectSuggestion(result rag.Result) string {

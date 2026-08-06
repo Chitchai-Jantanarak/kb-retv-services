@@ -17,6 +17,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("qdrant.collectionPrefix", "kb_chunks")
 	v.SetDefault("memgraph.enabled", false)
 	v.SetDefault("memgraph.uri", "bolt://localhost:7687")
+	v.SetDefault("llm.enabled", true)
 	v.SetDefault("llm.default_vendor", "gemini")
 	v.SetDefault("llm.default_model", "gemini-2.5-flash")
 	v.SetDefault("llm.request_timeout_seconds", 8)
@@ -39,4 +40,5 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("embedding.refreshMaxChunks", 512)
 	v.SetDefault("embedding.refreshBatchSize", 64)
 	v.SetDefault("embedding.largeRunThreshold", 1000)
+	v.SetDefault("reply.defaultMode", "full")
 }

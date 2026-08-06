@@ -143,5 +143,8 @@ func configFrom(v *viper.Viper) Config {
 			RefreshBatchSize:  v.GetInt("embedding.refreshBatchSize"),
 			LargeRunThreshold: v.GetInt("embedding.largeRunThreshold"),
 		},
+		Reply: Reply{
+			DefaultMode: v.GetString("reply.defaultMode"),
+		},
 	}
 }

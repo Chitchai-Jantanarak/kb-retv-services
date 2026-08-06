@@ -126,6 +126,119 @@ func TestWorkflowRunUsesSymptomMetadataForGraphAnchor(t *testing.T) {
 	}
 }
 
+func TestWorkflowRunAppliesServerDefaultFastDraftMode(t *testing.T) {
+	repo := memory.NewKnowledgeRepository(nil)
+	recorder := &modeRecordingRetriever{}
+	workflow := NewWorkflow(repo, WithRetriever(recorder), WithDefaultMode(rag.ModeFastDraft))
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 1)
+	if _, err := workflow.Run(ctx, dto.ReplyRequest{
+		CustomerID: "cust-001",
+		Message:    "The printer is offline.",
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if recorder.calls != 1 {
+		t.Fatalf("calls = %d, want 1", recorder.calls)
+	}
+	if recorder.modes[0] != rag.ModeFastDraft {
+		t.Fatalf("mode = %q, want %q", recorder.modes[0], rag.ModeFastDraft)
+	}
+}
+
+func TestWorkflowRunKeepsFullModeWhenDefaultUnset(t *testing.T) {
+	repo := memory.NewKnowledgeRepository(nil)
+	recorder := &modeRecordingRetriever{}
+	workflow := NewWorkflow(repo, WithRetriever(recorder))
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 1)
+	if _, err := workflow.Run(ctx, dto.ReplyRequest{
+		CustomerID: "cust-001",
+		Message:    "The printer is offline.",
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if recorder.calls != 1 {
+		t.Fatalf("calls = %d, want 1", recorder.calls)
+	}
+	if recorder.modes[0] != "" {
+		t.Fatalf("mode = %q, want empty (today's behavior)", recorder.modes[0])
+	}
+}
+
+func TestWorkflowRunEscalatesServerDefaultedFastDraftOnWeakSignal(t *testing.T) {
+	repo := memory.NewKnowledgeRepository(nil)
+	recorder := &modeRecordingRetriever{}
+	workflow := NewWorkflow(repo,
+		WithRetriever(recorder),
+		WithCRAG(weakCRAG{}),
+		WithDefaultMode(rag.ModeFastDraft),
+	)
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 1)
+	if _, err := workflow.Run(ctx, dto.ReplyRequest{
+		CustomerID: "cust-001",
+		Message:    "The printer is offline.",
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if recorder.calls != 2 {
+		t.Fatalf("calls = %d, want 2", recorder.calls)
+	}
+	if recorder.modes[0] != rag.ModeFastDraft {
+		t.Fatalf("first call mode = %q, want %q", recorder.modes[0], rag.ModeFastDraft)
+	}
+	if recorder.modes[1] != rag.ModeFullReview {
+		t.Fatalf("second call mode = %q, want %q", recorder.modes[1], rag.ModeFullReview)
+	}
+}
+
+func TestWorkflowRunDoesNotEscalateClientRequestedFastDraftOnWeakSignal(t *testing.T) {
+	repo := memory.NewKnowledgeRepository(nil)
+	recorder := &modeRecordingRetriever{}
+	workflow := NewWorkflow(repo,
+		WithRetriever(recorder),
+		WithCRAG(weakCRAG{}),
+		WithDefaultMode(rag.ModeFastDraft),
+	)
+
+	ctx := ctxkey.WithCompanyID(context.Background(), 1)
+	if _, err := workflow.Run(ctx, dto.ReplyRequest{
+		CustomerID: "cust-001",
+		Message:    "The printer is offline.",
+		Mode:       rag.ModeFastDraft,
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if recorder.calls != 1 {
+		t.Fatalf("calls = %d, want 1", recorder.calls)
+	}
+	if recorder.modes[0] != rag.ModeFastDraft {
+		t.Fatalf("mode = %q, want %q", recorder.modes[0], rag.ModeFastDraft)
+	}
+}
+
+type modeRecordingRetriever struct {
+	calls int
+	modes []string
+}
+
+func (r *modeRecordingRetriever) Retrieve(_ context.Context, query rag.Query, _ rag.Meta) ([]rag.Candidate, error) {
+	r.calls++
+	r.modes = append(r.modes, query.Mode)
+	return []rag.Candidate{{ID: "c1", Title: "candidate", Content: "candidate content", Source: "test", Score: 1}}, nil
+}
+
+type weakCRAG struct{}
+
+func (weakCRAG) Grade(_ context.Context, _, _ string) (rag.CRAGResult, error) {
+	return rag.CRAGResult{Verdict: rag.VerdictIrrelevant, Graded: true}, nil
+}
+
 type singleCandidateRetriever struct{}
 
 func (singleCandidateRetriever) Retrieve(ctx context.Context, query rag.Query, meta rag.Meta) ([]rag.Candidate, error) {
