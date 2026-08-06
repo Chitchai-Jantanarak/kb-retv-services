@@ -28,19 +28,3 @@ func TestWorkloadMapsRows(t *testing.T) {
 		t.Fatalf("row = %v", rows[0])
 	}
 }
-
-func TestWorkloadEmptyCoverage(t *testing.T) {
-	repo := &stubEmployeeRepo{loads: []employeemysql.WorkloadRow{{Name: "Nok", Open: 4}}}
-	h := NewWorkload(repo)
-
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "team workload", Coverage: nil})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
-	}
-	if repo.loadsCovered != nil {
-		t.Fatal("repo must not be queried on empty coverage")
-	}
-}

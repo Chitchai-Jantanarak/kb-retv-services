@@ -41,8 +41,8 @@ func can(principal ctxkey.Principal, permission string) bool {
 }
 
 var defaultRolePerms = map[string][]string{
-	"tenant_admin": {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject", "ai:search:read"},
-	"agent_lead":   {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject", "ai:search:read"},
-	"agent":        {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:search:read"},
+	"tenant_admin": {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
+	"agent_lead":   {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
+	"agent":        {"ai:reply:create", "ai:feedback:create", "ai:reports:read"},
 	"customer":     {"ai:feedback:create"},
 }

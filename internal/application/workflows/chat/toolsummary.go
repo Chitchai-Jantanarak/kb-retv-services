@@ -8,14 +8,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/skeleton"
 )
 
-const toolSummaryTimeout = 3 * time.Second
-
-func summaryComposeMode(r skeleton.Response) bool {
+func summaryComposeMode(r skeleton.Response, req dto.ChatRequest) bool {
+	if req.Mode == dto.ChatModeVoice {
+		return false
+	}
 	return r.ComposeMode != "template"
 }
 
@@ -34,30 +35,13 @@ func (w *Workflow) composeToolReply(ctx context.Context, locale, question string
 		}
 	}
 
-	prompt, err := w.summaryTmpl.Render(map[string]string{
+	summary, ok := w.smallModelCall(ctx, w.summaryTmpl, map[string]string{
 		"language": promptLanguage(locale),
 		"question": question,
 		"count":    strconv.Itoa(len(r.Table.Rows)),
 		"rows":     rowsText,
-	})
-	if err != nil {
-		return "", false
-	}
-
-	provider, err := w.resolve(ctx, companyID)
-	if err != nil {
-		return "", false
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, toolSummaryTimeout)
-	defer cancel()
-	completion, err := provider.Generate(callCtx, prompt)
-	if err != nil {
-		return "", false
-	}
-
-	summary := strings.TrimSpace(completion.Text)
-	if summary == "" || !summaryCodesGrounded(summary, rowsText) {
+	}, companyID)
+	if !ok || !summaryCodesGrounded(summary, rowsText) {
 		return "", false
 	}
 

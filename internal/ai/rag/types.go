@@ -32,8 +32,7 @@ type Query struct {
 }
 
 type Meta struct {
-	Intent string
-	Terms  []string
+	Terms []string
 }
 
 type PlannedQuery struct {
@@ -97,7 +96,6 @@ type DebugTrace struct {
 }
 
 type DebugPlanTrace struct {
-	Intent           string            `json:"intent,omitempty"`
 	Terms            []string          `json:"terms,omitempty"`
 	RetrievalQueries int               `json:"retrieval_queries"`
 	GraphAnchors     int               `json:"graph_anchors"`
@@ -108,6 +106,7 @@ type DebugRetrievalTrace struct {
 	Candidates       int    `json:"candidates"`
 	TopSource        string `json:"top_source,omitempty"`
 	ContextAssembled bool   `json:"context_assembled"`
+	GraphError       string `json:"graph_error,omitempty"`
 }
 
 type DebugQualityTrace struct {
@@ -119,10 +118,6 @@ type DebugQualityTrace struct {
 	Decision       string  `json:"decision"`
 	DraftGenerated bool    `json:"draft_generated"`
 	CriticRan      bool    `json:"critic_ran"`
-}
-
-type Extractor interface {
-	Extract(ctx context.Context, query Query) (Meta, error)
 }
 
 type Planner interface {
@@ -161,10 +156,9 @@ type Budget interface {
 
 type Config struct {
 	Planner                Planner
-	Extractor              Extractor
 	Retrievers             []Retriever
 	GraphRetriever         GraphRetriever
-	ContextAssembler       ContextAssembler
+	ContextAssembler       *ParentChildContextAssembler
 	Reranker               Reranker
 	Compressor             Compressor
 	CRAG                   CRAG

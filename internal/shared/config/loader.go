@@ -65,11 +65,11 @@ func configFrom(v *viper.Viper) Config {
 		Memgraph: Memgraph{
 			Enabled:  v.GetBool("memgraph.enabled"),
 			URI:      v.GetString("memgraph.uri"),
-			URL:      firstNonEmpty(v.GetString("memgraph.url"), v.GetString("memgraph.uri")),
 			Username: v.GetString("memgraph.username"),
 			Password: v.GetString("memgraph.password"),
 		},
 		LLM: LLM{
+			Enabled:       v.GetBool("llm.enabled"),
 			DefaultVendor: v.GetString("llm.default_vendor"),
 			DefaultModel:  v.GetString("llm.default_model"),
 			EmbeddingProvider: firstNonEmpty(

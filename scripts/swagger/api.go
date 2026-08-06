@@ -9,6 +9,8 @@ var (
 	_ = dto.ChatRequest{}
 	_ = dto.ChatResponse{}
 	_ = dto.ReplyRequest{}
+	_ = dto.ChatConfirmRequest{}
+	_ = dto.ChatStreamEvent{}
 	_ = response.Envelope{}
 )
 
@@ -75,6 +77,57 @@ type reviewQueueCallbackData struct {
 	Kind      string `json:"kind" example:"symptom_proposed"`
 }
 
+type reviewApproveData struct {
+	ReviewItemID int64  `json:"review_item_id" example:"123"`
+	Kind         string `json:"kind" example:"symptom_proposed"`
+	PromotionRef string `json:"promotion_ref,omitempty" example:"symptom_node:456"`
+}
+
+type reviewApproveResponse struct {
+	Data reviewApproveData `json:"data"`
+}
+
+type aiAccuracyData struct {
+	TotalClassified int64 `json:"total_classified" example:"120"`
+	HumanConfirmed  int64 `json:"human_confirmed" example:"98"`
+	ProblemTypeHits int64 `json:"problem_type_hits" example:"90"`
+	SubjectHits     int64 `json:"subject_hits" example:"95"`
+	SymptomHits     int64 `json:"symptom_hits" example:"80"`
+	SeverityHits    int64 `json:"severity_hits" example:"88"`
+}
+
+type aiAccuracyResponse struct {
+	Data aiAccuracyData `json:"data"`
+}
+
+type answerRateData struct {
+	TotalActions   int64   `json:"total_actions" example:"200"`
+	HighConfidence int64   `json:"high_confidence" example:"170"`
+	LatencyAvgMS   int64   `json:"latency_avg_ms" example:"850"`
+	Threshold      float64 `json:"threshold" example:"0.85"`
+}
+
+type answerRateResponse struct {
+	Data answerRateData `json:"data"`
+}
+
+type knowledgeGapRow struct {
+	ID              int64  `json:"id" example:"7"`
+	QueryText       string `json:"query_text" example:"how to reset password"`
+	OccurrenceCount int64  `json:"occurrence_count" example:"14"`
+	FirstSeen       string `json:"first_seen" example:"2026-07-01T09:00:00Z"`
+	LastSeen        string `json:"last_seen" example:"2026-08-01T09:00:00Z"`
+	Status          string `json:"status" example:"open"`
+}
+
+type knowledgeGapsData struct {
+	Gaps []knowledgeGapRow `json:"gaps"`
+}
+
+type knowledgeGapsResponse struct {
+	Data knowledgeGapsData `json:"data"`
+}
+
 // @title Centric RAG AI Service
 // @version 0.1.0
 // @description Internal AI service for tenancy-scoped support retrieval and reply workflows.
@@ -120,6 +173,36 @@ func createReply() {}
 // @Failure 500 {object} response.Envelope
 // @Router /v1/chat [post]
 func createChat() {}
+
+// @Summary Create chat turn (streaming)
+// @Description Server-Sent Events variant of /v1/chat. Each frame is `event: <type>\ndata: <json>`; types are start, token, tool, pending_action, done, error. Same request body and stage set as /v1/chat.
+// @Tags chat
+// @Accept json
+// @Produce text/event-stream
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param X-Timeout-Ms header string false "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent"
+// @Param request body dto.ChatRequest true "Chat request"
+// @Success 200 {object} dto.ChatStreamEvent
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Router /v1/chat/stream [post]
+func createChatStream() {}
+
+// @Summary Confirm a pending chat action
+// @Description Executes an action previously proposed via `pending_action` in a /v1/chat or /v1/chat/stream response. `action_id` is the 32-character id from that field.
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param request body dto.ChatConfirmRequest true "Confirm request"
+// @Success 200 {object} response.Envelope{data=dto.ChatResponse}
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Router /v1/chat/confirm-action [post]
+func confirmChatAction() {}
 
 // @Summary Receive LINE inbound webhook
 // @Tags inbound
@@ -173,6 +256,61 @@ func createFeedback() {}
 // @Failure 500 {object} response.Envelope
 // @Router /v1/admin/review-queue/{id}/reject [post]
 func rejectReviewQueueItem() {}
+
+// @Summary Approve review queue item
+// @Description Promotes the review queue item into its target (symptom node, subject, or KB article).
+// @Tags review-queue
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param id path int true "Review item ID"
+// @Success 200 {object} reviewApproveResponse
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/admin/review-queue/{id}/approve [post]
+func approveReviewQueueItem() {}
+
+// @Summary AI accuracy report
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param since query string false "RFC3339 timestamp, or an integer number of days ago"
+// @Success 200 {object} aiAccuracyResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/reports/ai-accuracy [get]
+func aiAccuracyReport() {}
+
+// @Summary Answer rate report
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param since query string false "RFC3339 timestamp, or an integer number of days ago"
+// @Param threshold query number false "Confidence threshold, default 0.85"
+// @Success 200 {object} answerRateResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/reports/answer-rate [get]
+func answerRateReport() {}
+
+// @Summary Knowledge gaps report
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param limit query int false "Max rows, default 20"
+// @Success 200 {object} knowledgeGapsResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/reports/knowledge-gaps [get]
+func knowledgeGapsReport() {}
 
 // @Summary Receive signed Laravel review queue callback
 // @Description Laravel internal endpoint used by the Go review outbox. `X-AI-Signature` is lowercase hex HMAC-SHA256 over `<timestamp>.<raw JSON body>` using `GO_AI_WEBHOOK_SECRET`.

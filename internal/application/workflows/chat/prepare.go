@@ -65,7 +65,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		return chatPreamble{}, err
 	}
 	var selectedToolDebug *dto.ChatToolDebug
-	if w.orch != nil && decision.Intent != intent.OffDomain && decision.Intent != intent.Handoff && decision.Intent != intent.Social {
+	if w.orch != nil && decision.Intent != intent.Social {
 		var toolResp skeleton.Response
 		var toolErr error
 		toolCtx := ctx
@@ -125,7 +125,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		}
 		if toolErr == nil && toolResp.Matched {
 			resp := toolChatResponse(req.Locale, toolResp)
-			if summaryComposeMode(toolResp) {
+			if summaryComposeMode(toolResp, req) {
 				if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
 					resp.Reply = summary
 				}
@@ -301,12 +301,6 @@ func (w *Workflow) persistTurns(ctx context.Context, companyID int64, req dto.Ch
 
 func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
 	switch d.Intent {
-	case intent.OffDomain:
-		return dto.ChatResponse{
-			Reply:    offDomainReply(locale),
-			Status:   dto.ChatStatusOffDomain,
-			Activity: activity(locale, "request_checked"),
-		}, true
 	case intent.Handoff:
 		return dto.ChatResponse{
 			Reply:    handoffReply(locale),

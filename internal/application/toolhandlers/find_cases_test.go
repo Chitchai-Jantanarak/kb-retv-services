@@ -38,18 +38,38 @@ func TestFindCasesMapsRows(t *testing.T) {
 	}
 }
 
-func TestFindCasesEmptyCoverage(t *testing.T) {
-	repo := &stubCasesRepo{latestCases: []reportsmysql.CaseRow{{Code: "REP-1"}}}
+func TestFindCasesHonoursRequestedCount(t *testing.T) {
+	repo := &stubCasesRepo{}
 	h := NewFindCases(repo)
 
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "cases", Coverage: nil})
-	if err != nil {
+	if _, err := h.Run(context.Background(), skeleton.Query{
+		Text:     "ขอเคสปัญหา 4 อย่างล่าสุด",
+		Coverage: []int64{3},
+		Tool:     tools.Tool{Limit: 10},
+	}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
+	if repo.latestLimit != 4 {
+		t.Fatalf("latestLimit = %d, want 4", repo.latestLimit)
 	}
-	if repo.latestCoverage != nil {
-		t.Fatal("repo must not be queried on empty coverage")
+}
+
+func TestRequestedLimit(t *testing.T) {
+	cases := []struct {
+		text string
+		cap  int
+		want int
+	}{
+		{"give me 3 latest incoming cases", 10, 3},
+		{"ขอเคสปัญหา 4 อย่างล่าสุด", 10, 4},
+		{"find cases", 10, 10},
+		{"status of REP-606", 10, 10},
+		{"show 25 cases", 10, 10},
+		{"show 0 cases", 10, 10},
+	}
+	for _, c := range cases {
+		if got := requestedLimit(c.text, c.cap); got != c.want {
+			t.Fatalf("requestedLimit(%q, %d) = %d, want %d", c.text, c.cap, got, c.want)
+		}
 	}
 }

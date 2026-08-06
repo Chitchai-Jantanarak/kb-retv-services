@@ -13,9 +13,7 @@ const (
 	minAISymptomConfidence = 0.70
 )
 
-type DefaultQueryPlanner struct {
-	Extractor Extractor
-}
+type DefaultQueryPlanner struct{}
 
 func (p DefaultQueryPlanner) Plan(ctx context.Context, query Query) (QueryPlan, error) {
 	if err := ctx.Err(); err != nil {
@@ -31,14 +29,7 @@ func (p DefaultQueryPlanner) Plan(ctx context.Context, query Query) (QueryPlan, 
 	plannedQuery.Text = retrievalText
 	plannedQuery.Limit = effectiveQueryLimit(query.Limit)
 
-	extractor := p.Extractor
-	if extractor == nil {
-		extractor = DefaultExtractor{}
-	}
-	meta, err := extractor.Extract(ctx, plannedQuery)
-	if err != nil {
-		return QueryPlan{}, err
-	}
+	meta := Meta{Terms: terms(plannedQuery.Text)}
 
 	canonicalText := canonicalQueryText(retrievalText)
 	navigational := isNavigationalQuery(canonicalText)
@@ -54,7 +45,7 @@ func (p DefaultQueryPlanner) Plan(ctx context.Context, query Query) (QueryPlan, 
 			{Kind: PlannedQueryOriginal, Text: retrievalText},
 		},
 		GraphAnchors: graphAnchors,
-		SkipReasons:  plannerSkipReasons(navigational, graphSkipReason),
+		SkipReasons:  plannerSkipReasons(graphSkipReason),
 	}, nil
 }
 
@@ -93,20 +84,11 @@ func isNavigationalQuery(canonical string) bool {
 	return false
 }
 
-func plannerSkipReasons(navigational bool, graphSkipReason string) map[string]string {
-	reason := "disabled in deterministic query planner"
-	if navigational {
-		reason = "disabled for navigational query"
+func plannerSkipReasons(graphSkipReason string) map[string]string {
+	if graphSkipReason == "" {
+		return nil
 	}
-	reasons := map[string]string{
-		"rewrite":    "disabled in deterministic query planner",
-		"hyde":       reason,
-		"rag_fusion": reason,
-	}
-	if graphSkipReason != "" {
-		reasons["graph_anchor"] = graphSkipReason
-	}
-	return reasons
+	return map[string]string{"graph_anchor": graphSkipReason}
 }
 
 func graphAnchorsFromMetadata(metadata map[string]string, navigational bool) ([]GraphAnchor, string) {

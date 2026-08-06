@@ -23,10 +23,12 @@ func TestWriteCompletenessPersistsStatusMissingAndFields(t *testing.T) {
 	if !strings.Contains(q.execSQL, "UPDATE conversations") ||
 		!strings.Contains(q.execSQL, "intake_status") ||
 		!strings.Contains(q.execSQL, "intake_missing") ||
-		!strings.Contains(q.execSQL, "intake_fields") {
+		!strings.Contains(q.execSQL, "intake_fields") ||
+		!strings.Contains(q.execSQL, "intake_score") ||
+		!strings.Contains(q.execSQL, "intake_reasons") {
 		t.Fatalf("SQL = %s", q.execSQL)
 	}
-	if len(q.execArgs) != 4 {
+	if len(q.execArgs) != 6 {
 		t.Fatalf("args = %v", q.execArgs)
 	}
 	if q.execArgs[0] != intake.StatusIncomplete {
@@ -38,8 +40,8 @@ func TestWriteCompletenessPersistsStatusMissingAndFields(t *testing.T) {
 	if q.execArgs[2] != `{"problem_detail":"stuck at dock"}` {
 		t.Fatalf("fields arg = %v", q.execArgs[2])
 	}
-	if q.execArgs[3] != int64(42) {
-		t.Fatalf("conversation arg = %v", q.execArgs[3])
+	if q.execArgs[5] != int64(42) {
+		t.Fatalf("conversation arg = %v", q.execArgs[5])
 	}
 }
 

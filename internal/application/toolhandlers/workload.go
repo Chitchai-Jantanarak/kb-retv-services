@@ -16,9 +16,6 @@ func NewWorkload(repo EmployeeRepo) Workload {
 }
 
 func (h Workload) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	if len(q.Coverage) == 0 {
-		return []skeleton.Row{}, nil
-	}
 	limit := q.Tool.Limit
 	if limit <= 0 {
 		limit = 20

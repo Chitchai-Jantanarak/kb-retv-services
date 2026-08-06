@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/my/app/internal/application/skeleton"
 )
@@ -21,10 +20,10 @@ func NewAssignCase(repo CasesRepo) AssignCase {
 }
 
 func (h AssignCase) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	code := strings.ToUpper(caseCodeRe.FindString(q.Text))
+	code := paramOrParse(q, "code")
 	employeeID := parseEmployeeID(q.Text)
 	if code == "" || employeeID == 0 {
-		return nil, fmt.Errorf("assign_case: a case code and a numeric employee id are required")
+		return nil, skeleton.NeedsParams("case_code", "employee_id")
 	}
 	id, err := h.repo.CaseIDByCode(ctx, q.Coverage, code)
 	if err != nil {

@@ -1,13 +1,14 @@
-package toolbroker
+package main
 
 import (
+	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/application/toolhandlers"
 	"github.com/my/app/internal/application/tools"
 )
 
-type Deps struct {
-	FTS       toolhandlers.FTSSource
+type toolBrokerDeps struct {
+	FTS       rag.FTSSource
 	Reports   toolhandlers.CasesRepo
 	Inbound   toolhandlers.InboundRepo
 	Promoter  toolhandlers.Promoter
@@ -15,11 +16,11 @@ type Deps struct {
 	Customers toolhandlers.CustomerRepo
 }
 
-type Broker struct {
+type toolBroker struct {
 	handlers map[string]skeleton.Handler
 }
 
-func New(deps Deps) *Broker {
+func newToolBroker(deps toolBrokerDeps) *toolBroker {
 	handlers := map[string]skeleton.Handler{}
 	if deps.FTS != nil {
 		handlers["knowledge"] = toolhandlers.NewKnowledge(deps.FTS)
@@ -45,14 +46,14 @@ func New(deps Deps) *Broker {
 	if deps.Promoter != nil {
 		handlers["promote.mail"] = toolhandlers.NewPromoteMail(deps.Promoter)
 	}
-	return &Broker{handlers: handlers}
+	return &toolBroker{handlers: handlers}
 }
 
-func (b *Broker) Handlers() map[string]skeleton.Handler {
+func (b *toolBroker) Handlers() map[string]skeleton.Handler {
 	return b.handlers
 }
 
-func (b *Broker) Bound(catalog []tools.Tool) []tools.Tool {
+func (b *toolBroker) Bound(catalog []tools.Tool) []tools.Tool {
 	out := make([]tools.Tool, 0, len(catalog))
 	for _, tool := range catalog {
 		if _, ok := b.handlers[tool.Handler]; ok {
@@ -62,7 +63,7 @@ func (b *Broker) Bound(catalog []tools.Tool) []tools.Tool {
 	return out
 }
 
-func (b *Broker) UnboundIDs(catalog []tools.Tool) []string {
+func (b *toolBroker) UnboundIDs(catalog []tools.Tool) []string {
 	var out []string
 	for _, tool := range catalog {
 		if _, ok := b.handlers[tool.Handler]; !ok {

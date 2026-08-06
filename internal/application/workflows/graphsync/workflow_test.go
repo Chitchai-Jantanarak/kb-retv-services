@@ -143,6 +143,78 @@ func TestWorkflowEmitsReportArticleAndEdge(t *testing.T) {
 	}
 }
 
+func TestWorkflowLinksArticleToClassifiedSymptom(t *testing.T) {
+	src := &stubArticleSource{articles: []ArticleRecord{
+		{ID: 11, CompanyID: 7, SourceReportID: 101, Title: "First", SymptomID: 55, SymptomName: "wifi drops"},
+	}}
+	store := &stubGraphStore{}
+	wf, err := New(Config{Source: src, Graph: graph.NewKBGraph(store)})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+
+	res, err := wf.Run(context.Background(), Options{CompanyID: 7})
+	if err != nil {
+		t.Fatalf("Run() err = %v", err)
+	}
+	if res.Edges != 2 {
+		t.Fatalf("res.Edges = %d, want 2 (produced + solves)", res.Edges)
+	}
+
+	var sawSymptomNode, sawSolvesEdge bool
+	for _, n := range store.nodes {
+		if len(n.Labels) == 1 && n.Labels[0] == graph.LabelSymptom {
+			sawSymptomNode = true
+			if n.CompanyID != 7 || n.ID != "7:symptom:55" {
+				t.Fatalf("unexpected symptom node: %+v", n)
+			}
+		}
+	}
+	for _, e := range store.edges {
+		if e.Type == graph.EdgeSolves {
+			sawSolvesEdge = true
+			if e.CompanyID != 7 || e.From != "7:article:11" || e.To != "7:symptom:55" {
+				t.Fatalf("unexpected solves edge: %+v", e)
+			}
+		}
+	}
+	if !sawSymptomNode {
+		t.Fatal("expected a Symptom node to be upserted")
+	}
+	if !sawSolvesEdge {
+		t.Fatal("expected a SOLVES edge to be created")
+	}
+}
+
+func TestWorkflowNoSymptomSkipsSolvesEdge(t *testing.T) {
+	src := &stubArticleSource{articles: []ArticleRecord{
+		{ID: 11, CompanyID: 7, SourceReportID: 101, Title: "First"},
+	}}
+	store := &stubGraphStore{}
+	wf, err := New(Config{Source: src, Graph: graph.NewKBGraph(store)})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+
+	res, err := wf.Run(context.Background(), Options{CompanyID: 7})
+	if err != nil {
+		t.Fatalf("Run() err = %v", err)
+	}
+	if res.Edges != 1 {
+		t.Fatalf("res.Edges = %d, want 1 (produced only)", res.Edges)
+	}
+	for _, e := range store.edges {
+		if e.Type == graph.EdgeSolves {
+			t.Fatalf("unexpected solves edge emitted: %+v", e)
+		}
+	}
+	for _, n := range store.nodes {
+		if len(n.Labels) == 1 && n.Labels[0] == graph.LabelSymptom {
+			t.Fatalf("unexpected symptom node emitted: %+v", n)
+		}
+	}
+}
+
 func TestWorkflowContextCancellationPropagates(t *testing.T) {
 	src := &stubArticleSource{articles: []ArticleRecord{
 		{ID: 11, CompanyID: 7, SourceReportID: 101, Title: "First"},

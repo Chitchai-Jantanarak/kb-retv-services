@@ -7,6 +7,7 @@ import (
 
 	"github.com/my/app/internal/domain/kb"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/qdrant"
 	"github.com/my/app/internal/shared/ctxkey"
 )
 
@@ -65,8 +66,12 @@ func (r *VectorRetriever) Retrieve(ctx context.Context, query Query, meta Meta) 
 
 	var hits []ports.VectorHit
 	for _, companyID := range coverage {
+		collection, err := qdrant.CollectionForCompany(prefix, companyID)
+		if err != nil {
+			return nil, err
+		}
 		collectionHits, err := r.vector.Search(ctx, ports.VectorSearch{
-			Collection: fmt.Sprintf("%s__%d", prefix, companyID),
+			Collection: collection,
 			Query:      vectors[0],
 			Limit:      searchLimit,
 		})

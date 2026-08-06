@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 )
@@ -60,10 +61,12 @@ type TicketEnqueuer interface {
 type Completeness struct {
 	Status  string
 	Missing []string
+	Score   int
+	Reasons []string
 }
 
 type CompletenessAssessor interface {
-	Assess(ctx context.Context, companyID, conversationID int64, subject, body string) (Completeness, error)
+	Assess(ctx context.Context, companyID, conversationID int64, sender, subject, body string) (Completeness, error)
 }
 
 type MediaPromoter interface {
@@ -165,7 +168,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		}
 	}
 
-	convoID, _, err := w.conversations.UpsertConversation(ctx, Conversation{
+	convoID, created, err := w.conversations.UpsertConversation(ctx, Conversation{
 		CompanyID:        account.CompanyID,
 		ChannelAccountID: account.ID,
 		ExternalCustomer: customer,
@@ -208,6 +211,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 			ActorExternal: customer,
 			SubjectType:   "message",
 			SubjectID:     msgID,
+			SubjectLabel:  req.Subject,
 			Action:        ports.ActivityCreate,
 			Context: map[string]any{
 				"channel":            req.Channel,
@@ -231,11 +235,82 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	}
 
 	if w.completeness != nil && req.Channel == ChannelEmail {
-		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, req.Subject, req.Body); aerr == nil {
+		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, customer, req.Subject, req.Body); aerr == nil {
 			res.IntakeStatus = assessed.Status
 			res.IntakeMissing = assessed.Missing
+			w.recordIntakeAssessed(ctx, account.CompanyID, convoID, req.Subject, assessed)
+		}
+	}
+
+	if w.tickets != nil && created {
+		shouldEnqueue := req.Channel == ChannelLine || (req.Channel == ChannelEmail && res.IntakeStatus == intake.StatusReady)
+		if shouldEnqueue {
+			if terr := w.tickets.EnqueueTicket(ctx, account.CompanyID, convoID, msgID, customer, req); terr != nil {
+				w.log.Warn("omnichannel: ticket enqueue failed",
+					zap.Int64("company_id", account.CompanyID),
+					zap.Int64("conversation_id", convoID),
+					zap.Int64("message_id", msgID),
+					zap.Error(terr))
+				w.recordTicketEnqueueFailed(ctx, account.CompanyID, convoID, msgID, req.Subject, terr)
+			} else {
+				res.TicketEnqueued = true
+			}
 		}
 	}
 
 	return res, nil
+}
+
+func (w *Workflow) recordIntakeAssessed(ctx context.Context, companyID, convoID int64, subject string, assessed Completeness) {
+	if w.activity == nil {
+		return
+	}
+
+	entry := ports.ActivityEntry{
+		CompanyID:    companyID,
+		ActorType:    ports.ActorTypeAIAgent,
+		SubjectType:  "conversation",
+		SubjectID:    convoID,
+		SubjectLabel: subject,
+		Action:       ActionIntakeAssessed,
+		Context: map[string]any{
+			"intake_status":  assessed.Status,
+			"intake_missing": assessed.Missing,
+			"intake_score":   assessed.Score,
+			"intake_reasons": assessed.Reasons,
+		},
+	}
+
+	if err := w.activity.RecordActivity(ctx, entry); err != nil {
+		w.log.Warn("omnichannel: intake activity record failed",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
+			zap.Error(err))
+	}
+}
+
+func (w *Workflow) recordTicketEnqueueFailed(ctx context.Context, companyID, convoID, msgID int64, subject string, enqueueErr error) {
+	if w.activity == nil {
+		return
+	}
+
+	entry := ports.ActivityEntry{
+		CompanyID:    companyID,
+		ActorType:    ports.ActorTypeAIAgent,
+		SubjectType:  "conversation",
+		SubjectID:    convoID,
+		SubjectLabel: subject,
+		Action:       ActionTicketEnqueueFailed,
+		Context: map[string]any{
+			"message_id": msgID,
+			"error":      enqueueErr.Error(),
+		},
+	}
+
+	if err := w.activity.RecordActivity(ctx, entry); err != nil {
+		w.log.Warn("omnichannel: ticket enqueue activity record failed",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
+			zap.Error(err))
+	}
 }

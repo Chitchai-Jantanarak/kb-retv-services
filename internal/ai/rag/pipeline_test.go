@@ -54,7 +54,6 @@ func TestPipelineRunCachesRerankedCompressedResult(t *testing.T) {
 		},
 	}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{retriever},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 32},
@@ -92,9 +91,6 @@ func TestPipelineRunCachesRerankedCompressedResult(t *testing.T) {
 	if retriever.last.CompanyID != 1 {
 		t.Fatalf("company_id = %d, want 1", retriever.last.CompanyID)
 	}
-	if first.Meta.Intent != "troubleshooting" {
-		t.Fatalf("intent = %q, want troubleshooting", first.Meta.Intent)
-	}
 }
 
 func TestPipelineUsesPlanForCacheAndRetrieverQuery(t *testing.T) {
@@ -103,7 +99,6 @@ func TestPipelineUsesPlanForCacheAndRetrieverQuery(t *testing.T) {
 		candidates: []Candidate{{ID: "1", Title: "Printer", Content: "printer offline fix", Score: 0.9}},
 	}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{retriever},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -168,7 +163,6 @@ func TestPipelinePlannerPreservesCompanyContextForRetrievers(t *testing.T) {
 		candidates: []Candidate{{ID: "1", Content: "x"}},
 	}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{retriever},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -288,6 +282,7 @@ func TestPipelineSkipsFailedGraphRetriever(t *testing.T) {
 		CompanyID: 9,
 		Text:      "printer jams",
 		Limit:     3,
+		Debug:     true,
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v, want graph failure swallowed", err)
@@ -298,11 +293,13 @@ func TestPipelineSkipsFailedGraphRetriever(t *testing.T) {
 	if len(result.Candidates) == 0 || result.Candidates[0].ID != "text" {
 		t.Fatalf("candidates = %+v, want fallback text candidate", result.Candidates)
 	}
+	if result.DebugTrace == nil || result.DebugTrace.Retrieval.GraphError != "memgraph down" {
+		t.Fatalf("DebugTrace.Retrieval.GraphError = %+v, want %q", result.DebugTrace, "memgraph down")
+	}
 }
 
 func TestPipelineRunSkipsFailedRetriever(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor: DefaultExtractor{},
 		Retrievers: []Retriever{
 			&recordingRetriever{err: errors.New("qdrant down")},
 			&recordingRetriever{candidates: []Candidate{{ID: "kb-1", Title: "Printer", Content: "printer offline fix", Score: 0.8}}},
@@ -326,7 +323,6 @@ func TestPipelineRunSkipsFailedRetriever(t *testing.T) {
 
 func TestPipelineRunDeduplicatesCandidatesByHighestScore(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor: DefaultExtractor{},
 		Retrievers: []Retriever{
 			&recordingRetriever{candidates: []Candidate{{ID: "same", Title: "Old", Content: "old", Score: 0.2}}},
 			&recordingRetriever{candidates: []Candidate{{ID: "same", Title: "New", Content: "new printer offline", Score: 0.9}}},
@@ -354,7 +350,6 @@ func TestPipelineRunDeduplicatesCandidatesByHighestScore(t *testing.T) {
 
 func TestPipelineRunEscalatesWhenNoCandidates(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: nil}},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -375,7 +370,6 @@ func TestPipelineRunEscalatesWhenNoCandidates(t *testing.T) {
 
 func TestPipelineRunAutoSendsAboveThreshold(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.9}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -399,7 +393,6 @@ func TestPipelineRunAutoSendsAboveThreshold(t *testing.T) {
 
 func TestPipelineUngradedCRAGNeverAutoSends(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.95}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -423,7 +416,6 @@ func TestPipelineUngradedCRAGNeverAutoSends(t *testing.T) {
 
 func TestPipelineUsesCRAGResultConfidence(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor: DefaultExtractor{},
 		Retrievers: []Retriever{
 			&recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.9}}},
 		},
@@ -464,7 +456,6 @@ func TestPipelineKnowledgeGapRecording(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := &recordingGap{}
 			pipeline := NewPipeline(Config{
-				Extractor:    DefaultExtractor{},
 				Retrievers:   []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 				Reranker:     LexicalReranker{},
 				CRAG:         fakeCRAG{verdict: tc.verdict},
@@ -495,7 +486,6 @@ func TestPipelineKnowledgeGapRecording(t *testing.T) {
 func TestPipelineKnowledgeGapRecordsWhenNoCandidates(t *testing.T) {
 	recorder := &recordingGap{}
 	pipeline := NewPipeline(Config{
-		Extractor:    DefaultExtractor{},
 		Retrievers:   []Retriever{&recordingRetriever{candidates: nil}},
 		Reranker:     LexicalReranker{},
 		CRAG:         fakeCRAG{verdict: VerdictIrrelevant},
@@ -525,7 +515,6 @@ func TestPipelineKnowledgeGapFailureCases(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := Config{
-				Extractor:  DefaultExtractor{},
 				Retrievers: []Retriever{&recordingRetriever{candidates: nil}},
 				Reranker:   LexicalReranker{},
 				CRAG:       fakeCRAG{verdict: VerdictIrrelevant},

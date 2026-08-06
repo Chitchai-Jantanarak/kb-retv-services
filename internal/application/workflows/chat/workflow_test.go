@@ -438,7 +438,7 @@ func TestRunDoesNotCacheEmptyReply(t *testing.T) {
 	}
 }
 
-func routerForTest(t *testing.T, fts FTSSource) *intent.Router {
+func routerForTest(t *testing.T, fts rag.FTSSource) *intent.Router {
 	t.Helper()
 	emb := &chatStubEmbedder{vecs: map[string][]float32{
 		"ติดต่อเจ้าหน้าที่": {1, 0, 0},
@@ -781,7 +781,7 @@ func TestRunDebugHandoffSurfacesRouterTimingAndSkipsGenerate(t *testing.T) {
 	}
 
 	resp, err := wf.Run(privilegedChatContext(3), dto.ChatRequest{
-		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "à¸•à¸´à¸”à¸•à¹ˆà¸­"}},
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "ติดต่อ"}},
 		Debug:    true,
 	})
 	if err != nil {

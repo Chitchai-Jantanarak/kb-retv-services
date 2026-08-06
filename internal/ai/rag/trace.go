@@ -37,6 +37,7 @@ func debugTrace(
 	decision Decision,
 	draft string,
 	criticRan bool,
+	graphError string,
 ) *DebugTrace {
 	if !wantsTimings(query) {
 		return nil
@@ -48,7 +49,6 @@ func debugTrace(
 	return &DebugTrace{
 		Mode: query.Mode,
 		Plan: DebugPlanTrace{
-			Intent:           plan.Meta.Intent,
 			Terms:            append([]string(nil), plan.Meta.Terms...),
 			RetrievalQueries: len(retrievalQueriesForPlan(query, plan)),
 			GraphAnchors:     len(plan.GraphAnchors),
@@ -58,6 +58,7 @@ func debugTrace(
 			Candidates:       len(candidates),
 			TopSource:        topSource,
 			ContextAssembled: contextAssembled,
+			GraphError:       graphError,
 		},
 		Quality: DebugQualityTrace{
 			CRAGVerdict:    crag.Verdict.String(),

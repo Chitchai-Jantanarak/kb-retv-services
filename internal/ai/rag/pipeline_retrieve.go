@@ -28,6 +28,7 @@ func (p *Pipeline) retrieve(ctx context.Context, state *pipelineState) error {
 					return err
 				}
 				logger.FromContext(ctx).Warn("graph retriever failed; skipping", zap.Error(err))
+				state.graphError = err.Error()
 				return nil
 			}
 			state.candidates = rrfMerge([][]Candidate{graphCandidates, state.candidates})

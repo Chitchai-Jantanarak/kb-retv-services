@@ -373,8 +373,8 @@ func TestRunHappyPathPersistsDraft(t *testing.T) {
 	if res.CompanyID != 7 || res.ConversationID != 100 || res.MessageID != 200 {
 		t.Fatalf("result = %+v", res)
 	}
-	if res.TicketEnqueued || tickets.called {
-		t.Fatalf("draft must not enqueue a ticket: res=%+v tickets=%+v", res, tickets)
+	if !res.TicketEnqueued || !tickets.called {
+		t.Fatalf("new line conversation must enqueue a ticket: res=%+v tickets=%+v", res, tickets)
 	}
 }
 
@@ -401,12 +401,12 @@ func TestRunExistingConversationDoesNotEnqueue(t *testing.T) {
 	}
 }
 
-func TestRunInboundCreatesDraftAndNeverAutoEnqueues(t *testing.T) {
+func TestRunLineDedupeHitDoesNotEnqueue(t *testing.T) {
 	tickets := &captureTickets{}
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
 		Conversations: &stubConvos{id: 100, created: true},
-		Messages:      &stubMessages{id: 200},
+		Messages:      &foundMessages{convoID: 77, msgID: 88},
 		Tickets:       tickets,
 	})
 	if err != nil {
@@ -417,7 +417,7 @@ func TestRunInboundCreatesDraftAndNeverAutoEnqueues(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if res.TicketEnqueued || tickets.called {
-		t.Fatalf("inbound must create a DRAFT, not auto-enqueue a ticket: res=%+v tickets=%+v", res, tickets)
+		t.Fatalf("dedupe hit must not enqueue a ticket: res=%+v tickets=%+v", res, tickets)
 	}
 }
 
@@ -436,5 +436,86 @@ func TestRunWithoutEnqueuerIsStillOK(t *testing.T) {
 	}
 	if res.TicketEnqueued {
 		t.Fatalf("expected ticket_enqueued=false when no enqueuer wired")
+	}
+}
+
+func TestRunEmailCompleteIntakeEnqueuesTicket(t *testing.T) {
+	tickets := &captureTickets{}
+	assessor := &stubAssessor{result: Completeness{Status: "ready"}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Completeness:  assessor,
+		Tickets:       tickets,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !tickets.called {
+		t.Fatal("email conversation with complete intake must enqueue a ticket")
+	}
+	if !res.TicketEnqueued {
+		t.Fatalf("TicketEnqueued = false, want true: res=%+v", res)
+	}
+}
+
+func TestRunEmailIncompleteIntakeDoesNotEnqueue(t *testing.T) {
+	tickets := &captureTickets{}
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Missing: []string{"product"}}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Completeness:  assessor,
+		Tickets:       tickets,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.TicketEnqueued || tickets.called {
+		t.Fatalf("incomplete email intake must not enqueue a ticket: res=%+v tickets=%+v", res, tickets)
+	}
+}
+
+func TestRunTicketEnqueueFailureDoesNotFailRun(t *testing.T) {
+	tickets := &captureTickets{err: errors.New("queue down")}
+	act := &capturingActivity{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Tickets:       tickets,
+		Activity:      act,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), validNorm("Uabc"), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run must not fail when ticket enqueue fails: %v", err)
+	}
+	if !tickets.called {
+		t.Fatal("enqueuer must still be called")
+	}
+	if res.TicketEnqueued {
+		t.Fatalf("TicketEnqueued = true, want false on enqueue error: res=%+v", res)
+	}
+	found := false
+	for _, e := range act.entries {
+		if e.Action == ActionTicketEnqueueFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an activity entry recording the enqueue failure, got %+v", act.entries)
 	}
 }

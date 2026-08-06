@@ -28,6 +28,18 @@ type FTSSource interface {
 	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]FTSChunk, error)
 }
 
+func SnippetFromChunk(c FTSChunk, trimSpace bool, maxLen int) (title, snippet string) {
+	title, snippet = c.Title, c.Content
+	if trimSpace {
+		title = strings.TrimSpace(title)
+		snippet = strings.TrimSpace(snippet)
+	}
+	if maxLen > 0 && len(snippet) > maxLen {
+		snippet = snippet[:maxLen]
+	}
+	return title, snippet
+}
+
 type FTSRetriever struct {
 	source FTSSource
 }
@@ -54,12 +66,13 @@ func (r *FTSRetriever) Retrieve(ctx context.Context, query Query, _ Meta) ([]Can
 	}
 	out := make([]Candidate, 0, len(rows))
 	for _, row := range rows {
+		title, content := SnippetFromChunk(row, false, 0)
 		out = append(out, Candidate{
 			ID:        fmt.Sprintf("chunk:%d", row.ChunkID),
 			ArticleID: fmt.Sprintf("%d", row.ArticleID),
 			ChunkID:   fmt.Sprintf("%d", row.ChunkID),
-			Title:     row.Title,
-			Content:   row.Content,
+			Title:     title,
+			Content:   content,
 			Source:    "fts",
 			Score:     row.Relevance,
 		})

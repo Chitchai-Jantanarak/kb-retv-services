@@ -83,6 +83,9 @@ type capturingChatWorkflow struct {
 }
 
 func (w *capturingChatWorkflow) Run(_ context.Context, req dto.ChatRequest) (dto.ChatResponse, error) {
+	if err := req.Validate(); err != nil {
+		return dto.ChatResponse{}, err
+	}
 	w.req = req
 	return w.resp, nil
 }

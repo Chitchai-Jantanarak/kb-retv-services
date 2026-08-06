@@ -64,11 +64,37 @@ func newExtractor(t *testing.T, provider ports.LLMProvider, opts ...intake.Optio
 	return ext
 }
 
+func TestExtractDisabledAIReturnsUnknownWithoutVendorCall(t *testing.T) {
+	registry, err := prompts.NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	provider := &fakeProvider{}
+	resolve := func(context.Context, int64) (ports.LLMProvider, error) {
+		return nil, ports.ErrAIDisabled
+	}
+	ext, err := intake.NewExtractor(registry, resolve)
+	if err != nil {
+		t.Fatalf("NewExtractor() error = %v", err)
+	}
+
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Printer down", "It stops mid-job every morning.")
+	if err != nil {
+		t.Fatalf("Extract() error = %v, want nil", err)
+	}
+	if got.Status != intake.StatusUnknown {
+		t.Fatalf("Status = %q, want unknown", got.Status)
+	}
+	if provider.prompt.User != "" {
+		t.Fatal("provider was called while ai is disabled")
+	}
+}
+
 func TestExtractMissingProductIsIncomplete(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"printer stops mid-job","product":"","contact":"a@b.com"}`}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "Printer down", "It stops mid-job every morning.")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Printer down", "It stops mid-job every morning.")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -88,9 +114,9 @@ func TestExtractMissingProductIsIncomplete(t *testing.T) {
 
 func TestExtractAllRequiredPresentIsReady(t *testing.T) {
 	provider := &fakeProvider{json: "```json\n{\"problem_detail\":\"robot stuck at dock\",\"product\":\"Bella Bot\"}\n```"}
-	ext := newExtractor(t, provider)
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
 
-	got, err := ext.Extract(context.Background(), 7, "Robot stuck", "The robot will not leave the dock.")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Robot stuck", "The robot will not leave the dock.")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -106,7 +132,7 @@ func TestExtractPromptCarriesMessageAndKnownProducts(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"x","product":"Bella Bot"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot", "Kettybot"}}))
 
-	if _, err := ext.Extract(context.Background(), 7, "Robot stuck", "will not leave the dock"); err != nil {
+	if _, err := ext.Extract(context.Background(), 7, "cust@x.com", "Robot stuck", "will not leave the dock"); err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
 	if !strings.Contains(provider.prompt.User, "will not leave the dock") {
@@ -127,7 +153,7 @@ func TestExtractProductOutsideTaxonomyIsTreatedAsMissing(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"screen dead","product":"Toaster 9000"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
 
-	got, err := ext.Extract(context.Background(), 7, "", "the screen is dead")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "", "the screen is dead")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -149,7 +175,7 @@ func TestExtractUsesPerCompanySpec(t *testing.T) {
 		Optional: []string{"contact"},
 	}}))
 
-	got, err := ext.Extract(context.Background(), 7, "", "something broke")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "", "something broke")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -165,7 +191,7 @@ func TestExtractEmptyMessageSkipsTheLLM(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"never asked"}`}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "  ", "\n")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "  ", "\n")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -184,7 +210,7 @@ func TestExtractUnparsableJSONYieldsIncompleteNotError(t *testing.T) {
 	provider := &fakeProvider{json: "sorry, I cannot help with that"}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "Subject", "body")
+	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Subject", "body")
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -200,7 +226,35 @@ func TestExtractProviderErrorPropagates(t *testing.T) {
 	provider := &fakeProvider{err: errors.New("boom")}
 	ext := newExtractor(t, provider)
 
-	if _, err := ext.Extract(context.Background(), 7, "s", "b"); err == nil {
+	if _, err := ext.Extract(context.Background(), 7, "cust@x.com", "s", "b"); err == nil {
 		t.Fatal("Extract() error = nil, want provider error")
 	}
+}
+
+func TestExtractWithoutProductTaxonomyIsUnverified(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"repo has a long function","product":"some/repo"}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, "no-reply@example.com", "Suggestions", "Jules found improvements for your repos and listed them below in detail for review.")
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Status != intake.StatusUnverified {
+		t.Fatalf("Status = %q, want unverified", got.Status)
+	}
+	if got.Score <= 0 || got.Score >= 100 {
+		t.Fatalf("Score = %d, want strictly between 0 and 100", got.Score)
+	}
+	if !containsReason(got.Reasons, intake.ReasonProductUnchecked) || !containsReason(got.Reasons, intake.ReasonSenderNoReply) {
+		t.Fatalf("Reasons = %v", got.Reasons)
+	}
+}
+
+func containsReason(reasons []string, want string) bool {
+	for _, r := range reasons {
+		if r == want {
+			return true
+		}
+	}
+	return false
 }

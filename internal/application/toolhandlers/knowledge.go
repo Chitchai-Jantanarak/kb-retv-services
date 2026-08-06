@@ -3,23 +3,22 @@ package toolhandlers
 import (
 	"context"
 	"strconv"
-	"strings"
 
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/shared/htmltext"
 )
 
-const knowledgeSummaryMaxChars = 160
-
-type FTSSource interface {
-	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]rag.FTSChunk, error)
-}
+const (
+	knowledgeSummaryMaxChars  = 160
+	knowledgeToolMinRelevance = 5.0
+)
 
 type Knowledge struct {
-	fts FTSSource
+	fts rag.FTSSource
 }
 
-func NewKnowledge(fts FTSSource) Knowledge {
+func NewKnowledge(fts rag.FTSSource) Knowledge {
 	return Knowledge{fts: fts}
 }
 
@@ -35,12 +34,16 @@ func (h Knowledge) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, e
 
 	rows := make([]skeleton.Row, 0, len(chunks))
 	for _, chunk := range chunks {
-		summary := strings.TrimSpace(chunk.Content)
+		if chunk.Relevance < knowledgeToolMinRelevance {
+			continue
+		}
+		title, content := rag.SnippetFromChunk(chunk, true, 0)
+		summary := htmltext.RedactSecrets(content)
 		if len(summary) > knowledgeSummaryMaxChars {
 			summary = summary[:knowledgeSummaryMaxChars]
 		}
 		rows = append(rows, skeleton.Row{
-			"article":    strings.TrimSpace(chunk.Title),
+			"article":    title,
 			"summary":    summary,
 			"article_id": strconv.FormatInt(chunk.ArticleID, 10),
 		})

@@ -15,6 +15,8 @@ type ArticleRecord struct {
 	SourceReportID int64
 	Title          string
 	UpdatedAt      time.Time
+	SymptomID      int64
+	SymptomName    string
 }
 
 type ArticleSource interface {
@@ -92,6 +94,17 @@ func (w *Workflow) Run(ctx context.Context, opts Options) (Result, error) {
 				return res, fmt.Errorf("graphsync: link report->article %d->%d: %w", a.SourceReportID, a.ID, err)
 			}
 			res.Edges++
+
+			if a.SymptomID > 0 {
+				symptomProps := map[string]any{"name": a.SymptomName}
+				if err := w.graph.UpsertSymptom(ctx, opts.CompanyID, a.SymptomID, symptomProps); err != nil {
+					return res, fmt.Errorf("graphsync: upsert symptom %d: %w", a.SymptomID, err)
+				}
+				if err := w.graph.LinkArticleSolvesSymptom(ctx, opts.CompanyID, a.ID, a.SymptomID, nil); err != nil {
+					return res, fmt.Errorf("graphsync: link article->symptom %d->%d: %w", a.ID, a.SymptomID, err)
+				}
+				res.Edges++
+			}
 		} else {
 			res.Skipped++
 		}

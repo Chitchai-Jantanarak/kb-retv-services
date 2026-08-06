@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -9,8 +10,10 @@ import (
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/application/services/mediastore"
+	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
+	infraasynq "github.com/my/app/internal/infra/asynq"
 	lineinfra "github.com/my/app/internal/infra/line"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/tenant"
@@ -41,6 +44,10 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	}
 	if promoter := buildLineMediaPromoter(cfg, log); promoter != nil {
 		wfCfg.MediaPromoter = promoter
+	}
+	if enqueuer := buildTicketEnqueuer(cfg, log); enqueuer != nil {
+		wfCfg.Tickets = enqueuer
+		log.Info("ticket auto-enqueue configured")
 	}
 
 	wf, err := omnichannel.New(wfCfg)
@@ -80,6 +87,27 @@ func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Prom
 	contentClient := lineinfra.New("", cfg.Line.ChannelAccessToken, 0)
 	log.Info("line media promotion configured")
 	return mediastore.NewPromoter(contentClient, deliverer)
+}
+
+func buildTicketEnqueuer(cfg config.Config, log *zap.Logger) *tickets.Enqueuer {
+	redisURL := cfg.Redis.URL
+	if redisURL == "" {
+		redisURL = os.Getenv("REDIS_URL")
+	}
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+	queue, err := infraasynq.NewQueue(infraasynq.Config{RedisURL: redisURL})
+	if err != nil {
+		log.Warn("ticket auto-enqueue not configured", zap.Error(err))
+		return nil
+	}
+	enqueuer, err := tickets.NewEnqueuer(queue)
+	if err != nil {
+		log.Warn("ticket auto-enqueue not configured", zap.Error(err))
+		return nil
+	}
+	return enqueuer
 }
 
 func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.CompanyResolver, log *zap.Logger) omnichannel.CompletenessAssessor {

@@ -20,7 +20,7 @@ func TestKnowledgeRetrieverMapsRepositoryArticlesToCandidates(t *testing.T) {
 		CompanyID: 42,
 		Text:      "printer offline",
 		Limit:     5,
-	}, Meta{Intent: "troubleshooting"})
+	}, Meta{Terms: []string{"printer", "offline"}})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
 	}

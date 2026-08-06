@@ -12,7 +12,6 @@ import (
 
 func TestPipelineEscalatesWithReasonWhenGeneratorUnavailable(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "restart printer", Score: 0.9}}}},
 		Compressor:          Compressor{MaxRunes: 100},
 		CRAG:                fakeCRAG{verdict: VerdictRelevant},
@@ -63,7 +62,6 @@ func (c *stubCritic) Critique(_ context.Context, _ Query, _ string, _ []Candidat
 func TestPipelineUsesGeneratorWhenConfigured(t *testing.T) {
 	gen := &stubGenerator{draft: "draft answer"}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -87,7 +85,6 @@ func TestPipelineUsesGeneratorWhenConfigured(t *testing.T) {
 func TestPipelineAssemblesParentContextBeforeGeneration(t *testing.T) {
 	gen := &stubGenerator{draft: "draft answer"}
 	pipeline := NewPipeline(Config{
-		Extractor: DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: []Candidate{
 			{ID: "7:11", ArticleID: "7", ChunkID: "11", Title: "Child", Content: "child snippet", Source: "vector", Score: 0.9},
 		}}},
@@ -123,7 +120,6 @@ func TestPipelineAssemblesParentContextBeforeGeneration(t *testing.T) {
 func TestPipelineSkipsGeneratorOnIrrelevantVerdict(t *testing.T) {
 	gen := &stubGenerator{draft: "should not appear"}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -146,7 +142,6 @@ func TestPipelineSkipsGeneratorOnIrrelevantVerdict(t *testing.T) {
 func TestPipelineKeepsDraftWhenGeneratorErrors(t *testing.T) {
 	gen := &stubGenerator{err: errors.New("provider 500")}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -165,7 +160,6 @@ func TestPipelineKeepsDraftWhenGeneratorErrors(t *testing.T) {
 
 func TestPipelineCriticDowngradesAutoToDraftWhenSendFalse(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -190,7 +184,6 @@ func TestPipelineCriticDowngradesAutoToDraftWhenSendFalse(t *testing.T) {
 func TestPipelineSkipsCriticWhenDecisionIsDraft(t *testing.T) {
 	critic := &stubCritic{res: CritiqueResult{Supported: false, Send: false}}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -215,7 +208,6 @@ func TestPipelineSkipsCriticWhenDecisionIsDraft(t *testing.T) {
 
 func TestPipelineCriticKeepsAutoWhenSendTrue(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -252,7 +244,6 @@ func (b *stubBudget) Acquire(_ context.Context, _ int64, _ string) (bool, error)
 func TestPipelineBudgetExhaustionDegradesToEscalate(t *testing.T) {
 	gen := &stubGenerator{draft: "draft"}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -277,7 +268,6 @@ func TestPipelineBudgetExhaustionDegradesToEscalate(t *testing.T) {
 func TestPipelineBudgetDeniedCriticDowngradesToDraft(t *testing.T) {
 	critic := &stubCritic{res: CritiqueResult{Supported: true, Send: true}}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -302,7 +292,6 @@ func TestPipelineBudgetDeniedCriticDowngradesToDraft(t *testing.T) {
 
 func TestPipelineCriticErrorDowngradesToDraft(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},
@@ -327,7 +316,6 @@ func TestPipelineCriticErrorDowngradesToDraft(t *testing.T) {
 func TestPipelineSkipsGeneratorOnEscalate(t *testing.T) {
 	gen := &stubGenerator{draft: "should not appear"}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "x"}}}},
 		Reranker:            LexicalReranker{},
 		Compressor:          Compressor{MaxRunes: 100},

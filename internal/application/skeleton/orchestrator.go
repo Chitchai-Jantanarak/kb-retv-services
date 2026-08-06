@@ -31,6 +31,15 @@ type Query struct {
 	Actor    Actor
 }
 
+var coverageRequiredHandlers = map[string]bool{
+	"reports.find":      true,
+	"reports.byProduct": true,
+	"workload":          true,
+	"reports.track":     true,
+	"employee.status":   true,
+	"customer.profile":  true,
+}
+
 var ErrNeedsParam = errors.New("skeleton: required parameter missing")
 
 type MissingParams struct {
@@ -202,7 +211,12 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 
 	resp.Called = true
 	handlerStart := time.Now()
-	rows, err := handler.Run(ctx, Query{Tool: tool, Text: msg, Params: sel.Params, Coverage: actor.Coverage, Actor: actor})
+	var rows []Row
+	if coverageRequiredHandlers[tool.Handler] && len(actor.Coverage) == 0 {
+		rows = []Row{}
+	} else {
+		rows, err = handler.Run(ctx, Query{Tool: tool, Text: msg, Params: sel.Params, Coverage: actor.Coverage, Actor: actor})
+	}
 	handlerState := "completed"
 	handlerErrorCode := ""
 	handlerError := ""

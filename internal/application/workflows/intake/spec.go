@@ -17,6 +17,7 @@ const (
 	StatusUnknown    = "unknown"
 	StatusReady      = "ready"
 	StatusIncomplete = "incomplete"
+	StatusUnverified = "unverified"
 )
 
 const (

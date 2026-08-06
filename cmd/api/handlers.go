@@ -16,13 +16,13 @@ import (
 )
 
 type apiHandlers struct {
-	reports    *handlers.ReportsHandler
-	inbound    *handlers.InboundHandler
-	feedback   *handlers.FeedbackHandler
-	review     *handlers.ReviewHandler
-	chat       *handlers.ChatHandler
-	chatStream *handlers.ChatStreamHandler
-	search     *handlers.SearchHandler
+	reports     *handlers.ReportsHandler
+	inbound     *handlers.InboundHandler
+	feedback    *handlers.FeedbackHandler
+	review      *handlers.ReviewHandler
+	chat        *handlers.ChatHandler
+	chatStream  *handlers.ChatStreamHandler
+	chatConfirm *handlers.ChatConfirmHandler
 }
 
 func buildAPIHandlers(
@@ -41,7 +41,7 @@ func buildAPIHandlers(
 	chat := buildChatEndpoints(cfg, qdb, resolver, reportsRepo, log)
 	endpoints.chat = chat.chat
 	endpoints.chatStream = chat.stream
-	endpoints.search = chat.search
+	endpoints.chatConfirm = chat.confirm
 
 	endpoints.reports = handlers.NewReportsHandler(reportsRepo)
 	log.Info("reports endpoints configured")

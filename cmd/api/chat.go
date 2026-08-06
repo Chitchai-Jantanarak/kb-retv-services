@@ -16,10 +16,8 @@ import (
 	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/application/toolaudit"
-	"github.com/my/app/internal/application/toolbroker"
 	"github.com/my/app/internal/application/tools"
 	chatwf "github.com/my/app/internal/application/workflows/chat"
-	searchwf "github.com/my/app/internal/application/workflows/search"
 	"github.com/my/app/internal/infra/attachments"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/memcache"
@@ -43,7 +41,6 @@ import (
 type chatEndpoints struct {
 	chat    *handlers.ChatHandler
 	stream  *handlers.ChatStreamHandler
-	search  *handlers.SearchHandler
 	confirm *handlers.ChatConfirmHandler
 }
 
@@ -84,8 +81,6 @@ func buildChatEndpoints(
 	if guardErr != nil {
 		log.Error("chat endpoints disabled: local routing guard unavailable and no provider substitution is permitted",
 			zap.Error(guardErr))
-		endpoints.search = handlers.NewSearchHandler(searchwf.NewWorkflow(ftsSource))
-		log.Info("search endpoint configured")
 		return endpoints
 	}
 
@@ -122,9 +117,6 @@ func buildChatEndpoints(
 		log.Info("chat endpoint configured")
 		log.Info("chat stream endpoint configured")
 	}
-
-	endpoints.search = handlers.NewSearchHandler(searchwf.NewWorkflow(ftsSource))
-	log.Info("search endpoint configured")
 
 	return endpoints
 }
@@ -170,7 +162,7 @@ func appendChatIntelligenceOptions(
 		return chatOpts, nil
 	}
 
-	broker := toolbroker.New(toolbroker.Deps{
+	broker := newToolBroker(toolBrokerDeps{
 		FTS:       ftsSource,
 		Reports:   reportsRepo,
 		Inbound:   channelsmysql.New(qdb),

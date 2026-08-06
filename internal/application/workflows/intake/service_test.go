@@ -25,9 +25,9 @@ func (f *fakeSink) WriteCompleteness(_ context.Context, conversationID int64, r 
 func TestServiceAssessPersistsResult(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"stuck","product":"Bella Bot"}`}
 	sink := &fakeSink{}
-	svc := intake.NewService(newExtractor(t, provider), sink, nil)
+	svc := intake.NewService(newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}})), sink, nil)
 
-	got, err := svc.Assess(context.Background(), 7, 42, "Robot stuck", "will not move")
+	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "Robot stuck", "will not move")
 	if err != nil {
 		t.Fatalf("Assess() error = %v", err)
 	}
@@ -45,9 +45,9 @@ func TestServiceAssessPersistsResult(t *testing.T) {
 func TestServiceAssessReturnsErrorWhenExtractionFails(t *testing.T) {
 	provider := &fakeProvider{err: errors.New("llm down")}
 	sink := &fakeSink{}
-	svc := intake.NewService(newExtractor(t, provider), sink, nil)
+	svc := intake.NewService(newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}})), sink, nil)
 
-	got, err := svc.Assess(context.Background(), 7, 42, "s", "b")
+	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "s", "b")
 	if err == nil {
 		t.Fatal("Assess() error = nil, want extraction error")
 	}
@@ -61,7 +61,7 @@ func TestServiceAssessReturnsErrorWhenExtractionFails(t *testing.T) {
 
 func TestServiceAssessNilServiceIsUnknown(t *testing.T) {
 	var svc *intake.Service
-	got, err := svc.Assess(context.Background(), 7, 42, "s", "b")
+	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "s", "b")
 	if err != nil {
 		t.Fatalf("Assess() error = %v", err)
 	}

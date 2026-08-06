@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
@@ -20,10 +19,6 @@ type SessionStore interface {
 
 type toolRunner interface {
 	Handle(ctx context.Context, actor skeleton.Actor, msg string) (skeleton.Response, error)
-}
-
-type FTSSource interface {
-	SearchChunks(ctx context.Context, coverage []int64, query string, limit int) ([]rag.FTSChunk, error)
 }
 
 type ProfileSource interface {

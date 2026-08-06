@@ -42,19 +42,3 @@ func TestTrackCaseNeedsCode(t *testing.T) {
 		t.Fatal("err = nil, want error when code is missing")
 	}
 }
-
-func TestTrackCaseEmptyCoverage(t *testing.T) {
-	repo := &stubCasesRepo{caseByCode: reportsmysql.CaseRow{Code: "REP-9"}}
-	h := NewTrackCase(repo)
-
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "where is REP-9", Coverage: nil})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
-	}
-	if repo.byCodeCoverage != nil {
-		t.Fatal("repo must not be queried on empty coverage")
-	}
-}

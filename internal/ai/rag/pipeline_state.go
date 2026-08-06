@@ -8,6 +8,7 @@ type pipelineState struct {
 	timings          map[string]int64
 	candidates       []Candidate
 	contextAssembled bool
+	graphError       string
 	cragResult       CRAGResult
 	verdict          CRAGVerdict
 	confidence       float64

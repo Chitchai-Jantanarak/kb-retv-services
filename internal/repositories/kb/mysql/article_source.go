@@ -30,20 +30,26 @@ func (s *ArticleSource) ArticlesSince(ctx context.Context, companyID int64, sinc
 
 	query := `
 SELECT
-  id,
-  company_id,
-  COALESCE(source_report_id, 0),
-  COALESCE(title, ''),
-  created_at
-FROM kb_articles
-WHERE company_id = ?`
+  a.id,
+  a.company_id,
+  COALESCE(a.source_report_id, 0),
+  COALESCE(a.title, ''),
+  a.created_at,
+  COALESCE(rc.ai_symptom_node_id, 0),
+  COALESCE(sn.name, '')
+FROM kb_articles a
+LEFT JOIN report_classification rc
+  ON rc.report_id = a.source_report_id AND rc.company_id = a.company_id
+LEFT JOIN symptom_nodes sn
+  ON sn.id = rc.ai_symptom_node_id AND sn.company_id = a.company_id
+WHERE a.company_id = ?`
 	args := []any{companyID}
 	if !since.IsZero() {
-		query += " AND created_at >= ?"
+		query += " AND a.created_at >= ?"
 		args = append(args, since)
 	}
 	query += `
-ORDER BY created_at ASC, id ASC
+ORDER BY a.created_at ASC, a.id ASC
 LIMIT ?`
 	args = append(args, limit)
 
@@ -56,7 +62,7 @@ LIMIT ?`
 	out := make([]graphsync.ArticleRecord, 0, 16)
 	for rows.Next() {
 		var rec graphsync.ArticleRecord
-		if err := rows.Scan(&rec.ID, &rec.CompanyID, &rec.SourceReportID, &rec.Title, &rec.UpdatedAt); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.CompanyID, &rec.SourceReportID, &rec.Title, &rec.UpdatedAt, &rec.SymptomID, &rec.SymptomName); err != nil {
 			return nil, fmt.Errorf("kb_articles: scan: %w", err)
 		}
 		out = append(out, rec)

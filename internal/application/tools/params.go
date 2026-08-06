@@ -186,6 +186,16 @@ func requiredCount(params []compiledParam) int {
 	return n
 }
 
+func entityMatched(params []compiledParam, extracted map[string]string) int {
+	n := 0
+	for _, p := range params {
+		if p.required && p.lookup != "" && extracted[p.name] != "" {
+			n++
+		}
+	}
+	return n
+}
+
 func requiredMatched(params []compiledParam, extracted map[string]string) int {
 	n := 0
 	for _, p := range params {

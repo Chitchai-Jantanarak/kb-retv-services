@@ -27,8 +27,14 @@ func TestDefaultQueryPlannerNormalizesClassifiesAndBoundsLimit(t *testing.T) {
 	if plan.CanonicalText != "printer offline now" {
 		t.Fatalf("CanonicalText = %q, want lower whitespace-collapsed text", plan.CanonicalText)
 	}
-	if plan.Meta.Intent != "troubleshooting" {
-		t.Fatalf("Intent = %q, want troubleshooting", plan.Meta.Intent)
+	wantTerms := []string{"printer", "offline", "now"}
+	if len(plan.Meta.Terms) != len(wantTerms) {
+		t.Fatalf("Terms = %+v, want %+v", plan.Meta.Terms, wantTerms)
+	}
+	for i, term := range wantTerms {
+		if plan.Meta.Terms[i] != term {
+			t.Fatalf("Terms = %+v, want %+v", plan.Meta.Terms, wantTerms)
+		}
 	}
 	if plan.EffectiveLimit != maxQueryPlanLimit {
 		t.Fatalf("EffectiveLimit = %d, want cap %d", plan.EffectiveLimit, maxQueryPlanLimit)
@@ -38,11 +44,6 @@ func TestDefaultQueryPlannerNormalizesClassifiesAndBoundsLimit(t *testing.T) {
 	}
 	if plan.RetrievalQueries[0].Kind != PlannedQueryOriginal || plan.RetrievalQueries[0].Text != "Printer OFFLINE now" {
 		t.Fatalf("RetrievalQueries[0] = %+v, want original retrieval text", plan.RetrievalQueries[0])
-	}
-	for _, stage := range []string{"rewrite", "hyde", "rag_fusion"} {
-		if plan.SkipReasons[stage] == "" {
-			t.Fatalf("SkipReasons[%q] missing in %+v", stage, plan.SkipReasons)
-		}
 	}
 }
 
@@ -60,10 +61,8 @@ func TestDefaultQueryPlannerDetectsNavigationalQueriesAndDisablesExpansion(t *te
 	if !plan.IsNavigational {
 		t.Fatal("IsNavigational = false, want true")
 	}
-	for _, stage := range []string{"hyde", "rag_fusion"} {
-		if !strings.Contains(plan.SkipReasons[stage], "navigational") {
-			t.Fatalf("SkipReasons[%q] = %q, want navigational reason", stage, plan.SkipReasons[stage])
-		}
+	if reason := plan.SkipReasons["graph_anchor"]; !strings.Contains(reason, "navigational") {
+		t.Fatalf("SkipReasons[%q] = %q, want navigational reason", "graph_anchor", reason)
 	}
 	if len(plan.RetrievalQueries) != 1 || plan.RetrievalQueries[0].Kind != PlannedQueryOriginal {
 		t.Fatalf("RetrievalQueries = %+v, want only original query", plan.RetrievalQueries)

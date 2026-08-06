@@ -59,6 +59,7 @@ func (p *Pipeline) finalize(state *pipelineState) Result {
 			state.decision,
 			state.draft,
 			state.criticRan,
+			state.graphError,
 		),
 	}
 }

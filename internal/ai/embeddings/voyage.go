@@ -3,9 +3,8 @@ package embeddings
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"sort"
+	"io"
 	"strings"
 	"time"
 )
@@ -21,12 +20,7 @@ type VoyageConfig struct {
 }
 
 type VoyageProvider struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	dimensions int
-	inputType  string
-	retrier    *httpRetrier
+	compat *openaiCompatProvider
 }
 
 func NewVoyageProvider(cfg VoyageConfig) *VoyageProvider {
@@ -46,82 +40,42 @@ func NewVoyageProvider(cfg VoyageConfig) *VoyageProvider {
 	if inputType == "" {
 		inputType = "document"
 	}
-	return &VoyageProvider{
+
+	compat := &openaiCompatProvider{
 		baseURL:    baseURL,
 		apiKey:     cfg.APIKey,
 		model:      model,
 		dimensions: dimensions,
-		inputType:  inputType,
 		retrier:    newHTTPRetrier(cfg.MaxRetries, cfg.RequestsPerMin, 60*time.Second),
+		vendor:     "voyage",
 	}
+	compat.extraFields = func() map[string]any {
+		fields := map[string]any{"input_type": inputType}
+		if compat.dimensions > 0 {
+			fields["output_dimension"] = compat.dimensions
+		}
+		return fields
+	}
+	compat.formatError = voyageErrorMessage
+
+	return &VoyageProvider{compat: compat}
 }
 
 func (p *VoyageProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	if strings.TrimSpace(p.apiKey) == "" {
-		return nil, errors.New("voyage api key is required")
-	}
-	if len(texts) == 0 {
-		return nil, nil
-	}
-
-	body := map[string]any{
-		"input":      texts,
-		"model":      p.model,
-		"input_type": p.inputType,
-	}
-	if p.dimensions > 0 {
-		body["output_dimension"] = p.dimensions
-	}
-
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := p.retrier.post(ctx, p.baseURL+"/embeddings", payload, map[string]string{
-		"Authorization": "Bearer " + p.apiKey,
-		"Content-Type":  "application/json",
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var errBody struct {
-			Error any `json:"error"`
-		}
-		_ = json.NewDecoder(resp.Body).Decode(&errBody)
-		if errBody.Error != nil {
-			return nil, fmt.Errorf("voyage embeddings returned %s: %v", resp.Status, errBody.Error)
-		}
-		return nil, fmt.Errorf("voyage embeddings returned %s", resp.Status)
-	}
-
-	var out struct {
-		Data []struct {
-			Index     int       `json:"index"`
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	if len(out.Data) != len(texts) {
-		return nil, fmt.Errorf("embedding count %d does not match input count %d", len(out.Data), len(texts))
-	}
-
-	sort.Slice(out.Data, func(i int, j int) bool {
-		return out.Data[i].Index < out.Data[j].Index
-	})
-
-	vectors := make([][]float32, 0, len(out.Data))
-	for _, item := range out.Data {
-		vectors = append(vectors, item.Embedding)
-	}
-	return vectors, nil
+	return p.compat.embed(ctx, texts)
 }
 
 func (p *VoyageProvider) Dim() int {
-	return p.dimensions
+	return p.compat.Dim()
+}
+
+func voyageErrorMessage(status string, body io.Reader) error {
+	var errBody struct {
+		Error any `json:"error"`
+	}
+	_ = json.NewDecoder(body).Decode(&errBody)
+	if errBody.Error != nil {
+		return fmt.Errorf("voyage embeddings returned %s: %v", status, errBody.Error)
+	}
+	return fmt.Errorf("voyage embeddings returned %s", status)
 }

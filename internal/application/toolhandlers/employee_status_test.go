@@ -50,19 +50,3 @@ func TestEmployeeStatusMapsRows(t *testing.T) {
 		t.Fatalf("casesName = %q", repo.casesName)
 	}
 }
-
-func TestEmployeeStatusEmptyCoverage(t *testing.T) {
-	repo := &stubEmployeeRepo{cases: []employeemysql.CaseRow{{Code: "REP-5"}}}
-	h := NewEmployeeStatus(repo)
-
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "Nok", Coverage: nil})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
-	}
-	if repo.casesCovered != nil {
-		t.Fatal("repo must not be queried on empty coverage")
-	}
-}

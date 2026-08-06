@@ -23,12 +23,12 @@ func NewService(extractor *Extractor, sink Sink, log *zap.Logger) *Service {
 	return &Service{extractor: extractor, sink: sink, log: log}
 }
 
-func (s *Service) Assess(ctx context.Context, companyID, conversationID int64, subject, body string) (Result, error) {
+func (s *Service) Assess(ctx context.Context, companyID, conversationID int64, sender, subject, body string) (Result, error) {
 	if s == nil || s.extractor == nil {
 		return Result{Status: StatusUnknown}, nil
 	}
 
-	result, err := s.extractor.Extract(ctx, companyID, subject, body)
+	result, err := s.extractor.Extract(ctx, companyID, sender, subject, body)
 	if err != nil {
 		s.log.Warn("intake completeness extraction failed",
 			zap.Int64("company_id", companyID),

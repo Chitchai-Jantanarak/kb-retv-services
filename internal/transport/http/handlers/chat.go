@@ -29,10 +29,6 @@ func (h *ChatHandler) Create(c *echo.Context) error {
 		return response.WriteError(c, apperr.Wrap(apperr.CodeInvalidInput, "invalid JSON body", err))
 	}
 
-	if err := req.Validate(); err != nil {
-		return response.WriteError(c, err)
-	}
-
 	resp, err := h.workflow.Run(c.Request().Context(), req)
 	if err != nil {
 		return response.WriteError(c, err)

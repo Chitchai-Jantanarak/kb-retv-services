@@ -46,20 +46,7 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
-	var sources []dto.ChatSource
-	var knowledge string
-	timedChat(timings, "knowledge", func() {
-		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
-	})
-
-	var profileBlock string
-	if w.profile != nil {
-		timedChat(timings, "profile", func() {
-			if block, perr := w.profile.Build(ctx, companyID); perr == nil {
-				profileBlock = block
-			}
-		})
-	}
+	sources, knowledge, profileBlock := w.fetchContext(ctx, companyID, lastUser, timings)
 
 	var prompt ports.Prompt
 	err = timedChatErr(timings, "render", func() error {

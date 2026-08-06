@@ -21,7 +21,6 @@ type Qdrant struct {
 type Memgraph struct {
 	Enabled  bool
 	URI      string
-	URL      string
 	Username string
 	Password string
 }

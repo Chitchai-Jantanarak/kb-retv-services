@@ -38,8 +38,8 @@ func TestWorkflowRunReturnsCompanyAwareSuggestion(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if resp.Intent != "troubleshooting" {
-		t.Fatalf("Intent = %q, want troubleshooting", resp.Intent)
+	if resp.Intent != intentGeneralSupport {
+		t.Fatalf("Intent = %q, want %q", resp.Intent, intentGeneralSupport)
 	}
 	if resp.Suggestion == "" {
 		t.Fatal("Suggestion is empty")
@@ -151,7 +151,6 @@ func TestSelectSuggestionEscalateReturnsStub(t *testing.T) {
 	result := rag.Result{
 		Decision:   rag.DecisionEscalate,
 		Candidates: []rag.Candidate{{ID: "x", Content: "raw doc body that must not leak"}},
-		Meta:       rag.Meta{Intent: "troubleshooting"},
 	}
 
 	got := selectSuggestion(result)
@@ -168,7 +167,6 @@ func TestSelectSuggestionFallbackStripsImages(t *testing.T) {
 	result := rag.Result{
 		Decision:   rag.DecisionDraft,
 		Candidates: []rag.Candidate{{ID: "x", Content: `<p>fix</p><img src="data:image/png;base64,AAAA">`}},
-		Meta:       rag.Meta{Intent: "troubleshooting"},
 	}
 
 	got := selectSuggestion(result)

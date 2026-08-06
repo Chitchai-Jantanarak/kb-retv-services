@@ -9,7 +9,6 @@ func TestPipelineDebugStageTimings(t *testing.T) {
 	reranker := &recordingReranker{}
 	critic := &stubCritic{res: CritiqueResult{Supported: true, Send: true}}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "restart printer", Score: 0.8}}}},
 		Reranker:            reranker,
 		Compressor:          Compressor{MaxRunes: 100},
@@ -44,7 +43,6 @@ func TestPipelineDebugStageTimings(t *testing.T) {
 
 func TestPipelineDebugTraceSummarizesPlanRetrievalAndQuality(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor: DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: []Candidate{
 			{ID: "1", Content: "restart printer", Source: "knowledge", Score: 0.8},
 		}}},
@@ -74,8 +72,8 @@ func TestPipelineDebugTraceSummarizesPlanRetrievalAndQuality(t *testing.T) {
 	if trace == nil {
 		t.Fatal("DebugTrace = nil, want trace in debug mode")
 	}
-	if trace.Plan.Intent != "troubleshooting" {
-		t.Fatalf("trace plan intent = %q, want troubleshooting", trace.Plan.Intent)
+	if len(trace.Plan.Terms) == 0 {
+		t.Fatalf("trace plan terms = %+v, want non-empty", trace.Plan.Terms)
 	}
 	if trace.Retrieval.Candidates != 1 || trace.Retrieval.TopSource != "knowledge" {
 		t.Fatalf("trace retrieval = %+v, want one knowledge candidate", trace.Retrieval)
@@ -90,7 +88,6 @@ func TestPipelineDebugTraceSummarizesPlanRetrievalAndQuality(t *testing.T) {
 
 func TestPipelineOmitsStageTimingsByDefault(t *testing.T) {
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "restart printer", Score: 0.8}}}},
 		Reranker:   &recordingReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -120,7 +117,6 @@ func TestPipelineFastDraftSkipsCriticAndSingleCandidateRerank(t *testing.T) {
 	generator := &stubGenerator{draft: "draft"}
 	critic := &stubCritic{res: CritiqueResult{Supported: false, Send: false}}
 	pipeline := NewPipeline(Config{
-		Extractor:           DefaultExtractor{},
 		Retrievers:          []Retriever{&recordingRetriever{candidates: []Candidate{{ID: "1", Content: "restart printer", Score: 0.8}}}},
 		Reranker:            reranker,
 		Compressor:          Compressor{MaxRunes: 100},
@@ -171,7 +167,6 @@ func TestPipelineFastDraftUsesCheapRetrievalBeforeExpensive(t *testing.T) {
 		candidates: []Candidate{{ID: "expensive", Source: "expensive", Content: "expensive answer", Score: 0.9}},
 	}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{cheap, expensive},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},
@@ -213,7 +208,6 @@ func TestPipelineFastDraftFallsBackToExpensiveRetrievalWhenCheapMisses(t *testin
 		candidates: []Candidate{{ID: "expensive", Source: "expensive", Content: "expensive answer", Score: 0.9}},
 	}
 	pipeline := NewPipeline(Config{
-		Extractor:  DefaultExtractor{},
 		Retrievers: []Retriever{cheap, expensive},
 		Reranker:   LexicalReranker{},
 		Compressor: Compressor{MaxRunes: 100},

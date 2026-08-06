@@ -11,23 +11,19 @@ import (
 	"github.com/my/app/internal/shared/logger"
 )
 
-type ContextAssembler interface {
-	Assemble(ctx context.Context, query Query, candidates []Candidate) ([]Candidate, error)
-}
-
 type ParentChunkSource interface {
 	ParentChunksByChildIDs(ctx context.Context, query kb.ChunkQuery) ([]kb.ChunkContext, error)
 }
 
-type parentChildContextAssembler struct {
+type ParentChildContextAssembler struct {
 	source ParentChunkSource
 }
 
-func NewContextAssembler(source ParentChunkSource) ContextAssembler {
-	return parentChildContextAssembler{source: source}
+func NewContextAssembler(source ParentChunkSource) *ParentChildContextAssembler {
+	return &ParentChildContextAssembler{source: source}
 }
 
-func (a parentChildContextAssembler) Assemble(ctx context.Context, query Query, candidates []Candidate) ([]Candidate, error) {
+func (a *ParentChildContextAssembler) Assemble(ctx context.Context, query Query, candidates []Candidate) ([]Candidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -60,19 +60,3 @@ func TestCustomerProfileNotFound(t *testing.T) {
 		t.Fatalf("rows = %d, want 0 when not found", len(rows))
 	}
 }
-
-func TestCustomerProfileEmptyCoverage(t *testing.T) {
-	repo := &stubCustomerRepo{profile: customermysql.Profile{Company: "Acme", Found: true}}
-	h := NewCustomerProfile(repo)
-
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "Acme", Coverage: nil})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
-	}
-	if repo.covered != nil {
-		t.Fatal("repo must not be queried on empty coverage")
-	}
-}

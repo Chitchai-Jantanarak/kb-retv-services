@@ -19,7 +19,7 @@ type Workflow struct {
 	summaryTmpl prompts.Template
 	clarifyTmpl prompts.Template
 	resolve     rag.ProviderForCompany
-	fts         FTSSource
+	fts         rag.FTSSource
 	profile     ProfileSource
 	cases       CaseSource
 	router      *intent.Router
@@ -32,7 +32,7 @@ type Workflow struct {
 	turns       TurnRecorder
 }
 
-func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts FTSSource, opts ...Option) (*Workflow, error) {
+func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts rag.FTSSource, opts ...Option) (*Workflow, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("chat: prompt registry is required")
 	}
@@ -103,22 +103,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		return attachChatDebug(cachedResp, pre.toolDebug, timings, true), nil
 	}
 
-	var (
-		sources   []dto.ChatSource
-		knowledge string
-	)
-	timedChat(timings, "knowledge", func() {
-		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
-	})
-
-	var profileBlock string
-	if w.profile != nil {
-		timedChat(timings, "profile", func() {
-			if block, perr := w.profile.Build(ctx, companyID); perr == nil {
-				profileBlock = block
-			}
-		})
-	}
+	sources, knowledge, profileBlock := w.fetchContext(ctx, companyID, lastUser, timings)
 
 	turn, err := w.generateTurn(ctx, req, companyID, knowledge, profileBlock, timings)
 	if err != nil {
@@ -140,6 +125,26 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	})
 	resp = withChatTimings(resp, timings)
 	return attachChatDebug(resp, pre.toolDebug, timings, false), nil
+}
+
+func (w *Workflow) fetchContext(ctx context.Context, companyID int64, lastUser string, timings map[string]int64) ([]dto.ChatSource, string, string) {
+	var (
+		sources   []dto.ChatSource
+		knowledge string
+	)
+	timedChat(timings, "knowledge", func() {
+		sources, knowledge = w.knowledgeContext(ctx, companyID, lastUser)
+	})
+
+	var profileBlock string
+	if w.profile != nil {
+		timedChat(timings, "profile", func() {
+			if block, perr := w.profile.Build(ctx, companyID); perr == nil {
+				profileBlock = block
+			}
+		})
+	}
+	return sources, knowledge, profileBlock
 }
 
 func offDomainReply(locale string) string {

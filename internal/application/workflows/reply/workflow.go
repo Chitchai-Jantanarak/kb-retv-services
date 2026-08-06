@@ -3,7 +3,6 @@ package reply
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/my/app/internal/ai/rag"
@@ -12,6 +11,8 @@ import (
 	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/htmltext"
 )
+
+const intentGeneralSupport = "general-support"
 
 type AgentIDLookup func(ctx context.Context, companyID int64) (int64, bool)
 
@@ -134,7 +135,7 @@ func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow 
 	retrievers := make([]rag.Retriever, 0, 1+len(cfg.retrievers))
 	retrievers = append(retrievers, rag.NewKnowledgeRetriever(knowledge))
 	retrievers = append(retrievers, cfg.retrievers...)
-	var contextAssembler rag.ContextAssembler
+	var contextAssembler *rag.ParentChildContextAssembler
 	if source, ok := knowledge.(rag.ParentChunkSource); ok {
 		contextAssembler = rag.NewContextAssembler(source)
 	}
@@ -144,7 +145,6 @@ func NewWorkflow(knowledge ports.KnowledgeRepository, opts ...Option) *Workflow 
 	}
 	return &Workflow{
 		pipeline: rag.NewPipeline(rag.Config{
-			Extractor:              rag.DefaultExtractor{},
 			Retrievers:             retrievers,
 			GraphRetriever:         cfg.graph,
 			ContextAssembler:       contextAssembler,
@@ -197,7 +197,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 	}
 
 	return dto.ReplyResponse{
-		Intent:         result.Meta.Intent,
+		Intent:         intentGeneralSupport,
 		Draft:          suggestion,
 		Suggestion:     suggestion,
 		Sources:        toSources(result.Candidates),
@@ -218,7 +218,6 @@ func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, dra
 	}
 	output := map[string]any{
 		"draft":    draft,
-		"intent":   result.Meta.Intent,
 		"decision": string(result.Decision),
 		"sources":  toActionSources(result.Candidates),
 	}
@@ -262,12 +261,12 @@ func toActionSources(candidates []rag.Candidate) []ports.AIActionSource {
 	return out
 }
 
-func buildSuggestion(intent string, candidates []rag.Candidate) string {
+func buildSuggestion(candidates []rag.Candidate) string {
 	if len(candidates) == 0 {
 		return "Acknowledge the issue, confirm the affected service, and ask for the latest error details."
 	}
 
-	return fmt.Sprintf("Intent: %s. Suggested reply: %s", intent, htmltext.StripInlineImages(candidates[0].Content))
+	return fmt.Sprintf("Suggested reply: %s", htmltext.StripInlineImages(candidates[0].Content))
 }
 
 func selectSuggestion(result rag.Result) string {
@@ -275,17 +274,13 @@ func selectSuggestion(result rag.Result) string {
 		return result.Draft
 	}
 	if result.Decision == rag.DecisionEscalate {
-		return escalationMessage(result.Meta.Intent)
+		return escalationMessage()
 	}
-	return buildSuggestion(result.Meta.Intent, result.Candidates)
+	return buildSuggestion(result.Candidates)
 }
 
-func escalationMessage(intent string) string {
-	intent = strings.TrimSpace(intent)
-	if intent == "" {
-		return "No confident match in past cases. Escalating to a human agent."
-	}
-	return fmt.Sprintf("No confident match in past cases for intent %q. Escalating to a human agent.", intent)
+func escalationMessage() string {
+	return "No confident match in past cases. Escalating to a human agent."
 }
 
 func toSources(candidates []rag.Candidate) []dto.ReplySource {

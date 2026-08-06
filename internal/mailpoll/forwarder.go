@@ -12,12 +12,14 @@ import (
 )
 
 type EmailPayload struct {
-	MessageID string `json:"message_id"`
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Subject   string `json:"subject"`
-	Body      string `json:"body"`
-	BodyHTML  string `json:"body_html"`
+	MessageID  string   `json:"message_id"`
+	InReplyTo  string   `json:"in_reply_to"`
+	From       string   `json:"from"`
+	To         string   `json:"to"`
+	Recipients []string `json:"recipients"`
+	Subject    string   `json:"subject"`
+	Body       string   `json:"body"`
+	BodyHTML   string   `json:"body_html"`
 }
 
 type Forwarder struct {

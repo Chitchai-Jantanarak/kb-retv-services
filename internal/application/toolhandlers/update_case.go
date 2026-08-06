@@ -22,6 +22,13 @@ type CasesRepo interface {
 
 var caseCodeRe = regexp.MustCompile(`(?i)REP-?\d+`)
 
+func paramOrParse(q skeleton.Query, name string) string {
+	if v := q.Params[name]; v != "" {
+		return v
+	}
+	return strings.ToUpper(caseCodeRe.FindString(q.Text))
+}
+
 type UpdateCase struct {
 	repo CasesRepo
 }
@@ -31,10 +38,13 @@ func NewUpdateCase(repo CasesRepo) UpdateCase {
 }
 
 func (h UpdateCase) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	code := strings.ToUpper(caseCodeRe.FindString(q.Text))
-	status := parseStatus(q.Text)
+	code := paramOrParse(q, "code")
+	status := q.Params["status"]
+	if status == "" {
+		status = parseStatus(q.Text)
+	}
 	if code == "" || status == "" {
-		return nil, fmt.Errorf("update_case: a case code and target status are required")
+		return nil, skeleton.NeedsParams("case_code", "status")
 	}
 	id, err := h.repo.CaseIDByCode(ctx, q.Coverage, code)
 	if err != nil {

@@ -31,19 +31,3 @@ func TestProductCasesMapsRows(t *testing.T) {
 		t.Fatalf("byProductTerm = %q", repo.byProductTerm)
 	}
 }
-
-func TestProductCasesEmptyCoverage(t *testing.T) {
-	repo := &stubCasesRepo{casesByProduct: []reportsmysql.CaseRow{{Code: "REP-2"}}}
-	h := NewProductCases(repo)
-
-	rows, err := h.Run(context.Background(), skeleton.Query{Text: "model X", Coverage: nil})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("rows = %d, want 0 on empty coverage", len(rows))
-	}
-	if repo.byProductCoverage != nil {
-		t.Fatal("repo must not be queried on empty coverage")
-	}
-}

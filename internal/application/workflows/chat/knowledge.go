@@ -43,11 +43,7 @@ func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query 
 		block   strings.Builder
 	)
 	for _, chunk := range chunks {
-		title := strings.TrimSpace(chunk.Title)
-		snippet := strings.TrimSpace(chunk.Content)
-		if len(snippet) > knowledgeSnippetMaxChars {
-			snippet = snippet[:knowledgeSnippetMaxChars]
-		}
+		title, snippet := rag.SnippetFromChunk(chunk, true, knowledgeSnippetMaxChars)
 		if title != "" || snippet != "" {
 			sources = append(sources, dto.ChatSource{
 				ID:      fmt.Sprintf("chunk:%d", chunk.ChunkID),

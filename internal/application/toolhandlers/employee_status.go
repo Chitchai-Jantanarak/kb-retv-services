@@ -22,14 +22,15 @@ func NewEmployeeStatus(repo EmployeeRepo) EmployeeStatus {
 }
 
 func (h EmployeeStatus) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	if len(q.Coverage) == 0 {
-		return []skeleton.Row{}, nil
-	}
 	limit := q.Tool.Limit
 	if limit <= 0 {
 		limit = 5
 	}
-	cases, err := h.repo.OpenCasesByEmployee(ctx, q.Coverage, strings.TrimSpace(q.Text), limit)
+	employee := q.Params["employee"]
+	if employee == "" {
+		employee = strings.TrimSpace(q.Text)
+	}
+	cases, err := h.repo.OpenCasesByEmployee(ctx, q.Coverage, employee, limit)
 	if err != nil {
 		return nil, err
 	}

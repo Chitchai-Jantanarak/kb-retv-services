@@ -1,6 +1,7 @@
 package omnichannel
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -140,6 +141,21 @@ func TestEmailNormalizerExtractsAddress(t *testing.T) {
 	}
 	if got.Request.Subject != "help" {
 		t.Fatalf("subject = %q", got.Request.Subject)
+	}
+}
+
+func TestEmailNormalizerCarriesThreadAndRecipients(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","in_reply_to":" <m-1@mail> ","from":"alice@example.com","to":"Alice <alice@example.com>","recipients":["Support <SUPPORT@site.com>","alice@example.com"],"subject":"re: help","body":"any progress?"}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if got.InReplyTo != "<m-1@mail>" {
+		t.Fatalf("in_reply_to = %q", got.InReplyTo)
+	}
+	want := []string{"alice@example.com", "support@site.com"}
+	if !reflect.DeepEqual(got.AccountCandidates, want) {
+		t.Fatalf("candidates = %v, want %v", got.AccountCandidates, want)
 	}
 }
 

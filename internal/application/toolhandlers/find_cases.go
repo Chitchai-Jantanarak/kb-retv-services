@@ -2,9 +2,26 @@ package toolhandlers
 
 import (
 	"context"
+	"regexp"
+	"strconv"
 
 	"github.com/my/app/internal/application/skeleton"
 )
+
+var countRe = regexp.MustCompile(`\b([1-9][0-9]?)\b`)
+
+func requestedLimit(text string, cap int) int {
+	cleaned := caseCodeRe.ReplaceAllString(text, "")
+	m := countRe.FindStringSubmatch(cleaned)
+	if m == nil {
+		return cap
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n < 1 || n > cap {
+		return cap
+	}
+	return n
+}
 
 type FindCases struct {
 	repo CasesRepo
@@ -15,14 +32,16 @@ func NewFindCases(repo CasesRepo) FindCases {
 }
 
 func (h FindCases) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	if len(q.Coverage) == 0 {
-		return []skeleton.Row{}, nil
-	}
 	limit := q.Tool.Limit
 	if limit <= 0 {
 		limit = 10
 	}
-	cases, err := h.repo.LatestCases(ctx, q.Coverage, parseStatus(q.Text), limit)
+	limit = requestedLimit(q.Text, limit)
+	status := q.Params["status"]
+	if status == "" {
+		status = parseStatus(q.Text)
+	}
+	cases, err := h.repo.LatestCases(ctx, q.Coverage, status, limit)
 	if err != nil {
 		return nil, err
 	}

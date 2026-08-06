@@ -23,7 +23,7 @@ type Options struct {
 	Review         *handlers.ReviewHandler
 	Chat           *handlers.ChatHandler
 	ChatStream     *handlers.ChatStreamHandler
-	Search         *handlers.SearchHandler
+	ChatConfirm    *handlers.ChatConfirmHandler
 	Budget         appmiddleware.BudgetPolicy
 }
 
@@ -70,8 +70,8 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 		protectedV1.POST("/chat/stream", opts.ChatStream.Create, appmiddleware.RequirePermission("ai:reply:create"))
 	}
 
-	if opts.Search != nil {
-		protectedV1.POST("/search", opts.Search.Create, appmiddleware.RequirePermission("ai:search:read"))
+	if opts.ChatConfirm != nil {
+		protectedV1.POST("/chat/confirm-action", opts.ChatConfirm.Create, appmiddleware.RequirePermission("ai:reply:create"))
 	}
 
 	if opts.Feedback != nil {

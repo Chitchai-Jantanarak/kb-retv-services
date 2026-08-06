@@ -11,10 +11,9 @@ const defaultConfidenceThreshold = 0.85
 
 type Pipeline struct {
 	planner             Planner
-	extractor           Extractor
 	retrievers          []Retriever
 	graphRetriever      GraphRetriever
-	contextAssembler    ContextAssembler
+	contextAssembler    *ParentChildContextAssembler
 	reranker            Reranker
 	compressor          Compressor
 	crag                CRAG
@@ -34,13 +33,9 @@ type cacheConfig struct {
 }
 
 func NewPipeline(cfg Config) *Pipeline {
-	extractor := cfg.Extractor
-	if extractor == nil {
-		extractor = DefaultExtractor{}
-	}
 	planner := cfg.Planner
 	if planner == nil {
-		planner = DefaultQueryPlanner{Extractor: extractor}
+		planner = DefaultQueryPlanner{}
 	}
 	reranker := cfg.Reranker
 	if reranker == nil {
@@ -60,7 +55,6 @@ func NewPipeline(cfg Config) *Pipeline {
 	}
 	return &Pipeline{
 		planner:             planner,
-		extractor:           extractor,
 		retrievers:          cfg.Retrievers,
 		graphRetriever:      cfg.GraphRetriever,
 		contextAssembler:    cfg.ContextAssembler,

@@ -144,11 +144,15 @@ func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64
 	if err != nil {
 		return fmt.Errorf("conversations: encode intake_fields: %w", err)
 	}
+	reasons, err := json.Marshal(nonNilStrings(res.Reasons))
+	if err != nil {
+		return fmt.Errorf("conversations: encode intake_reasons: %w", err)
+	}
 
 	if _, err := r.db.ExecContext(ctx, `
 UPDATE conversations
-SET intake_status = ?, intake_missing = ?, intake_fields = ?
-WHERE id = ?`, status, string(missing), string(fields), conversationID); err != nil {
+SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?
+WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), conversationID); err != nil {
 		return fmt.Errorf("conversations: write completeness: %w", err)
 	}
 	return nil

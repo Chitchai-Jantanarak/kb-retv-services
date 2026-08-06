@@ -13,17 +13,10 @@ import (
 const (
 	LabelReport    = "Report"
 	LabelKbArticle = "KbArticle"
-	LabelTopic     = "Topic"
-	LabelSubject   = "Subject"
-	LabelComponent = "Component"
 	LabelSymptom   = "Symptom"
 
-	EdgeSolves     = "SOLVES"
-	EdgeAboutTopic = "ABOUT_TOPIC"
-	EdgeAboutSub   = "ABOUT_SUBJECT"
-	EdgeAboutComp  = "ABOUT_COMPONENT"
-	EdgeRelatedTo  = "RELATED_TO"
-	EdgeProduced   = "PRODUCED"
+	EdgeSolves   = "SOLVES"
+	EdgeProduced = "PRODUCED"
 )
 
 type KBGraph struct {
@@ -42,18 +35,6 @@ func (g *KBGraph) UpsertArticle(ctx context.Context, companyID int64, articleID 
 	return g.upsertEntity(ctx, companyID, LabelKbArticle, "article", strconv.FormatInt(articleID, 10), props)
 }
 
-func (g *KBGraph) UpsertTopic(ctx context.Context, companyID int64, topicKey string, props map[string]any) error {
-	return g.upsertEntity(ctx, companyID, LabelTopic, "topic", topicKey, props)
-}
-
-func (g *KBGraph) UpsertSubject(ctx context.Context, companyID int64, subjectID int64, props map[string]any) error {
-	return g.upsertEntity(ctx, companyID, LabelSubject, "subject", strconv.FormatInt(subjectID, 10), props)
-}
-
-func (g *KBGraph) UpsertComponent(ctx context.Context, companyID int64, componentKey string, props map[string]any) error {
-	return g.upsertEntity(ctx, companyID, LabelComponent, "component", componentKey, props)
-}
-
 func (g *KBGraph) UpsertSymptom(ctx context.Context, companyID int64, symptomID int64, props map[string]any) error {
 	return g.upsertEntity(ctx, companyID, LabelSymptom, "symptom", strconv.FormatInt(symptomID, 10), props)
 }
@@ -62,24 +43,6 @@ func (g *KBGraph) LinkArticleSolvesSymptom(ctx context.Context, companyID int64,
 	from := memgraph.ExternalID(companyID, "article", strconv.FormatInt(articleID, 10))
 	to := memgraph.ExternalID(companyID, "symptom", strconv.FormatInt(symptomID, 10))
 	return g.upsertEdge(ctx, companyID, from, to, EdgeSolves, props)
-}
-
-func (g *KBGraph) LinkArticleAboutSubject(ctx context.Context, companyID int64, articleID, subjectID int64, props map[string]any) error {
-	from := memgraph.ExternalID(companyID, "article", strconv.FormatInt(articleID, 10))
-	to := memgraph.ExternalID(companyID, "subject", strconv.FormatInt(subjectID, 10))
-	return g.upsertEdge(ctx, companyID, from, to, EdgeAboutSub, props)
-}
-
-func (g *KBGraph) LinkArticleAboutComponent(ctx context.Context, companyID int64, articleID int64, componentKey string, props map[string]any) error {
-	from := memgraph.ExternalID(companyID, "article", strconv.FormatInt(articleID, 10))
-	to := memgraph.ExternalID(companyID, "component", componentKey)
-	return g.upsertEdge(ctx, companyID, from, to, EdgeAboutComp, props)
-}
-
-func (g *KBGraph) LinkSymptomRelatedTo(ctx context.Context, companyID int64, symptomA, symptomB int64, props map[string]any) error {
-	from := memgraph.ExternalID(companyID, "symptom", strconv.FormatInt(symptomA, 10))
-	to := memgraph.ExternalID(companyID, "symptom", strconv.FormatInt(symptomB, 10))
-	return g.upsertEdge(ctx, companyID, from, to, EdgeRelatedTo, props)
 }
 
 func (g *KBGraph) LinkReportProducedArticle(ctx context.Context, companyID int64, reportID, articleID int64) error {
@@ -111,33 +74,6 @@ func (g *KBGraph) ArticlesForSymptom(ctx context.Context, companyID int64, cover
 			"company_id": companyID,
 			"coverage":   scope,
 			"symptom_id": memgraph.ExternalID(companyID, "symptom", strconv.FormatInt(symptomID, 10)),
-		},
-	})
-}
-
-// RelatedArticles returns articles linked to symptoms that are RELATED_TO
-// the seed article's solved symptoms (1-hop expansion).
-func (g *KBGraph) RelatedArticles(ctx context.Context, companyID, articleID int64, limit int) ([]map[string]any, error) {
-	if companyID <= 0 {
-		return nil, errors.New("kb_graph: RelatedArticles: company_id must be positive")
-	}
-	if limit <= 0 {
-		limit = 16
-	}
-	stmt := fmt.Sprintf(`
-		MATCH (seed:%s { company_id: $company_id, id: $article_id })
-		      -[:%s { company_id: $company_id }]->(s1:%s { company_id: $company_id })
-		      -[:%s { company_id: $company_id }]->(s2:%s { company_id: $company_id })
-		      <-[:%s { company_id: $company_id }]-(rel:%s { company_id: $company_id })
-		WHERE rel.id <> seed.id
-		RETURN DISTINCT rel.id AS article_id, rel.title AS title
-		LIMIT %d
-	`, LabelKbArticle, EdgeSolves, LabelSymptom, EdgeRelatedTo, LabelSymptom, EdgeSolves, LabelKbArticle, limit)
-	return g.store.Query(ctx, ports.CypherQuery{
-		Statement: stmt,
-		Params: map[string]any{
-			"company_id": companyID,
-			"article_id": memgraph.ExternalID(companyID, "article", strconv.FormatInt(articleID, 10)),
 		},
 	})
 }

@@ -16,14 +16,15 @@ func NewProductCases(repo CasesRepo) ProductCases {
 }
 
 func (h ProductCases) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	if len(q.Coverage) == 0 {
-		return []skeleton.Row{}, nil
-	}
 	limit := q.Tool.Limit
 	if limit <= 0 {
 		limit = 10
 	}
-	cases, err := h.repo.CasesByProduct(ctx, q.Coverage, strings.TrimSpace(q.Text), limit)
+	product := q.Params["product"]
+	if product == "" {
+		product = strings.TrimSpace(q.Text)
+	}
+	cases, err := h.repo.CasesByProduct(ctx, q.Coverage, product, limit)
 	if err != nil {
 		return nil, err
 	}

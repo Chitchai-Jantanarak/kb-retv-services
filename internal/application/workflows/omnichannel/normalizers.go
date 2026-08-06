@@ -15,10 +15,15 @@ const (
 	ChannelAPI   = "api"
 )
 
+const ActionIntakeAssessed = "ai_intake_assessed"
+const ActionTicketEnqueueFailed = "ai_ticket_enqueue_failed"
+
 type Normalized struct {
 	Request           dto.InboundMessageRequest
 	ExternalSender    string
 	AccountExternalID string
+	AccountCandidates []string
+	InReplyTo         string
 }
 
 type Normalizer interface {

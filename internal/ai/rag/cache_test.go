@@ -15,7 +15,6 @@ func TestPipelineRecomputesDecisionOnCacheHitWhenThresholdChanges(t *testing.T) 
 	threshold := 0.5
 	retriever := &recordingRetriever{candidates: []Candidate{{ID: "1", Title: "Fix", Content: "solution", Score: 0.9}}}
 	pipeline := NewPipeline(Config{
-		Extractor:              DefaultExtractor{},
 		Retrievers:             []Retriever{retriever},
 		Reranker:               LexicalReranker{},
 		Compressor:             Compressor{MaxRunes: 100},

@@ -46,8 +46,8 @@ func audioOnlyRequest() dto.ChatRequest {
 	}
 }
 
-func TestRunAudioOnlyMessageTranscribesAndGuardsOnTranscript(t *testing.T) {
-	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+func TestRunAudioOnlyMessageTranscribesAndRoutesOnTranscript(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"i cannot help with that","case":null}`}
 	fts := &stubFTS{}
 	fetcher := &stubFetcher{data: ports.AttachmentData{Bytes: []byte("audio-bytes"), MIMEType: "audio/webm"}}
 	transcriber := &stubTranscriber{text: "tell me a joke"}
@@ -64,14 +64,14 @@ func TestRunAudioOnlyMessageTranscribesAndGuardsOnTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if resp.Status != dto.ChatStatusOffDomain {
-		t.Fatalf("Status = %q, want off_domain (guard should run on transcript)", resp.Status)
-	}
 	if resp.Transcript != "tell me a joke" {
 		t.Fatalf("Transcript = %q, want %q", resp.Transcript, "tell me a joke")
 	}
-	if provider.calls != 0 {
-		t.Fatalf("provider calls = %d, want 0", provider.calls)
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1: an out-of-scope ask is answered by the model, not refused by a guard", provider.calls)
+	}
+	if !strings.Contains(provider.prompt.User, "tell me a joke") {
+		t.Fatalf("prompt = %q, want the transcript routed into it", provider.prompt.User)
 	}
 }
 

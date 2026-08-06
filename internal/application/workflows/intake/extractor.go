@@ -3,6 +3,7 @@ package intake
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,8 @@ type Result struct {
 	Fields  map[string]string
 	Missing []string
 	Status  string
+	Score   int
+	Reasons []string
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -70,7 +73,7 @@ func NewExtractor(registry *prompts.Registry, resolve ProviderForCompany, opts .
 	return e, nil
 }
 
-func (e *Extractor) Extract(ctx context.Context, companyID int64, subject, body string) (Result, error) {
+func (e *Extractor) Extract(ctx context.Context, companyID int64, sender, subject, body string) (Result, error) {
 	if companyID <= 0 {
 		return Result{}, fmt.Errorf("intake: company_id must be positive")
 	}
@@ -89,6 +92,14 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, subject, body 
 		return emptyResult(spec), nil
 	}
 
+	provider, err := e.resolve(ctx, companyID)
+	if errors.Is(err, ports.ErrAIDisabled) {
+		return Result{Status: StatusUnknown}, nil
+	}
+	if err != nil {
+		return Result{}, fmt.Errorf("intake: resolve provider: %w", err)
+	}
+
 	products, err := e.productList(ctx, companyID)
 	if err != nil {
 		return Result{}, err
@@ -103,25 +114,43 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, subject, body 
 		return Result{}, fmt.Errorf("intake: render prompt: %w", err)
 	}
 
-	provider, err := e.resolve(ctx, companyID)
-	if err != nil {
-		return Result{}, fmt.Errorf("intake: resolve provider: %w", err)
-	}
 	completion, err := provider.GenerateJSON(ctx, prompt)
 	if err != nil {
 		return Result{}, err
 	}
 
 	fields := parseFields(completion.Text, spec)
-	if unknownProduct(fields[FieldProduct], products) {
-		delete(fields, FieldProduct)
+
+	productChecked := len(products) > 0
+	productVerified := false
+	if productChecked {
+		if unknownProduct(fields[FieldProduct], products) {
+			delete(fields, FieldProduct)
+		} else {
+			productVerified = strings.TrimSpace(fields[FieldProduct]) != ""
+		}
 	}
 
 	missing := spec.Missing(fields)
+	status := spec.StatusFor(fields)
+	if status == StatusReady && !productChecked {
+		status = StatusUnverified
+	}
+
+	sig := Signals{
+		Sender:          sender,
+		Body:            body,
+		ProductChecked:  productChecked,
+		ProductVerified: productVerified,
+	}
+	score, reasons := Score(spec, fields, missing, sig)
+
 	return Result{
 		Fields:  fields,
 		Missing: missing,
-		Status:  spec.StatusFor(fields),
+		Status:  status,
+		Score:   score,
+		Reasons: reasons,
 	}, nil
 }
 

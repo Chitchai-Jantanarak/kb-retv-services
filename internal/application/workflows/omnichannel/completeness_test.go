@@ -19,7 +19,7 @@ type stubAssessor struct {
 	body      string
 }
 
-func (s *stubAssessor) Assess(_ context.Context, companyID, conversationID int64, subject, body string) (Completeness, error) {
+func (s *stubAssessor) Assess(_ context.Context, companyID, conversationID int64, sender, subject, body string) (Completeness, error) {
 	s.called = true
 	s.companyID = companyID
 	s.convoID = conversationID

@@ -127,9 +127,10 @@ func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, f
 		return mailpoll.EmailPayload{}, fmt.Errorf("empty fetch")
 	}
 
-	p := mailpoll.EmailPayload{To: fallbackTo}
+	p := mailpoll.EmailPayload{To: fallbackTo, Recipients: []string{fallbackTo}}
 	if msg.Envelope != nil {
 		p.MessageID = msg.Envelope.MessageId
+		p.InReplyTo = msg.Envelope.InReplyTo
 		p.Subject = msg.Envelope.Subject
 		if len(msg.Envelope.From) > 0 {
 			p.From = address(msg.Envelope.From[0])
@@ -137,6 +138,7 @@ func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, f
 		if len(msg.Envelope.To) > 0 {
 			p.To = address(msg.Envelope.To[0])
 		}
+		p.Recipients = recipients(msg.Envelope, fallbackTo)
 	}
 	if strings.TrimSpace(p.MessageID) == "" {
 		p.MessageID = fmt.Sprintf("<mailpoll-%d@%s>", uid, cfgHost(fallbackTo))
@@ -183,6 +185,27 @@ func markSeen(c *client.Client, uid uint32) {
 	seqset.AddNum(uid)
 	item := imap.FormatFlagsOp(imap.AddFlags, true)
 	_ = c.UidStore(seqset, item, []interface{}{imap.SeenFlag}, nil)
+}
+
+func recipients(env *imap.Envelope, fallbackTo string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, 4)
+	add := func(addr string) {
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		if addr == "" || seen[addr] {
+			return
+		}
+		seen[addr] = true
+		out = append(out, addr)
+	}
+	for _, a := range env.To {
+		add(address(a))
+	}
+	for _, a := range env.Cc {
+		add(address(a))
+	}
+	add(fallbackTo)
+	return out
 }
 
 func address(a *imap.Address) string {

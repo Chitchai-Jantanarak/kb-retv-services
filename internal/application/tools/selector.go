@@ -21,6 +21,7 @@ type Selection struct {
 	Matched      bool
 	Params       map[string]string
 	Specificity  int
+	Entities     int
 	PermFiltered bool
 }
 
@@ -47,6 +48,50 @@ func WithNameSource(names NameSource) SelectorOption {
 
 const defaultAccept = 0.55
 
+const defaultFloor = 0.35
+
+var acceptByKind = map[string]float64{
+	"read":      0.55,
+	"retrieval": 0.55,
+	"write":     0.62,
+}
+
+func thresholdsFor(t Tool) (float64, float64) {
+	accept := t.Thresholds.Accept
+	if accept <= 0 {
+		if byKind, ok := acceptByKind[t.Kind]; ok {
+			accept = byKind
+		} else {
+			accept = defaultAccept
+		}
+	}
+	floor := t.Thresholds.Floor
+	if floor <= 0 {
+		floor = defaultFloor
+	}
+	if floor > accept {
+		floor = accept
+	}
+	return accept, floor
+}
+
+const specificityMargin = 0.05
+
+func preferOver(cand, best Selection) bool {
+	switch {
+	case !best.Matched:
+		return true
+	case cand.Entities != best.Entities:
+		return cand.Entities > best.Entities
+	case cand.Specificity > best.Specificity:
+		return cand.Score >= best.Score-specificityMargin
+	case cand.Specificity < best.Specificity:
+		return cand.Score-specificityMargin > best.Score
+	default:
+		return cand.Score > best.Score
+	}
+}
+
 func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorOption) (*Selector, error) {
 	if emb == nil {
 		return nil, fmt.Errorf("tools: embedder is required")
@@ -69,14 +114,7 @@ func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorO
 			return nil, fmt.Errorf("tools: %s: anchor embedding count %d != %d", t.ID, len(vecs), len(t.Anchors))
 		}
 
-		accept := t.Thresholds.Accept
-		if accept <= 0 {
-			accept = defaultAccept
-		}
-		floor := t.Thresholds.Floor
-		if floor <= 0 || floor > accept {
-			floor = accept
-		}
+		accept, floor := thresholdsFor(t)
 
 		normed := make([][]float32, len(vecs))
 		for i, v := range vecs {
@@ -155,16 +193,21 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 		if !satisfied {
 			continue
 		}
-		specificity := requiredMatched(t.params, extracted)
-
 		corroborated := requiredCount(t.params) > 0
 		if !corroborated && score < t.accept {
 			continue
 		}
 
-		if !best.Matched || specificity > best.Specificity ||
-			(specificity == best.Specificity && score > best.Score) {
-			best = Selection{ToolID: t.id, Score: score, Matched: true, Params: extracted, Specificity: specificity}
+		cand := Selection{
+			ToolID:      t.id,
+			Score:       score,
+			Matched:     true,
+			Params:      extracted,
+			Specificity: requiredMatched(t.params, extracted),
+			Entities:    entityMatched(t.params, extracted),
+		}
+		if preferOver(cand, best) {
+			best = cand
 		}
 	}
 

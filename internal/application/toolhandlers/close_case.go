@@ -3,7 +3,6 @@ package toolhandlers
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/my/app/internal/application/skeleton"
 )
@@ -17,9 +16,9 @@ func NewCloseCase(repo CasesRepo) CloseCase {
 }
 
 func (h CloseCase) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	code := strings.ToUpper(caseCodeRe.FindString(q.Text))
+	code := paramOrParse(q, "code")
 	if code == "" {
-		return nil, fmt.Errorf("close_case: a case code is required")
+		return nil, skeleton.NeedsParams("case_code")
 	}
 	id, err := h.repo.CaseIDByCode(ctx, q.Coverage, code)
 	if err != nil {

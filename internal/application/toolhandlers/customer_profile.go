@@ -21,10 +21,11 @@ func NewCustomerProfile(repo CustomerRepo) CustomerProfile {
 }
 
 func (h CustomerProfile) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, error) {
-	if len(q.Coverage) == 0 {
-		return []skeleton.Row{}, nil
+	customer := q.Params["customer"]
+	if customer == "" {
+		customer = strings.TrimSpace(q.Text)
 	}
-	profile, err := h.repo.ProfileByName(ctx, q.Coverage, strings.TrimSpace(q.Text))
+	profile, err := h.repo.ProfileByName(ctx, q.Coverage, customer)
 	if err != nil {
 		return nil, err
 	}

@@ -3,18 +3,19 @@ package chat
 import (
 	"context"
 
+	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/shared/ctxkey"
 )
 
 type ftsScorer struct {
-	fts FTSSource
+	fts rag.FTSSource
 }
 
-func newFTSScorer(fts FTSSource) *ftsScorer {
+func newFTSScorer(fts rag.FTSSource) *ftsScorer {
 	return &ftsScorer{fts: fts}
 }
 
-func NewFTSScorer(fts FTSSource) *ftsScorer {
+func NewFTSScorer(fts rag.FTSSource) *ftsScorer {
 	return newFTSScorer(fts)
 }
 
