@@ -80,8 +80,11 @@ func TestBuildSearchCasesQueryScopesAndFilters(t *testing.T) {
 	if !strings.Contains(query, "r.company_id IN (?,?)") {
 		t.Fatalf("query = %q, want coverage scope", query)
 	}
-	if !strings.Contains(query, "r.title LIKE ? OR r.problem_detail LIKE ?") {
-		t.Fatalf("query = %q, want keyword filter over title+detail", query)
+	if !strings.Contains(query, "REPLACE(r.title, ' ', '') LIKE ? OR REPLACE(r.problem_text, ' ', '') LIKE ?") {
+		t.Fatalf("query = %q, want space-stripped keyword filter over title+problem_text", query)
+	}
+	if strings.Contains(query, "problem_detail") {
+		t.Fatalf("query = %q, problem_detail holds raw HTML and base64 images, search must use problem_text", query)
 	}
 	if !strings.Contains(query, "EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.product_node_id") {
 		t.Fatalf("query = %q, want product EXISTS filter on reports.product_node_id", query)
@@ -95,6 +98,41 @@ func TestBuildSearchCasesQueryScopesAndFilters(t *testing.T) {
 	}
 	if args[len(args)-1] != 5 {
 		t.Fatalf("last arg = %v, want limit 5", args[len(args)-1])
+	}
+}
+
+func TestBuildSearchCasesQueryStripsSpacesFromThaiQuery(t *testing.T) {
+	_, args := buildSearchCasesQuery([]int64{3}, "หุ่นยนต์ ไม่ ทำงาน", "", "", 5)
+	if args[1] != "%หุ่นยนต์ไม่ทำงาน%" {
+		t.Fatalf("args[1] = %v, want spaces stripped so it matches unspaced Thai stored text", args[1])
+	}
+	if args[2] != "%หุ่นยนต์ไม่ทำงาน%" {
+		t.Fatalf("args[2] = %v, want same stripped pattern for problem_text", args[2])
+	}
+}
+
+func TestBuildCasesByIDsQueryScopesAndJoinsSymptom(t *testing.T) {
+	query, args := buildCasesByIDsQuery([]int64{3, 4}, []int64{11, 12, 13})
+	if !strings.Contains(query, "r.company_id IN (?,?)") {
+		t.Fatalf("query = %q, want coverage scope", query)
+	}
+	if !strings.Contains(query, "r.id IN (?,?,?)") {
+		t.Fatalf("query = %q, want id set filter", query)
+	}
+	if !strings.Contains(query, "LEFT JOIN report_classification rc ON rc.report_id = r.id AND rc.company_id = r.company_id") {
+		t.Fatalf("query = %q, want classification join scoped by company", query)
+	}
+	if len(args) != 5 {
+		t.Fatalf("args = %v, want 2 coverage + 3 ids", args)
+	}
+}
+
+func TestBuildCasesByIDsQueryEmptyInputs(t *testing.T) {
+	if q, _ := buildCasesByIDsQuery(nil, []int64{1}); q != "" {
+		t.Fatalf("query = %q, want empty when coverage is empty", q)
+	}
+	if q, _ := buildCasesByIDsQuery([]int64{3}, nil); q != "" {
+		t.Fatalf("query = %q, want empty when id set is empty", q)
 	}
 }
 
@@ -226,6 +264,45 @@ func TestCaseIDByCodeEmptyCodeReturnsError(t *testing.T) {
 	_, err := repo.CaseIDByCode(context.Background(), []int64{3}, "")
 	if err == nil {
 		t.Fatal("err = nil, want error for empty code")
+	}
+}
+
+func TestBuildCaseByIDQueryScopesToCoverageAndExcludesCoded(t *testing.T) {
+	query, args := buildCaseByIDQuery([]int64{3, 4}, 45)
+	if !strings.Contains(query, "company_id IN (?,?)") {
+		t.Fatalf("query = %q, want company_id IN (?,?)", query)
+	}
+	if !strings.Contains(query, "r.code IS NULL") {
+		t.Fatalf("query = %q, want r.code IS NULL", query)
+	}
+	if len(args) != 3 {
+		t.Fatalf("args = %v, want 3 args (id + 2 coverage)", args)
+	}
+	if args[0] != int64(45) {
+		t.Fatalf("args[0] = %v, want id 45", args[0])
+	}
+	if args[1] != int64(3) || args[2] != int64(4) {
+		t.Fatalf("args[1:] = %v, want [3 4]", args[1:])
+	}
+}
+
+func TestCaseByIDEmptyCoverageReturnsErrorNoQuery(t *testing.T) {
+	q := &fakeCasesQuerier{}
+	repo := New(q)
+
+	_, err := repo.CaseByID(context.Background(), nil, 45)
+	if err == nil {
+		t.Fatal("err = nil, want error for empty coverage")
+	}
+}
+
+func TestCaseByIDNonPositiveIDReturnsError(t *testing.T) {
+	q := &fakeCasesQuerier{}
+	repo := New(q)
+
+	_, err := repo.CaseByID(context.Background(), []int64{3}, 0)
+	if err == nil {
+		t.Fatal("err = nil, want error for non-positive id")
 	}
 }
 

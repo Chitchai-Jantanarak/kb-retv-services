@@ -24,6 +24,7 @@ type Options struct {
 	Chat           *handlers.ChatHandler
 	ChatStream     *handlers.ChatStreamHandler
 	ChatConfirm    *handlers.ChatConfirmHandler
+	Search         *handlers.SearchHandler
 	Budget         appmiddleware.BudgetPolicy
 }
 
@@ -72,6 +73,10 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 
 	if opts.ChatConfirm != nil {
 		protectedV1.POST("/chat/confirm-action", opts.ChatConfirm.Create, appmiddleware.RequirePermission("ai:reply:create"))
+	}
+
+	if opts.Search != nil {
+		protectedV1.POST("/search", opts.Search.Create, appmiddleware.RequirePermission("ai:reply:create"))
 	}
 
 	if opts.Feedback != nil {

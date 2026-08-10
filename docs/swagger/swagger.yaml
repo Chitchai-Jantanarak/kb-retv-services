@@ -36,15 +36,84 @@ definitions:
       severity:
         type: string
     type: object
+  github_com_my_app_internal_application_dto.ChatCaseResult:
+    properties:
+      code:
+        type: string
+      id:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatConfirmRequest:
+    properties:
+      action_id:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatDebug:
+    properties:
+      cache_hit:
+        type: boolean
+      events:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatDebugEvent'
+        type: array
+      stage_timings_ms:
+        additionalProperties:
+          type: integer
+        type: object
+      tool:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatToolDebug'
+    type: object
+  github_com_my_app_internal_application_dto.ChatDebugEvent:
+    properties:
+      context:
+        additionalProperties:
+          type: string
+        type: object
+      duration_ms:
+        type: integer
+      error:
+        type: string
+      error_code:
+        type: string
+      label:
+        type: string
+      stage:
+        type: string
+      state:
+        type: string
+    type: object
   github_com_my_app_internal_application_dto.ChatMessage:
     properties:
+      attachments:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.AttachmentRef'
+        type: array
       content:
         type: string
       role:
         type: string
     type: object
+  github_com_my_app_internal_application_dto.ChatPendingAction:
+    properties:
+      id:
+        type: string
+      params:
+        additionalProperties:
+          type: string
+        type: object
+      summary:
+        type: string
+      tool_id:
+        type: string
+    type: object
   github_com_my_app_internal_application_dto.ChatRequest:
     properties:
+      conversation_id:
+        type: integer
       debug:
         type: boolean
       locale:
@@ -53,6 +122,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatMessage'
         type: array
+      mode:
+        type: string
     type: object
   github_com_my_app_internal_application_dto.ChatResponse:
     properties:
@@ -62,18 +133,35 @@ definitions:
         type: array
       case:
         $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatCaseDraft'
+      conversation_id:
+        type: integer
+      debug:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatDebug'
+      model:
+        type: string
+      pending_action:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatPendingAction'
       reply:
         type: string
+      search_results:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatCaseResult'
+        type: array
       sources:
         items:
           $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatSource'
         type: array
       stage_timings_ms:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       status:
+        type: string
+      tool_result:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatToolResult'
+      transcript:
+        type: string
+      vendor:
         type: string
     type: object
   github_com_my_app_internal_application_dto.ChatSource:
@@ -87,6 +175,106 @@ definitions:
       source:
         type: string
       title:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatStreamEvent:
+    properties:
+      activity:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatActivity'
+        type: array
+      code:
+        type: string
+      debug:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatDebug'
+      message:
+        type: string
+      model:
+        type: string
+      pending_action:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatPendingAction'
+      search_results:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatCaseResult'
+        type: array
+      sources:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatSource'
+        type: array
+      status:
+        type: string
+      text:
+        type: string
+      tool_result:
+        $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatToolResult'
+      transcript:
+        type: string
+      vendor:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatToolColumn:
+    properties:
+      key:
+        type: string
+      primary:
+        type: boolean
+      type:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatToolDebug:
+    properties:
+      called:
+        type: boolean
+      duration_ms:
+        type: integer
+      error:
+        type: string
+      error_code:
+        type: string
+      handler:
+        type: string
+      kind:
+        type: string
+      matched:
+        type: boolean
+      mutates:
+        type: boolean
+      outcome:
+        type: string
+      params:
+        additionalProperties:
+          type: string
+        type: object
+      permission_filtered:
+        type: boolean
+      required_permission:
+        type: string
+      retrieval_score:
+        type: number
+      router_confidence:
+        type: number
+      router_intent:
+        type: string
+      row_count:
+        type: integer
+      selection_score:
+        type: number
+      tool_id:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.ChatToolResult:
+    properties:
+      columns:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatToolColumn'
+        type: array
+      rows:
+        items:
+          additionalProperties:
+            type: string
+          type: object
+        type: array
+      tool_id:
         type: string
     type: object
   github_com_my_app_internal_application_dto.ReplyRequest:
@@ -160,7 +348,6 @@ definitions:
         type: array
       stage_timings_ms:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       suggestion:
@@ -173,6 +360,53 @@ definitions:
       score:
         type: number
       title:
+        type: string
+    type: object
+  github_com_my_app_internal_application_dto.SearchRequest:
+    properties:
+      limit:
+        type: integer
+      query:
+        type: string
+      types:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_my_app_internal_application_dto.SearchResponse:
+    properties:
+      graph_anchors:
+        type: integer
+      graph_used:
+        type: boolean
+      query:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.SearchResult'
+        type: array
+      vector_hits:
+        type: integer
+    type: object
+  github_com_my_app_internal_application_dto.SearchResult:
+    properties:
+      article_id:
+        type: string
+      code:
+        type: string
+      id:
+        type: string
+      report_id:
+        type: integer
+      score:
+        type: number
+      source:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      type:
         type: string
     type: object
   github_com_my_app_internal_transport_http_response.Envelope:
@@ -189,6 +423,52 @@ definitions:
         type: string
       message:
         type: string
+    type: object
+  scripts_swagger.aiAccuracyData:
+    properties:
+      human_confirmed:
+        example: 98
+        type: integer
+      problem_type_hits:
+        example: 90
+        type: integer
+      severity_hits:
+        example: 88
+        type: integer
+      subject_hits:
+        example: 95
+        type: integer
+      symptom_hits:
+        example: 80
+        type: integer
+      total_classified:
+        example: 120
+        type: integer
+    type: object
+  scripts_swagger.aiAccuracyResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.aiAccuracyData'
+    type: object
+  scripts_swagger.answerRateData:
+    properties:
+      high_confidence:
+        example: 170
+        type: integer
+      latency_avg_ms:
+        example: 850
+        type: integer
+      threshold:
+        example: 0.85
+        type: number
+      total_actions:
+        example: 200
+        type: integer
+    type: object
+  scripts_swagger.answerRateResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.answerRateData'
     type: object
   scripts_swagger.emailInboundWebhookRequest:
     properties:
@@ -227,6 +507,39 @@ definitions:
         - escalated
         example: accepted
         type: string
+    type: object
+  scripts_swagger.knowledgeGapRow:
+    properties:
+      first_seen:
+        example: "2026-07-01T09:00:00Z"
+        type: string
+      id:
+        example: 7
+        type: integer
+      last_seen:
+        example: "2026-08-01T09:00:00Z"
+        type: string
+      occurrence_count:
+        example: 14
+        type: integer
+      query_text:
+        example: how to reset password
+        type: string
+      status:
+        example: open
+        type: string
+    type: object
+  scripts_swagger.knowledgeGapsData:
+    properties:
+      gaps:
+        items:
+          $ref: '#/definitions/scripts_swagger.knowledgeGapRow'
+        type: array
+    type: object
+  scripts_swagger.knowledgeGapsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.knowledgeGapsData'
     type: object
   scripts_swagger.lineInboundEvent:
     properties:
@@ -280,6 +593,23 @@ definitions:
         items:
           $ref: '#/definitions/scripts_swagger.lineInboundEvent'
         type: array
+    type: object
+  scripts_swagger.reviewApproveData:
+    properties:
+      kind:
+        example: symptom_proposed
+        type: string
+      promotion_ref:
+        example: symptom_node:456
+        type: string
+      review_item_id:
+        example: 123
+        type: integer
+    type: object
+  scripts_swagger.reviewApproveResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.reviewApproveData'
     type: object
   scripts_swagger.reviewQueueCallbackData:
     properties:
@@ -401,6 +731,52 @@ paths:
       summary: Receive signed Laravel review queue callback
       tags:
       - laravel-callbacks
+  /v1/admin/review-queue/{id}/approve:
+    post:
+      description: Promotes the review queue item into its target (symptom node, subject,
+        or KB article).
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Review item ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.reviewApproveResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Approve review queue item
+      tags:
+      - review-queue
   /v1/admin/review-queue/{id}/reject:
     post:
       consumes:
@@ -511,6 +887,104 @@ paths:
           schema:
             $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
       summary: Create chat turn
+      tags:
+      - chat
+  /v1/chat/confirm-action:
+    post:
+      consumes:
+      - application/json
+      description: Executes an action previously proposed via `pending_action` in
+        a /v1/chat or /v1/chat/stream response. `action_id` is the 32-character id
+        from that field.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Confirm request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatConfirmRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Confirm a pending chat action
+      tags:
+      - chat
+  /v1/chat/stream:
+    post:
+      consumes:
+      - application/json
+      description: 'Server-Sent Events variant of /v1/chat. Each frame is `event:
+        <type>\ndata: <json>`; types are start, token, tool, pending_action, done,
+        error. Same request body and stage set as /v1/chat.'
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Request budget in milliseconds; Go runs within this minus headroom,
+          falling back to server config when absent
+        in: header
+        name: X-Timeout-Ms
+        type: string
+      - description: Chat request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatStreamEvent'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Create chat turn (streaming)
       tags:
       - chat
   /v1/inbound/email:
@@ -675,4 +1149,188 @@ paths:
       summary: Record reply feedback
       tags:
       - reply
+  /v1/reports/ai-accuracy:
+    get:
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: RFC3339 timestamp, or an integer number of days ago
+        in: query
+        name: since
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.aiAccuracyResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: AI accuracy report
+      tags:
+      - reports
+  /v1/reports/answer-rate:
+    get:
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: RFC3339 timestamp, or an integer number of days ago
+        in: query
+        name: since
+        type: string
+      - description: Confidence threshold, default 0.85
+        in: query
+        name: threshold
+        type: number
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.answerRateResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Answer rate report
+      tags:
+      - reports
+  /v1/reports/knowledge-gaps:
+    get:
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Max rows, default 20
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.knowledgeGapsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Knowledge gaps report
+      tags:
+      - reports
+  /v1/search:
+    post:
+      consumes:
+      - application/json
+      description: 'Embeds the query, runs ANN search over the tenant''s vector collection,
+        and resolves hits back to reports. When types includes "kb" and Memgraph is
+        enabled, each hit''s classification symptom is used as a graph anchor to pull
+        related knowledge articles. graph_anchors reports how many distinct symptoms
+        were resolved: zero means the tenant has no classification rows, so the graph
+        leg cannot return anything.'
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Request budget in milliseconds; Go runs within this minus headroom,
+          falling back to server config when absent
+        in: header
+        name: X-Timeout-Ms
+        type: string
+      - description: Search request; types defaults to [report, kb], limit 1-50
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_my_app_internal_application_dto.SearchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_application_dto.SearchResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Semantic search over reports and knowledge articles
+      tags:
+      - search
 swagger: "2.0"

@@ -23,8 +23,9 @@ func buildSearchCasesQuery(coverage []int64, query, product, status string, limi
 
 	var filters strings.Builder
 	if query != "" {
-		filters.WriteString(" AND (r.title LIKE ? OR r.problem_detail LIKE ?)")
-		args = append(args, "%"+query+"%", "%"+query+"%")
+		stripped := "%" + strings.ReplaceAll(query, " ", "") + "%"
+		filters.WriteString(" AND (REPLACE(r.title, ' ', '') LIKE ? OR REPLACE(r.problem_text, ' ', '') LIKE ?)")
+		args = append(args, stripped, stripped)
 	}
 	if product != "" {
 		filters.WriteString(" AND EXISTS (SELECT 1 FROM nodes n WHERE n.id = r.product_node_id AND n.title LIKE ?)")

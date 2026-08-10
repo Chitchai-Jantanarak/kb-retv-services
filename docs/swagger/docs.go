@@ -115,6 +115,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/admin/review-queue/{id}/approve": {
+            "post": {
+                "description": "Promotes the review queue item into its target (symptom node, subject, or KB article).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "review-queue"
+                ],
+                "summary": "Approve review queue item",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Review item ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.reviewApproveResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/admin/review-queue/{id}/reject": {
             "post": {
                 "consumes": [
@@ -276,6 +343,150 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/chat/confirm-action": {
+            "post": {
+                "description": "Executes an action previously proposed via ` + "`" + `pending_action` + "`" + ` in a /v1/chat or /v1/chat/stream response. ` + "`" + `action_id` + "`" + ` is the 32-character id from that field.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Confirm a pending chat action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Confirm request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatConfirmRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/chat/stream": {
+            "post": {
+                "description": "Server-Sent Events variant of /v1/chat. Each frame is ` + "`" + `event: \u003ctype\u003e\\ndata: \u003cjson\u003e` + "`" + `; types are start, token, tool, pending_action, done, error. Same request body and stage set as /v1/chat.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Create chat turn (streaming)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent",
+                        "name": "X-Timeout-Ms",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Chat request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatStreamEvent"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
                         }
@@ -532,6 +743,279 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/v1/reports/ai-accuracy": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "AI accuracy report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 timestamp, or an integer number of days ago",
+                        "name": "since",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.aiAccuracyResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/answer-rate": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Answer rate report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 timestamp, or an integer number of days ago",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Confidence threshold, default 0.85",
+                        "name": "threshold",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.answerRateResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/knowledge-gaps": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Knowledge gaps report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max rows, default 20",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.knowledgeGapsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/search": {
+            "post": {
+                "description": "Embeds the query, runs ANN search over the tenant's vector collection, and resolves hits back to reports. When types includes \"kb\" and Memgraph is enabled, each hit's classification symptom is used as a graph anchor to pull related knowledge articles. graph_anchors reports how many distinct symptoms were resolved: zero means the tenant has no classification rows, so the graph leg cannot return anything.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "Semantic search over reports and knowledge articles",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Request budget in milliseconds; Go runs within this minus headroom, falling back to server config when absent",
+                        "name": "X-Timeout-Ms",
+                        "in": "header"
+                    },
+                    {
+                        "description": "Search request; types defaults to [report, kb], limit 1-50",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.SearchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_application_dto.SearchResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -590,9 +1074,92 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_my_app_internal_application_dto.ChatCaseResult": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatConfirmRequest": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatDebug": {
+            "type": "object",
+            "properties": {
+                "cache_hit": {
+                    "type": "boolean"
+                },
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatDebugEvent"
+                    }
+                },
+                "stage_timings_ms": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "tool": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatToolDebug"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatDebugEvent": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "stage": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_my_app_internal_application_dto.ChatMessage": {
             "type": "object",
             "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.AttachmentRef"
+                    }
+                },
                 "content": {
                     "type": "string"
                 },
@@ -601,9 +1168,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_my_app_internal_application_dto.ChatPendingAction": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "tool_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_my_app_internal_application_dto.ChatRequest": {
             "type": "object",
             "properties": {
+                "conversation_id": {
+                    "type": "integer"
+                },
                 "debug": {
                     "type": "boolean"
                 },
@@ -615,6 +1205,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatMessage"
                     }
+                },
+                "mode": {
+                    "type": "string"
                 }
             }
         },
@@ -630,8 +1223,26 @@ const docTemplate = `{
                 "case": {
                     "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatCaseDraft"
                 },
+                "conversation_id": {
+                    "type": "integer"
+                },
+                "debug": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatDebug"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "pending_action": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatPendingAction"
+                },
                 "reply": {
                     "type": "string"
+                },
+                "search_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatCaseResult"
+                    }
                 },
                 "sources": {
                     "type": "array",
@@ -642,11 +1253,19 @@ const docTemplate = `{
                 "stage_timings_ms": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "status": {
+                    "type": "string"
+                },
+                "tool_result": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatToolResult"
+                },
+                "transcript": {
+                    "type": "string"
+                },
+                "vendor": {
                     "type": "string"
                 }
             }
@@ -667,6 +1286,158 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatStreamEvent": {
+            "type": "object",
+            "properties": {
+                "activity": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatActivity"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "debug": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatDebug"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "pending_action": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatPendingAction"
+                },
+                "search_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatCaseResult"
+                    }
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatSource"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "tool_result": {
+                    "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatToolResult"
+                },
+                "transcript": {
+                    "type": "string"
+                },
+                "vendor": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatToolColumn": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "primary": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatToolDebug": {
+            "type": "object",
+            "properties": {
+                "called": {
+                    "type": "boolean"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "handler": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "matched": {
+                    "type": "boolean"
+                },
+                "mutates": {
+                    "type": "boolean"
+                },
+                "outcome": {
+                    "type": "string"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "permission_filtered": {
+                    "type": "boolean"
+                },
+                "required_permission": {
+                    "type": "string"
+                },
+                "retrieval_score": {
+                    "type": "number"
+                },
+                "router_confidence": {
+                    "type": "number"
+                },
+                "router_intent": {
+                    "type": "string"
+                },
+                "row_count": {
+                    "type": "integer"
+                },
+                "selection_score": {
+                    "type": "number"
+                },
+                "tool_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.ChatToolResult": {
+            "type": "object",
+            "properties": {
+                "columns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatToolColumn"
+                    }
+                },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "tool_id": {
                     "type": "string"
                 }
             }
@@ -770,8 +1541,7 @@ const docTemplate = `{
                 "stage_timings_ms": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "suggestion": {
@@ -789,6 +1559,78 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.SearchRequest": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "query": {
+                    "type": "string"
+                },
+                "types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.SearchResponse": {
+            "type": "object",
+            "properties": {
+                "graph_anchors": {
+                    "type": "integer"
+                },
+                "graph_used": {
+                    "type": "boolean"
+                },
+                "query": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_application_dto.SearchResult"
+                    }
+                },
+                "vector_hits": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_my_app_internal_application_dto.SearchResult": {
+            "type": "object",
+            "properties": {
+                "article_id": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "report_id": {
+                    "type": "integer"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -813,6 +1655,72 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "scripts_swagger.aiAccuracyData": {
+            "type": "object",
+            "properties": {
+                "human_confirmed": {
+                    "type": "integer",
+                    "example": 98
+                },
+                "problem_type_hits": {
+                    "type": "integer",
+                    "example": 90
+                },
+                "severity_hits": {
+                    "type": "integer",
+                    "example": 88
+                },
+                "subject_hits": {
+                    "type": "integer",
+                    "example": 95
+                },
+                "symptom_hits": {
+                    "type": "integer",
+                    "example": 80
+                },
+                "total_classified": {
+                    "type": "integer",
+                    "example": 120
+                }
+            }
+        },
+        "scripts_swagger.aiAccuracyResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.aiAccuracyData"
+                }
+            }
+        },
+        "scripts_swagger.answerRateData": {
+            "type": "object",
+            "properties": {
+                "high_confidence": {
+                    "type": "integer",
+                    "example": 170
+                },
+                "latency_avg_ms": {
+                    "type": "integer",
+                    "example": 850
+                },
+                "threshold": {
+                    "type": "number",
+                    "example": 0.85
+                },
+                "total_actions": {
+                    "type": "integer",
+                    "example": 200
+                }
+            }
+        },
+        "scripts_swagger.answerRateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.answerRateData"
                 }
             }
         },
@@ -865,6 +1773,54 @@ const docTemplate = `{
                         "escalated"
                     ],
                     "example": "accepted"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGapRow": {
+            "type": "object",
+            "properties": {
+                "first_seen": {
+                    "type": "string",
+                    "example": "2026-07-01T09:00:00Z"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "last_seen": {
+                    "type": "string",
+                    "example": "2026-08-01T09:00:00Z"
+                },
+                "occurrence_count": {
+                    "type": "integer",
+                    "example": 14
+                },
+                "query_text": {
+                    "type": "string",
+                    "example": "how to reset password"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "open"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGapsData": {
+            "type": "object",
+            "properties": {
+                "gaps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.knowledgeGapRow"
+                    }
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGapsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.knowledgeGapsData"
                 }
             }
         },
@@ -941,6 +1897,31 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/scripts_swagger.lineInboundEvent"
                     }
+                }
+            }
+        },
+        "scripts_swagger.reviewApproveData": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "example": "symptom_proposed"
+                },
+                "promotion_ref": {
+                    "type": "string",
+                    "example": "symptom_node:456"
+                },
+                "review_item_id": {
+                    "type": "integer",
+                    "example": 123
+                }
+            }
+        },
+        "scripts_swagger.reviewApproveResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.reviewApproveData"
                 }
             }
         },

@@ -23,6 +23,7 @@ type apiHandlers struct {
 	chat        *handlers.ChatHandler
 	chatStream  *handlers.ChatStreamHandler
 	chatConfirm *handlers.ChatConfirmHandler
+	search      *handlers.SearchHandler
 }
 
 func buildAPIHandlers(
@@ -45,6 +46,8 @@ func buildAPIHandlers(
 
 	endpoints.reports = handlers.NewReportsHandler(reportsRepo)
 	log.Info("reports endpoints configured")
+
+	endpoints.search = buildSearchHandler(cfg, reportsRepo, log)
 
 	inbound, err := buildInboundHandler(cfg, central, qdb, resolver, log)
 	if err != nil {

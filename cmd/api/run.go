@@ -56,6 +56,7 @@ func run() {
 		Chat:           endpoints.chat,
 		ChatStream:     endpoints.chatStream,
 		ChatConfirm:    endpoints.chatConfirm,
+		Search:         endpoints.search,
 		Budget: appmiddleware.BudgetPolicy{
 			Fallback: time.Duration(cfg.Server.RequestBudgetMs) * time.Millisecond,
 			Headroom: time.Duration(cfg.Server.DeadlineHeadroomMs) * time.Millisecond,
