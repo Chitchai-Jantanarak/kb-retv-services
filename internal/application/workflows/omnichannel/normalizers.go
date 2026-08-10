@@ -24,6 +24,11 @@ type Normalized struct {
 	AccountExternalID string
 	AccountCandidates []string
 	InReplyTo         string
+	References        []string
+	SenderName        string
+	AutoSubmitted     string
+	ListUnsubscribe   bool
+	Precedence        string
 }
 
 type Normalizer interface {

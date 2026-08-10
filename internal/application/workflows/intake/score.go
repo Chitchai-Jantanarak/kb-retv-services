@@ -6,101 +6,128 @@ import (
 )
 
 const (
-	ReasonRequiredComplete = "required_complete"
-	ReasonRequiredMissing  = "required_missing"
-	ReasonProductVerified  = "product_verified"
-	ReasonProductUnchecked = "product_unchecked"
-	ReasonProductUnknown   = "product_unknown"
-	ReasonContactGiven     = "contact_given"
-	ReasonContactMissing   = "contact_missing"
-	ReasonSeverityGiven    = "severity_given"
-	ReasonSenderNoReply    = "sender_no_reply"
-	ReasonLinkHeavy        = "link_heavy"
-	ReasonBodyThin         = "body_thin"
+	ReasonListUnsubscribe = "list_unsubscribe"
+	ReasonAutoSubmitted   = "auto_submitted"
+	ReasonSenderNoReply   = "sender_no_reply"
+	ReasonPrecedenceBulk  = "precedence_bulk"
+	ReasonReferencedCase  = "referenced_case"
+	ReasonThreadMatched   = "thread_matched"
+	ReasonHasAttachments  = "has_attachments"
+	ReasonSenderKnown     = "sender_known"
+	ReasonBodyThin        = "body_thin"
+	ReasonLinkHeavy       = "link_heavy"
 )
 
 const (
-	weightRequired = 40
-	weightProduct  = 20
-	weightContact  = 10
-	weightSeverity = 5
-	weightSender   = 15
-	weightBody     = 10
+	baseScore = 50
 
-	thinBodyChars   = 120
-	linkHeavyPerKB  = 4.0
-	scoreFloor      = 5
-	scoreCeiling    = 95
+	weightListUnsubscribe = -40
+	weightAutoSubmitted   = -35
+	weightSenderNoReply   = -18
+	weightPrecedenceBulk  = -6
+	weightReferencedCase  = 30
+	weightThreadMatched   = 30
+	weightHasAttachments  = 12
+	weightSenderKnown     = 12
+	weightBodyThin        = -8
+	weightLinkHeavy       = -8
+
+	thinBodyChars  = 120
+	linkHeavyPerKB = 4.0
+	scoreFloor     = 5
+	scoreCeiling   = 95
 )
 
 var (
-	noReplyPattern = regexp.MustCompile(`(?i)(^|[._-])(no-?reply|do-?not-?reply|newsletter|notifications?|mailer|bounce)([._-]|@)`)
+	noReplyPattern = regexp.MustCompile(`(?i)(^|[._-])(no-?reply|do-?not-?reply)([._-]|@)`)
 	linkPattern    = regexp.MustCompile(`(?i)https?://`)
 )
 
+// Signals carries the deterministic evidence Score grades on. Every field
+// here must be knowable before any LLM call: headers, thread state, and
+// coarse shape of the message, never model-extracted content.
 type Signals struct {
 	Sender          string
+	Subject         string
 	Body            string
-	ProductVerified bool
-	ProductChecked  bool
+	ListUnsubscribe bool
+	AutoSubmitted   string
+	Precedence      string
+	HasAttachments  bool
+	ReferencedCase  string
+	ThreadMatched   bool
+	SenderKnown     bool
 }
 
-// Score grades an intake on deterministic evidence only. It never returns 0 or 100:
-// absence of evidence is not proof, so the ends of the range stay reserved.
-func Score(spec Spec, fields map[string]string, missing []string, sig Signals) (int, []string) {
-	reasons := make([]string, 0, 6)
-	score := 0
+// Score grades an intake on deterministic evidence only, computable before
+// any LLM call. It never returns 0 or 100: absence of evidence is not
+// proof, so the ends of the range stay reserved. Precedence is a weak,
+// non-standard signal by design — it must never, on its own, be enough to
+// flip a message from looking genuine to looking bulk.
+func Score(sig Signals) (int, []string) {
+	reasons := make([]string, 0, 8)
+	score := baseScore
 
-	if len(missing) == 0 {
-		score += weightRequired
-		reasons = append(reasons, ReasonRequiredComplete)
-	} else {
-		required := len(spec.Normalized().Required)
-		if required > 0 {
-			score += (weightRequired * (required - len(missing))) / required
-		}
-		reasons = append(reasons, ReasonRequiredMissing)
+	if sig.ListUnsubscribe {
+		score += weightListUnsubscribe
+		reasons = append(reasons, ReasonListUnsubscribe)
 	}
 
-	switch {
-	case !sig.ProductChecked:
-		reasons = append(reasons, ReasonProductUnchecked)
-	case sig.ProductVerified:
-		score += weightProduct
-		reasons = append(reasons, ReasonProductVerified)
-	default:
-		reasons = append(reasons, ReasonProductUnknown)
-	}
-
-	if strings.TrimSpace(fields[FieldContact]) != "" {
-		score += weightContact
-		reasons = append(reasons, ReasonContactGiven)
-	} else {
-		reasons = append(reasons, ReasonContactMissing)
-	}
-
-	if strings.TrimSpace(fields[FieldSeverity]) != "" {
-		score += weightSeverity
-		reasons = append(reasons, ReasonSeverityGiven)
+	if autoSubmitted := strings.ToLower(strings.TrimSpace(sig.AutoSubmitted)); autoSubmitted != "" && autoSubmitted != "no" {
+		score += weightAutoSubmitted
+		reasons = append(reasons, ReasonAutoSubmitted)
 	}
 
 	if noReplyPattern.MatchString(sig.Sender) {
+		score += weightSenderNoReply
 		reasons = append(reasons, ReasonSenderNoReply)
-	} else {
-		score += weightSender
+	}
+
+	if isBulkPrecedence(sig.Precedence) {
+		score += weightPrecedenceBulk
+		reasons = append(reasons, ReasonPrecedenceBulk)
+	}
+
+	if strings.TrimSpace(sig.ReferencedCase) != "" {
+		score += weightReferencedCase
+		reasons = append(reasons, ReasonReferencedCase)
+	}
+
+	if sig.ThreadMatched {
+		score += weightThreadMatched
+		reasons = append(reasons, ReasonThreadMatched)
+	}
+
+	if sig.HasAttachments {
+		score += weightHasAttachments
+		reasons = append(reasons, ReasonHasAttachments)
+	}
+
+	if sig.SenderKnown {
+		score += weightSenderKnown
+		reasons = append(reasons, ReasonSenderKnown)
 	}
 
 	body := strings.TrimSpace(sig.Body)
 	switch {
 	case len(body) < thinBodyChars:
+		score += weightBodyThin
 		reasons = append(reasons, ReasonBodyThin)
 	case linksPerKB(body) >= linkHeavyPerKB:
+		score += weightLinkHeavy
 		reasons = append(reasons, ReasonLinkHeavy)
-	default:
-		score += weightBody
 	}
 
 	return clampScore(score), reasons
+}
+
+func isBulkPrecedence(precedence string) bool {
+	switch strings.ToLower(strings.TrimSpace(precedence)) {
+	case "bulk", "junk", "list":
+		return true
+	default:
+		return false
+	}
 }
 
 func linksPerKB(body string) float64 {

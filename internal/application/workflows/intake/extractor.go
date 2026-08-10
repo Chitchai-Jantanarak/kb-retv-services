@@ -16,12 +16,33 @@ const (
 	maxProductHints = 30
 )
 
+const FieldClassification = "classification"
+
+var skipModelBelowScore = 20
+
+const (
+	ClassificationNewIssue      = "new_issue"
+	ClassificationFollowUp      = "follow_up"
+	ClassificationStatusQuery   = "status_query"
+	ClassificationNotActionable = "not_actionable"
+	ClassificationUnclear       = "unclear"
+)
+
+var validClassifications = map[string]struct{}{
+	ClassificationNewIssue:      {},
+	ClassificationFollowUp:      {},
+	ClassificationStatusQuery:   {},
+	ClassificationNotActionable: {},
+	ClassificationUnclear:       {},
+}
+
 type Result struct {
-	Fields  map[string]string
-	Missing []string
-	Status  string
-	Score   int
-	Reasons []string
+	Fields         map[string]string
+	Missing        []string
+	Status         string
+	Score          int
+	Reasons        []string
+	Classification string
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -73,9 +94,19 @@ func NewExtractor(registry *prompts.Registry, resolve ProviderForCompany, opts .
 	return e, nil
 }
 
-func (e *Extractor) Extract(ctx context.Context, companyID int64, sender, subject, body string) (Result, error) {
+func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (Result, error) {
 	if companyID <= 0 {
 		return Result{}, fmt.Errorf("intake: company_id must be positive")
+	}
+
+	score, reasons := Score(sig)
+	if score <= skipModelBelowScore {
+		return Result{
+			Status:         StatusUnknown,
+			Score:          score,
+			Reasons:        reasons,
+			Classification: ClassificationNotActionable,
+		}, nil
 	}
 
 	spec := DefaultSpec()
@@ -87,7 +118,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sender, subjec
 		spec = resolved.Normalized()
 	}
 
-	message := composeMessage(subject, body)
+	message := composeMessage(sig.Subject, sig.Body)
 	if message == "" {
 		return emptyResult(spec), nil
 	}
@@ -119,16 +150,13 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sender, subjec
 		return Result{}, err
 	}
 
-	fields := parseFields(completion.Text, spec)
+	decoded := decodeJSONObject(completion.Text)
+	fields := parseFields(decoded, spec)
+	classification := parseClassification(decoded)
 
 	productChecked := len(products) > 0
-	productVerified := false
-	if productChecked {
-		if unknownProduct(fields[FieldProduct], products) {
-			delete(fields, FieldProduct)
-		} else {
-			productVerified = strings.TrimSpace(fields[FieldProduct]) != ""
-		}
+	if productChecked && unknownProduct(fields[FieldProduct], products) {
+		delete(fields, FieldProduct)
 	}
 
 	missing := spec.Missing(fields)
@@ -137,20 +165,13 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sender, subjec
 		status = StatusUnverified
 	}
 
-	sig := Signals{
-		Sender:          sender,
-		Body:            body,
-		ProductChecked:  productChecked,
-		ProductVerified: productVerified,
-	}
-	score, reasons := Score(spec, fields, missing, sig)
-
 	return Result{
-		Fields:  fields,
-		Missing: missing,
-		Status:  status,
-		Score:   score,
-		Reasons: reasons,
+		Fields:         fields,
+		Missing:        missing,
+		Status:         status,
+		Score:          score,
+		Reasons:        reasons,
+		Classification: classification,
 	}, nil
 }
 
@@ -210,7 +231,7 @@ func productsSection(products []string) string {
 		". Use one of them verbatim when the message names a product; leave product empty when none of them matches."
 }
 
-func parseFields(raw string, spec Spec) map[string]string {
+func decodeJSONObject(raw string) map[string]any {
 	txt := strings.TrimSpace(raw)
 	txt = strings.TrimPrefix(txt, "```json")
 	txt = strings.TrimPrefix(txt, "```")
@@ -218,16 +239,21 @@ func parseFields(raw string, spec Spec) map[string]string {
 	txt = strings.TrimSpace(txt)
 
 	decoded := map[string]any{}
-	if err := json.Unmarshal([]byte(txt), &decoded); err != nil {
-		start, end := strings.Index(txt, "{"), strings.LastIndex(txt, "}")
-		if start < 0 || end <= start {
-			return map[string]string{}
-		}
-		if err := json.Unmarshal([]byte(txt[start:end+1]), &decoded); err != nil {
-			return map[string]string{}
-		}
+	if err := json.Unmarshal([]byte(txt), &decoded); err == nil {
+		return decoded
 	}
 
+	start, end := strings.Index(txt, "{"), strings.LastIndex(txt, "}")
+	if start < 0 || end <= start {
+		return map[string]any{}
+	}
+	if err := json.Unmarshal([]byte(txt[start:end+1]), &decoded); err != nil {
+		return map[string]any{}
+	}
+	return decoded
+}
+
+func parseFields(decoded map[string]any, spec Spec) map[string]string {
 	fields := make(map[string]string, len(decoded))
 	for _, key := range spec.Fields() {
 		value, ok := decoded[key]
@@ -245,6 +271,22 @@ func parseFields(raw string, spec Spec) map[string]string {
 		fields[key] = text
 	}
 	return fields
+}
+
+func parseClassification(decoded map[string]any) string {
+	value, ok := decoded[FieldClassification]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	text = strings.ToLower(strings.TrimSpace(text))
+	if _, valid := validClassifications[text]; !valid {
+		return ""
+	}
+	return text
 }
 
 func unknownProduct(product string, products []string) bool {

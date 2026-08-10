@@ -27,7 +27,7 @@ func TestServiceAssessPersistsResult(t *testing.T) {
 	sink := &fakeSink{}
 	svc := intake.NewService(newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}})), sink, nil)
 
-	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "Robot stuck", "will not move")
+	got, err := svc.Assess(context.Background(), 7, 42, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "will not move"})
 	if err != nil {
 		t.Fatalf("Assess() error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestServiceAssessReturnsErrorWhenExtractionFails(t *testing.T) {
 	sink := &fakeSink{}
 	svc := intake.NewService(newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}})), sink, nil)
 
-	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "s", "b")
+	got, err := svc.Assess(context.Background(), 7, 42, intake.Signals{Sender: "cust@x.com", Subject: "s", Body: "b"})
 	if err == nil {
 		t.Fatal("Assess() error = nil, want extraction error")
 	}
@@ -61,7 +61,7 @@ func TestServiceAssessReturnsErrorWhenExtractionFails(t *testing.T) {
 
 func TestServiceAssessNilServiceIsUnknown(t *testing.T) {
 	var svc *intake.Service
-	got, err := svc.Assess(context.Background(), 7, 42, "cust@x.com", "s", "b")
+	got, err := svc.Assess(context.Background(), 7, 42, intake.Signals{Sender: "cust@x.com", Subject: "s", Body: "b"})
 	if err != nil {
 		t.Fatalf("Assess() error = %v", err)
 	}

@@ -24,8 +24,17 @@ type intakeAssessor struct {
 	svc *intake.Service
 }
 
-func (a intakeAssessor) Assess(ctx context.Context, companyID, conversationID int64, sender, subject, body string) (omnichannel.Completeness, error) {
-	res, err := a.svc.Assess(ctx, companyID, conversationID, sender, subject, body)
+func (a intakeAssessor) Assess(ctx context.Context, companyID, conversationID int64, sig omnichannel.IntakeSignals) (omnichannel.Completeness, error) {
+	res, err := a.svc.Assess(ctx, companyID, conversationID, intake.Signals{
+		Sender:          sig.Sender,
+		Subject:         sig.Subject,
+		Body:            sig.Body,
+		ListUnsubscribe: sig.ListUnsubscribe,
+		AutoSubmitted:   sig.AutoSubmitted,
+		Precedence:      sig.Precedence,
+		ReferencedCase:  sig.ReferencedCase,
+		ThreadMatched:   sig.ThreadMatched,
+	})
 	if err != nil {
 		return omnichannel.Completeness{}, err
 	}

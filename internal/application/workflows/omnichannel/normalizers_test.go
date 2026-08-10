@@ -159,6 +159,30 @@ func TestEmailNormalizerCarriesThreadAndRecipients(t *testing.T) {
 	}
 }
 
+func TestEmailNormalizerCarriesExtendedSignals(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","in_reply_to":"<m-1@mail>","references":["<m-0@mail>"," <m-1@mail> "],"from":"alice@example.com","from_name":" Alice A. ","to":"support@site.com","subject":"re: help","body":"any progress?","auto_submitted":"no","list_unsubscribe":true,"precedence":"bulk"}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	wantRefs := []string{"<m-0@mail>", "<m-1@mail>"}
+	if !reflect.DeepEqual(got.References, wantRefs) {
+		t.Fatalf("references = %v, want %v", got.References, wantRefs)
+	}
+	if got.SenderName != "Alice A." {
+		t.Fatalf("sender_name = %q", got.SenderName)
+	}
+	if got.AutoSubmitted != "no" {
+		t.Fatalf("auto_submitted = %q", got.AutoSubmitted)
+	}
+	if !got.ListUnsubscribe {
+		t.Fatalf("list_unsubscribe = false, want true")
+	}
+	if got.Precedence != "bulk" {
+		t.Fatalf("precedence = %q", got.Precedence)
+	}
+}
+
 func TestRegistryRejectsDuplicateChannel(t *testing.T) {
 	_, err := NewNormalizerRegistry(LineNormalizer{}, LineNormalizer{})
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {

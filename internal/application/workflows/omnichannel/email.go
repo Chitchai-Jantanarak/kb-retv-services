@@ -9,15 +9,29 @@ import (
 	"github.com/my/app/internal/application/dto"
 )
 
+type emailAttachment struct {
+	Filename   string `json:"filename"`
+	MIMEType   string `json:"mime_type"`
+	SizeBytes  int    `json:"size_bytes"`
+	ContentB64 string `json:"content_b64"`
+}
+
 type emailPayload struct {
-	MessageID  string   `json:"message_id"`
-	InReplyTo  string   `json:"in_reply_to"`
-	From       string   `json:"from"`
-	To         string   `json:"to"`
-	Recipients []string `json:"recipients"`
-	Subject    string   `json:"subject"`
-	Body       string   `json:"body"`
-	BodyHTML   string   `json:"body_html"`
+	MessageID       string            `json:"message_id"`
+	InReplyTo       string            `json:"in_reply_to"`
+	From            string            `json:"from"`
+	To              string            `json:"to"`
+	Recipients      []string          `json:"recipients"`
+	Subject         string            `json:"subject"`
+	Body            string            `json:"body"`
+	BodyHTML        string            `json:"body_html"`
+	References      []string          `json:"references"`
+	FromName        string            `json:"from_name"`
+	Date            string            `json:"date"`
+	AutoSubmitted   string            `json:"auto_submitted"`
+	ListUnsubscribe bool              `json:"list_unsubscribe"`
+	Precedence      string            `json:"precedence"`
+	Attachments     []emailAttachment `json:"attachments"`
 }
 
 type EmailNormalizer struct{}
@@ -52,7 +66,23 @@ func (n EmailNormalizer) Normalize(raw []byte) (Normalized, error) {
 		AccountExternalID: extractEmailAddress(p.To),
 		AccountCandidates: emailCandidates(p),
 		InReplyTo:         strings.TrimSpace(p.InReplyTo),
+		References:        trimmedNonEmpty(p.References),
+		SenderName:        strings.TrimSpace(p.FromName),
+		AutoSubmitted:     strings.TrimSpace(p.AutoSubmitted),
+		ListUnsubscribe:   p.ListUnsubscribe,
+		Precedence:        strings.TrimSpace(p.Precedence),
 	}, nil
+}
+
+func trimmedNonEmpty(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // emailCandidates lists every address the mail was addressed to, primary first.

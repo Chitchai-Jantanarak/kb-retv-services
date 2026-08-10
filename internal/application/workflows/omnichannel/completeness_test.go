@@ -17,14 +17,16 @@ type stubAssessor struct {
 	convoID   int64
 	subject   string
 	body      string
+	sig       IntakeSignals
 }
 
-func (s *stubAssessor) Assess(_ context.Context, companyID, conversationID int64, sender, subject, body string) (Completeness, error) {
+func (s *stubAssessor) Assess(_ context.Context, companyID, conversationID int64, sig IntakeSignals) (Completeness, error) {
 	s.called = true
 	s.companyID = companyID
 	s.convoID = conversationID
-	s.subject = subject
-	s.body = body
+	s.subject = sig.Subject
+	s.body = sig.Body
+	s.sig = sig
 	return s.result, s.err
 }
 
@@ -90,6 +92,43 @@ func TestRunSkipsCompletenessForNonEmailChannels(t *testing.T) {
 	}
 	if res.IntakeStatus != "" {
 		t.Fatalf("IntakeStatus = %q, want empty", res.IntakeStatus)
+	}
+}
+
+func TestRunPassesIntakeSignalsToAssessor(t *testing.T) {
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete"}}
+	msgs := &threadAwareMessages{byExternalID: map[string]threadHit{
+		"<m-1@x>": {convoID: 42, msgID: 1},
+	}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      msgs,
+		Completeness:  assessor,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.ExternalMessageID = "<m-2@x>"
+	norm.Request.Subject = "Re: REP-4106 progress?"
+	norm.InReplyTo = "<m-1@x>"
+	norm.ListUnsubscribe = true
+
+	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !assessor.called {
+		t.Fatal("assessor must be called")
+	}
+	if !assessor.sig.ListUnsubscribe {
+		t.Fatal("ListUnsubscribe signal must reach the assessor")
+	}
+	if assessor.sig.ReferencedCase != "REP-4106" {
+		t.Fatalf("ReferencedCase = %q, want REP-4106", assessor.sig.ReferencedCase)
+	}
+	if !assessor.sig.ThreadMatched {
+		t.Fatal("ThreadMatched signal must reach the assessor")
 	}
 }
 

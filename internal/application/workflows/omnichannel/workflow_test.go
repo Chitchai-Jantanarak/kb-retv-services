@@ -3,6 +3,7 @@ package omnichannel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -517,5 +518,187 @@ func TestRunTicketEnqueueFailureDoesNotFailRun(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected an activity entry recording the enqueue failure, got %+v", act.entries)
+	}
+}
+
+type keyedAccounts struct {
+	byExternalID map[string]ChannelAccount
+}
+
+func (s *keyedAccounts) ByChannelAndExternalID(_ context.Context, _, externalID string) (ChannelAccount, error) {
+	if acc, ok := s.byExternalID[externalID]; ok {
+		return acc, nil
+	}
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for %s: %w", externalID, ErrAccountNotFound)
+}
+
+func TestRunEmailAccountCandidateFallbackResolves(t *testing.T) {
+	accounts := &keyedAccounts{byExternalID: map[string]ChannelAccount{
+		"support@site.com": {ID: 21, CompanyID: 9},
+	}}
+	wf, err := New(Config{
+		Accounts:      accounts,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.AccountExternalID = "unknown@elsewhere.com"
+	norm.AccountCandidates = []string{"unknown@elsewhere.com", "support@site.com"}
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.CompanyID != 9 {
+		t.Fatalf("CompanyID = %d, want 9 (resolved via CC candidate)", res.CompanyID)
+	}
+}
+
+func TestRunEmailUnresolvedPrimaryWithNoMatchingCandidateStillFails(t *testing.T) {
+	accounts := &keyedAccounts{byExternalID: map[string]ChannelAccount{
+		"support@site.com": {ID: 21, CompanyID: 9},
+	}}
+	wf, err := New(Config{
+		Accounts:      accounts,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.AccountExternalID = "unknown@elsewhere.com"
+	norm.AccountCandidates = []string{"unknown@elsewhere.com", "still-unknown@elsewhere.com"}
+
+	_, err = wf.Run(context.Background(), norm, []byte(`{}`))
+	if err == nil || !errors.Is(err, ErrAccountNotFound) {
+		t.Fatalf("err = %v, want ErrAccountNotFound when no candidate resolves", err)
+	}
+}
+
+type threadHit struct {
+	convoID, msgID int64
+}
+
+type threadAwareMessages struct {
+	byExternalID    map[string]threadHit
+	insertCalled    bool
+	insertedConvoID int64
+}
+
+func (m *threadAwareMessages) FindByExternalID(_ context.Context, externalID string) (int64, int64, bool, error) {
+	if hit, ok := m.byExternalID[externalID]; ok {
+		return hit.convoID, hit.msgID, true, nil
+	}
+	return 0, 0, false, nil
+}
+
+func (m *threadAwareMessages) InsertMessage(_ context.Context, msg StoredMessage) (int64, error) {
+	m.insertCalled = true
+	m.insertedConvoID = msg.ConversationID
+	return 555, nil
+}
+
+func TestRunEmailReplyReusesThreadConversation(t *testing.T) {
+	msgs := &threadAwareMessages{byExternalID: map[string]threadHit{
+		"<m-1@x>": {convoID: 42, msgID: 1},
+	}}
+	convos := &ctxCapturingConvos{id: 999, created: true}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.ExternalMessageID = "<m-2@x>"
+	norm.InReplyTo = "<m-1@x>"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ConversationID != 42 {
+		t.Fatalf("ConversationID = %d, want 42 (reused thread parent's conversation)", res.ConversationID)
+	}
+	if convos.gotCtx != nil {
+		t.Fatalf("threaded reply must NOT create a new conversation")
+	}
+	if msgs.insertedConvoID != 42 {
+		t.Fatalf("inserted message conversation_id = %d, want 42", msgs.insertedConvoID)
+	}
+}
+
+func TestRunEmailReferencesFallbackReusesThreadConversation(t *testing.T) {
+	msgs := &threadAwareMessages{byExternalID: map[string]threadHit{
+		"<m-0@x>": {convoID: 42, msgID: 1},
+	}}
+	convos := &ctxCapturingConvos{id: 999, created: true}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.ExternalMessageID = "<m-2@x>"
+	norm.InReplyTo = "<m-1@x>"
+	norm.References = []string{"<m-0@x>", "<m-1@x>"}
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ConversationID != 42 {
+		t.Fatalf("ConversationID = %d, want 42 (matched via references fallback)", res.ConversationID)
+	}
+	if convos.gotCtx != nil {
+		t.Fatalf("threaded reply must NOT create a new conversation")
+	}
+}
+
+func TestRunDetectsReferencedCaseFromSubject(t *testing.T) {
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "Re: REP-4106 progress?"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ReferencedCase != "REP-4106" {
+		t.Fatalf("ReferencedCase = %q, want REP-4106", res.ReferencedCase)
+	}
+}
+
+func TestRunReferencedCaseEmptyWhenNoRef(t *testing.T) {
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ReferencedCase != "" {
+		t.Fatalf("ReferencedCase = %q, want empty", res.ReferencedCase)
 	}
 }

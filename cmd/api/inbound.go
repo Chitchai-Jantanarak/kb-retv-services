@@ -73,6 +73,10 @@ func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Prom
 	if strings.TrimSpace(cfg.Line.ChannelAccessToken) == "" ||
 		strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" ||
 		strings.TrimSpace(cfg.Laravel.BaseURL) == "" {
+		log.Warn("line media promotion disabled: missing config",
+			zap.Bool("line_channel_access_token", strings.TrimSpace(cfg.Line.ChannelAccessToken) != ""),
+			zap.Bool("laravel_webhook_secret", strings.TrimSpace(cfg.Laravel.WebhookSecret) != ""),
+			zap.Bool("laravel_base_url", strings.TrimSpace(cfg.Laravel.BaseURL) != ""))
 		return nil
 	}
 	deliverer, err := mediastore.NewDeliverer(mediastore.DeliveryConfig{

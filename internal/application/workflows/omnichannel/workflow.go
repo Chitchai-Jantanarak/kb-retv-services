@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/tools"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
@@ -65,8 +66,19 @@ type Completeness struct {
 	Reasons []string
 }
 
+type IntakeSignals struct {
+	Sender          string
+	Subject         string
+	Body            string
+	ListUnsubscribe bool
+	AutoSubmitted   string
+	Precedence      string
+	ReferencedCase  string
+	ThreadMatched   bool
+}
+
 type CompletenessAssessor interface {
-	Assess(ctx context.Context, companyID, conversationID int64, sender, subject, body string) (Completeness, error)
+	Assess(ctx context.Context, companyID, conversationID int64, sig IntakeSignals) (Completeness, error)
 }
 
 type MediaPromoter interface {
@@ -128,6 +140,7 @@ type Result struct {
 	TicketEnqueued bool
 	IntakeStatus   string
 	IntakeMissing  []string
+	ReferencedCase string
 }
 
 func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, error) {
@@ -148,7 +161,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		return Result{}, err
 	}
 
-	account, err := w.accounts.ByChannelAndExternalID(ctx, req.Channel, accountKey)
+	account, err := w.resolveAccount(ctx, req.Channel, accountKey, n.AccountCandidates)
 	if err != nil {
 		return Result{}, fmt.Errorf("omnichannel: resolve channel account: %w", err)
 	}
@@ -168,15 +181,23 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		}
 	}
 
-	convoID, created, err := w.conversations.UpsertConversation(ctx, Conversation{
-		CompanyID:        account.CompanyID,
-		ChannelAccountID: account.ID,
-		ExternalCustomer: customer,
-		Subject:          req.Subject,
-		ForceNew:         req.Channel == "email",
-	})
-	if err != nil {
-		return Result{}, fmt.Errorf("omnichannel: upsert conversation: %w", err)
+	var convoID int64
+	var created bool
+	var threadMatched bool
+	if threadConvoID, threadFound := w.resolveThreadConversation(ctx, n); threadFound {
+		convoID = threadConvoID
+		threadMatched = true
+	} else {
+		convoID, created, err = w.conversations.UpsertConversation(ctx, Conversation{
+			CompanyID:        account.CompanyID,
+			ChannelAccountID: account.ID,
+			ExternalCustomer: customer,
+			Subject:          req.Subject,
+			ForceNew:         req.Channel == "email",
+		})
+		if err != nil {
+			return Result{}, fmt.Errorf("omnichannel: upsert conversation: %w", err)
+		}
 	}
 
 	msgID, err := w.messages.InsertMessage(ctx, StoredMessage{
@@ -232,10 +253,21 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		CompanyID:      account.CompanyID,
 		ConversationID: convoID,
 		MessageID:      msgID,
+		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
 	}
 
 	if w.completeness != nil && req.Channel == ChannelEmail {
-		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, customer, req.Subject, req.Body); aerr == nil {
+		sig := IntakeSignals{
+			Sender:          customer,
+			Subject:         req.Subject,
+			Body:            req.Body,
+			ListUnsubscribe: n.ListUnsubscribe,
+			AutoSubmitted:   n.AutoSubmitted,
+			Precedence:      n.Precedence,
+			ReferencedCase:  res.ReferencedCase,
+			ThreadMatched:   threadMatched,
+		}
+		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, sig); aerr == nil {
 			res.IntakeStatus = assessed.Status
 			res.IntakeMissing = assessed.Missing
 			w.recordIntakeAssessed(ctx, account.CompanyID, convoID, req.Subject, assessed)
@@ -313,4 +345,63 @@ func (w *Workflow) recordTicketEnqueueFailed(ctx context.Context, companyID, con
 			zap.Int64("conversation_id", convoID),
 			zap.Error(err))
 	}
+}
+
+func (w *Workflow) resolveAccount(ctx context.Context, channel, primaryKey string, candidates []string) (ChannelAccount, error) {
+	account, err := w.accounts.ByChannelAndExternalID(ctx, channel, primaryKey)
+	if err == nil || !errors.Is(err, ErrAccountNotFound) {
+		return account, err
+	}
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == primaryKey {
+			continue
+		}
+		if acc, cerr := w.accounts.ByChannelAndExternalID(ctx, channel, candidate); cerr == nil {
+			return acc, nil
+		}
+	}
+	return account, err
+}
+
+func (w *Workflow) resolveThreadConversation(ctx context.Context, n Normalized) (int64, bool) {
+	for _, ref := range threadReferences(n) {
+		convoID, _, found, err := w.messages.FindByExternalID(ctx, ref)
+		if err != nil {
+			w.log.Warn("omnichannel: thread lookup failed",
+				zap.String("reference", ref),
+				zap.Error(err))
+			continue
+		}
+		if found {
+			return convoID, true
+		}
+	}
+	return 0, false
+}
+
+func threadReferences(n Normalized) []string {
+	refs := make([]string, 0, len(n.References)+1)
+	if ref := strings.TrimSpace(n.InReplyTo); ref != "" {
+		refs = append(refs, ref)
+	}
+	for _, r := range n.References {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			refs = append(refs, r)
+		}
+	}
+	return refs
+}
+
+func detectReferencedCase(subject, body string) string {
+	text := strings.TrimSpace(subject)
+	if b := strings.TrimSpace(body); b != "" {
+		text = text + "\n" + b
+	}
+	ref, ok := tools.ParseCaseRef(text)
+	if !ok {
+		return ""
+	}
+	return ref.Code
 }

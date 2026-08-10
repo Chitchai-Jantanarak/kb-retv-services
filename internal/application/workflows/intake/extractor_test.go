@@ -16,6 +16,7 @@ type fakeProvider struct {
 	json   string
 	err    error
 	prompt ports.Prompt
+	calls  int
 }
 
 func (f *fakeProvider) Generate(context.Context, ports.Prompt) (ports.Completion, error) {
@@ -23,6 +24,7 @@ func (f *fakeProvider) Generate(context.Context, ports.Prompt) (ports.Completion
 }
 
 func (f *fakeProvider) GenerateJSON(_ context.Context, p ports.Prompt) (ports.Completion, error) {
+	f.calls++
 	f.prompt = p
 	if f.err != nil {
 		return ports.Completion{}, f.err
@@ -78,14 +80,14 @@ func TestExtractDisabledAIReturnsUnknownWithoutVendorCall(t *testing.T) {
 		t.Fatalf("NewExtractor() error = %v", err)
 	}
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Printer down", "It stops mid-job every morning.")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Printer down", Body: "It stops mid-job every morning."})
 	if err != nil {
 		t.Fatalf("Extract() error = %v, want nil", err)
 	}
 	if got.Status != intake.StatusUnknown {
 		t.Fatalf("Status = %q, want unknown", got.Status)
 	}
-	if provider.prompt.User != "" {
+	if provider.calls != 0 {
 		t.Fatal("provider was called while ai is disabled")
 	}
 }
@@ -94,7 +96,7 @@ func TestExtractMissingProductIsIncomplete(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"printer stops mid-job","product":"","contact":"a@b.com"}`}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Printer down", "It stops mid-job every morning.")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Printer down", Body: "It stops mid-job every morning."})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -116,7 +118,7 @@ func TestExtractAllRequiredPresentIsReady(t *testing.T) {
 	provider := &fakeProvider{json: "```json\n{\"problem_detail\":\"robot stuck at dock\",\"product\":\"Bella Bot\"}\n```"}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Robot stuck", "The robot will not leave the dock.")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock."})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -132,7 +134,7 @@ func TestExtractPromptCarriesMessageAndKnownProducts(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"x","product":"Bella Bot"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot", "Kettybot"}}))
 
-	if _, err := ext.Extract(context.Background(), 7, "cust@x.com", "Robot stuck", "will not leave the dock"); err != nil {
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "will not leave the dock"}); err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
 	if !strings.Contains(provider.prompt.User, "will not leave the dock") {
@@ -153,7 +155,7 @@ func TestExtractProductOutsideTaxonomyIsTreatedAsMissing(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"screen dead","product":"Toaster 9000"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "", "the screen is dead")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "", Body: "the screen is dead"})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -175,7 +177,7 @@ func TestExtractUsesPerCompanySpec(t *testing.T) {
 		Optional: []string{"contact"},
 	}}))
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "", "something broke")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "", Body: "something broke"})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -191,11 +193,11 @@ func TestExtractEmptyMessageSkipsTheLLM(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"never asked"}`}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "  ", "\n")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "  ", Body: "\n"})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	if provider.prompt.User != "" {
+	if provider.calls != 0 {
 		t.Fatal("provider must not be called for an empty message")
 	}
 	if got.Status != intake.StatusIncomplete {
@@ -210,7 +212,7 @@ func TestExtractUnparsableJSONYieldsIncompleteNotError(t *testing.T) {
 	provider := &fakeProvider{json: "sorry, I cannot help with that"}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "cust@x.com", "Subject", "body")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Subject", Body: "body"})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -226,7 +228,7 @@ func TestExtractProviderErrorPropagates(t *testing.T) {
 	provider := &fakeProvider{err: errors.New("boom")}
 	ext := newExtractor(t, provider)
 
-	if _, err := ext.Extract(context.Background(), 7, "cust@x.com", "s", "b"); err == nil {
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "s", Body: "b"}); err == nil {
 		t.Fatal("Extract() error = nil, want provider error")
 	}
 }
@@ -235,7 +237,7 @@ func TestExtractWithoutProductTaxonomyIsUnverified(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"repo has a long function","product":"some/repo"}`}
 	ext := newExtractor(t, provider)
 
-	got, err := ext.Extract(context.Background(), 7, "no-reply@example.com", "Suggestions", "Jules found improvements for your repos and listed them below in detail for review.")
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "no-reply@example.com", Subject: "Suggestions", Body: "Jules found improvements for your repos and listed them below in detail for review."})
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
@@ -245,8 +247,93 @@ func TestExtractWithoutProductTaxonomyIsUnverified(t *testing.T) {
 	if got.Score <= 0 || got.Score >= 100 {
 		t.Fatalf("Score = %d, want strictly between 0 and 100", got.Score)
 	}
-	if !containsReason(got.Reasons, intake.ReasonProductUnchecked) || !containsReason(got.Reasons, intake.ReasonSenderNoReply) {
+	if !containsReason(got.Reasons, intake.ReasonSenderNoReply) {
 		t.Fatalf("Reasons = %v", got.Reasons)
+	}
+}
+
+func TestExtractParsesClassificationFromModelOutput(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"robot stuck at dock","product":"Bella Bot"}`}
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock."})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != intake.ClassificationNewIssue {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNewIssue)
+	}
+}
+
+func TestExtractDropsUnrecognizedClassification(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"spam","problem_detail":"x"}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "s", Body: "b"})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != "" {
+		t.Fatalf("Classification = %q, want empty for an unrecognized value", got.Classification)
+	}
+}
+
+func TestExtractSkipsProviderForBulkMail(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"never asked"}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Subject:         "You might like these products",
+		Body:            "Click here to unsubscribe from our mailing list at any time.",
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+		Precedence:      "bulk",
+	})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 for obvious bulk mail", provider.calls)
+	}
+	if got.Classification != intake.ClassificationNotActionable {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNotActionable)
+	}
+	if got.Status != intake.StatusUnknown {
+		t.Fatalf("Status = %q, want unknown", got.Status)
+	}
+}
+
+func TestExtractPlainShortCustomerMailCallsProvider(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"stuck","product":"Bella Bot"}`}
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
+
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{
+		Sender:  "somchai@customer.co.th",
+		Subject: "Robot stuck",
+		Body:    "The robot will not leave the dock.",
+	}); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 for a plain customer mail", provider.calls)
+	}
+}
+
+func TestExtractReferencedCaseStillCallsProviderDespiteThinBody(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"ok"}`}
+	ext := newExtractor(t, provider)
+
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Subject:        "Re: REP-4106",
+		Body:           "ok",
+		ReferencedCase: "REP-4106",
+	}); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 when a case is referenced even with a thin body", provider.calls)
 	}
 }
 

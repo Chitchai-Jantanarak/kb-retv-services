@@ -12,14 +12,28 @@ import (
 )
 
 type EmailPayload struct {
-	MessageID  string   `json:"message_id"`
-	InReplyTo  string   `json:"in_reply_to"`
-	From       string   `json:"from"`
-	To         string   `json:"to"`
-	Recipients []string `json:"recipients"`
-	Subject    string   `json:"subject"`
-	Body       string   `json:"body"`
-	BodyHTML   string   `json:"body_html"`
+	MessageID       string       `json:"message_id"`
+	InReplyTo       string       `json:"in_reply_to"`
+	From            string       `json:"from"`
+	To              string       `json:"to"`
+	Recipients      []string     `json:"recipients"`
+	Subject         string       `json:"subject"`
+	Body            string       `json:"body"`
+	BodyHTML        string       `json:"body_html"`
+	References      []string     `json:"references"`
+	FromName        string       `json:"from_name"`
+	Date            string       `json:"date"`
+	AutoSubmitted   string       `json:"auto_submitted"`
+	ListUnsubscribe bool         `json:"list_unsubscribe"`
+	Precedence      string       `json:"precedence"`
+	Attachments     []Attachment `json:"attachments"`
+}
+
+type Attachment struct {
+	Filename   string `json:"filename"`
+	MIMEType   string `json:"mime_type"`
+	SizeBytes  int    `json:"size_bytes"`
+	ContentB64 string `json:"content_b64"`
 }
 
 type Forwarder struct {

@@ -21,24 +21,22 @@ func supportBody() string {
 }
 
 func TestScoreNeverSaturates(t *testing.T) {
-	spec := intake.DefaultSpec()
+	best, _ := intake.Score(intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Body:           supportBody(),
+		ReferencedCase: "REP-4106",
+		ThreadMatched:  true,
+		HasAttachments: true,
+		SenderKnown:    true,
+	})
 
-	best, _ := intake.Score(spec,
-		map[string]string{
-			intake.FieldProblemDetail: "wheels do not turn",
-			intake.FieldProduct:       "Bella Bot",
-			intake.FieldContact:       "081-555-0100",
-			intake.FieldSeverity:      "high",
-		},
-		nil,
-		intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody(), ProductChecked: true, ProductVerified: true},
-	)
-
-	worst, _ := intake.Score(spec,
-		map[string]string{},
-		[]string{intake.FieldProblemDetail, intake.FieldProduct},
-		intake.Signals{Sender: "no-reply@newsletter.com", Body: "hi"},
-	)
+	worst, _ := intake.Score(intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Body:            "hi",
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+		Precedence:      "bulk",
+	})
 
 	if best >= 100 || best <= 0 {
 		t.Fatalf("best score = %d, want strictly inside 0..100", best)
@@ -51,69 +49,111 @@ func TestScoreNeverSaturates(t *testing.T) {
 	}
 }
 
-func TestScoreLandsInTheMiddleForPartialEvidence(t *testing.T) {
-	spec := intake.DefaultSpec()
-
-	score, reasons := intake.Score(spec,
-		map[string]string{
-			intake.FieldProblemDetail: "not available",
-			intake.FieldProduct:       "pudu",
-		},
-		nil,
-		intake.Signals{Sender: "chitchai@gmail.com", Body: "pudu not available"},
-	)
-
-	if score <= 20 || score >= 80 {
-		t.Fatalf("score = %d, want a mid-range value for partial evidence", score)
+func TestScoreFlagsBulkMailBelowPlainCustomerMail(t *testing.T) {
+	bulk, reasons := intake.Score(intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Body:            strings.Repeat("Read more at https://example.com/a and https://example.com/b now. ", 6),
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+		Precedence:      "bulk",
+	})
+	if !hasReason(reasons, intake.ReasonListUnsubscribe) {
+		t.Fatalf("reasons = %v, want list_unsubscribe", reasons)
 	}
-	if !hasReason(reasons, intake.ReasonProductUnchecked) {
-		t.Fatalf("reasons = %v, want product_unchecked", reasons)
-	}
-	if !hasReason(reasons, intake.ReasonBodyThin) {
-		t.Fatalf("reasons = %v, want body_thin", reasons)
-	}
-}
-
-func TestScoreFlagsNewsletterShapedMail(t *testing.T) {
-	spec := intake.DefaultSpec()
-	body := strings.Repeat("Read more at https://example.com/a and https://example.com/b now. ", 6)
-
-	score, reasons := intake.Score(spec,
-		map[string]string{intake.FieldProblemDetail: "updates inside"},
-		[]string{intake.FieldProduct},
-		intake.Signals{Sender: "newsletter@mobbin.com", Body: body},
-	)
-
 	if !hasReason(reasons, intake.ReasonSenderNoReply) {
 		t.Fatalf("reasons = %v, want sender_no_reply", reasons)
 	}
-	if !hasReason(reasons, intake.ReasonRequiredMissing) {
-		t.Fatalf("reasons = %v, want required_missing", reasons)
-	}
 
-	genuine, _ := intake.Score(spec,
-		map[string]string{intake.FieldProblemDetail: "wheels stuck", intake.FieldProduct: "Bella Bot"},
-		nil,
-		intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody(), ProductChecked: true, ProductVerified: true},
-	)
-	if genuine <= score {
-		t.Fatalf("genuine support %d must outrank newsletter %d", genuine, score)
+	plain, _ := intake.Score(intake.Signals{
+		Sender: "somchai@customer.co.th",
+		Body:   "16.23 น. Robot No.1 หยุดทำงาน No.12",
+	})
+
+	if plain <= bulk {
+		t.Fatalf("plain short customer mail %d must outrank bulk mail %d", plain, bulk)
 	}
 }
 
-func TestScoreRewardsVerifiedProductOverUnchecked(t *testing.T) {
-	spec := intake.DefaultSpec()
-	fields := map[string]string{intake.FieldProblemDetail: "wheels stuck", intake.FieldProduct: "Bella Bot"}
-	sender := intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody()}
+func TestScoreImageOnlyMailIsNotPenalizedLikeBulk(t *testing.T) {
+	imageOnly, reasons := intake.Score(intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Body:           "",
+		HasAttachments: true,
+	})
+	if !hasReason(reasons, intake.ReasonHasAttachments) {
+		t.Fatalf("reasons = %v, want has_attachments", reasons)
+	}
 
-	unchecked, _ := intake.Score(spec, fields, nil, sender)
+	bulk, _ := intake.Score(intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Body:            "",
+		ListUnsubscribe: true,
+	})
 
-	verified := sender
-	verified.ProductChecked = true
-	verified.ProductVerified = true
-	checked, _ := intake.Score(spec, fields, nil, verified)
+	if imageOnly <= bulk {
+		t.Fatalf("image-only support mail %d must outrank bulk mail %d", imageOnly, bulk)
+	}
+}
 
-	if checked <= unchecked {
-		t.Fatalf("verified product %d must outrank unchecked %d", checked, unchecked)
+func TestScoreReferencedCaseOutranksNoReference(t *testing.T) {
+	withRef, reasons := intake.Score(intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Body:           supportBody(),
+		ReferencedCase: "REP-4106",
+	})
+	if !hasReason(reasons, intake.ReasonReferencedCase) {
+		t.Fatalf("reasons = %v, want referenced_case", reasons)
+	}
+
+	withoutRef, _ := intake.Score(intake.Signals{
+		Sender: "somchai@customer.co.th",
+		Body:   supportBody(),
+	})
+
+	if withRef <= withoutRef {
+		t.Fatalf("mail with a referenced case %d must outrank one without %d", withRef, withoutRef)
+	}
+}
+
+func TestScorePrecedenceAloneNeverFlipsTheVerdict(t *testing.T) {
+	plain := intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody()}
+	withPrecedence := plain
+	withPrecedence.Precedence = "bulk"
+
+	plainScore, _ := intake.Score(plain)
+	precedenceScore, reasons := intake.Score(withPrecedence)
+
+	if !hasReason(reasons, intake.ReasonPrecedenceBulk) {
+		t.Fatalf("reasons = %v, want precedence_bulk", reasons)
+	}
+	if precedenceScore >= plainScore {
+		t.Fatalf("precedence score %d must be lower than plain score %d", precedenceScore, plainScore)
+	}
+
+	bulk, _ := intake.Score(intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Body:            supportBody(),
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+	})
+	if precedenceScore <= bulk {
+		t.Fatalf("precedence alone must not sink a genuine mail %d to bulk-mail territory %d", precedenceScore, bulk)
+	}
+}
+
+func TestScoreRewardsThreadMatchAndSenderKnown(t *testing.T) {
+	unmatched, _ := intake.Score(intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody()})
+
+	matched, reasons := intake.Score(intake.Signals{
+		Sender:        "somchai@customer.co.th",
+		Body:          supportBody(),
+		ThreadMatched: true,
+		SenderKnown:   true,
+	})
+	if !hasReason(reasons, intake.ReasonThreadMatched) || !hasReason(reasons, intake.ReasonSenderKnown) {
+		t.Fatalf("reasons = %v, want thread_matched and sender_known", reasons)
+	}
+	if matched <= unmatched {
+		t.Fatalf("matched thread %d must outrank unmatched %d", matched, unmatched)
 	}
 }

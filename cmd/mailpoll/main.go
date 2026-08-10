@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/my/app/internal/mailpoll"
 )
+
+var maxAttachmentBytes = 8 * 1024 * 1024
 
 type config struct {
 	host, user, pass, mailbox string
@@ -134,11 +137,15 @@ func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, f
 		p.Subject = msg.Envelope.Subject
 		if len(msg.Envelope.From) > 0 {
 			p.From = address(msg.Envelope.From[0])
+			p.FromName = msg.Envelope.From[0].PersonalName
 		}
 		if len(msg.Envelope.To) > 0 {
 			p.To = address(msg.Envelope.To[0])
 		}
 		p.Recipients = recipients(msg.Envelope, fallbackTo)
+		if !msg.Envelope.Date.IsZero() {
+			p.Date = msg.Envelope.Date.Format(time.RFC3339)
+		}
 	}
 	if strings.TrimSpace(p.MessageID) == "" {
 		p.MessageID = fmt.Sprintf("<mailpoll-%d@%s>", uid, cfgHost(fallbackTo))
@@ -146,17 +153,40 @@ func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, f
 
 	if body := msg.GetBody(section); body != nil {
 		raw, _ := io.ReadAll(body)
-		p.Body, p.BodyHTML = extractBody(raw)
+		parsed := parseMessage(raw)
+		p.Body = parsed.Text
+		p.BodyHTML = parsed.HTML
+		p.Attachments = parsed.Attachments
+		p.AutoSubmitted = parsed.AutoSubmitted
+		p.ListUnsubscribe = parsed.ListUnsubscribe
+		p.Precedence = parsed.Precedence
 	}
 	return p, nil
 }
 
-func extractBody(raw []byte) (string, string) {
+type parsedMessage struct {
+	Text            string
+	HTML            string
+	Attachments     []mailpoll.Attachment
+	AutoSubmitted   string
+	ListUnsubscribe bool
+	Precedence      string
+}
+
+func parseMessage(raw []byte) parsedMessage {
 	mr, err := mail.CreateReader(bytes.NewReader(raw))
 	if err != nil {
-		return strings.TrimSpace(string(raw)), ""
+		return parsedMessage{Text: strings.TrimSpace(string(raw))}
 	}
-	var text, html string
+
+	result := parsedMessage{
+		AutoSubmitted:   strings.TrimSpace(mr.Header.Get("Auto-Submitted")),
+		ListUnsubscribe: strings.TrimSpace(mr.Header.Get("List-Unsubscribe")) != "",
+		Precedence:      strings.TrimSpace(mr.Header.Get("Precedence")),
+	}
+
+	attachmentBytes := 0
+	attachmentsCapped := false
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
@@ -165,19 +195,38 @@ func extractBody(raw []byte) (string, string) {
 		if err != nil {
 			break
 		}
-		h, ok := part.Header.(*mail.InlineHeader)
-		if !ok {
-			continue
-		}
-		b, _ := io.ReadAll(part.Body)
-		ct, _, _ := h.ContentType()
-		if strings.Contains(ct, "html") {
-			html = string(b)
-		} else {
-			text = string(b)
+		switch h := part.Header.(type) {
+		case *mail.InlineHeader:
+			b, _ := io.ReadAll(part.Body)
+			ct, _, _ := h.ContentType()
+			if strings.Contains(ct, "html") {
+				result.HTML = string(b)
+			} else {
+				result.Text = string(b)
+			}
+		case *mail.AttachmentHeader:
+			if attachmentsCapped {
+				continue
+			}
+			b, _ := io.ReadAll(part.Body)
+			if attachmentBytes+len(b) > maxAttachmentBytes {
+				attachmentsCapped = true
+				continue
+			}
+			attachmentBytes += len(b)
+			filename, _ := h.Filename()
+			mimeType, _, _ := h.ContentType()
+			result.Attachments = append(result.Attachments, mailpoll.Attachment{
+				Filename:   filename,
+				MIMEType:   mimeType,
+				SizeBytes:  len(b),
+				ContentB64: base64.StdEncoding.EncodeToString(b),
+			})
 		}
 	}
-	return strings.TrimSpace(text), strings.TrimSpace(html)
+	result.Text = strings.TrimSpace(result.Text)
+	result.HTML = strings.TrimSpace(result.HTML)
+	return result
 }
 
 func markSeen(c *client.Client, uid uint32) {
