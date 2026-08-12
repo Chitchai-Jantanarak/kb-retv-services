@@ -11,6 +11,7 @@ import (
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	"github.com/my/app/internal/infra/tenant"
+	"github.com/my/app/internal/shared/ctxkey"
 )
 
 type Repository struct {
@@ -82,9 +83,18 @@ func (r *Repository) FindByExternalID(ctx context.Context, externalID string) (i
 	if externalID == "" {
 		return 0, 0, false, nil
 	}
+	companyID, ok := ctxkey.CompanyID(ctx)
+	if !ok || companyID <= 0 {
+		return 0, 0, false, errors.New("messages: company_id missing from context")
+	}
 	var convoID, msgID int64
 	err := r.db.QueryRowContext(ctx, `
-SELECT conversation_id, id FROM messages WHERE external_id = ? ORDER BY id ASC LIMIT 1`, externalID).Scan(&convoID, &msgID)
+SELECT m.conversation_id, m.id
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.external_id = ? AND c.company_id = ?
+ORDER BY m.id ASC
+LIMIT 1`, externalID, companyID).Scan(&convoID, &msgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, false, nil
 	}
@@ -149,10 +159,16 @@ func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64
 		return fmt.Errorf("conversations: encode intake_reasons: %w", err)
 	}
 
+	classification := sql.NullString{String: res.Classification, Valid: res.Classification != ""}
+	catalogRelated := sql.NullBool{Valid: res.CatalogRelated != nil}
+	if res.CatalogRelated != nil {
+		catalogRelated.Bool = *res.CatalogRelated
+	}
+
 	if _, err := r.db.ExecContext(ctx, `
 UPDATE conversations
-SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?
-WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), conversationID); err != nil {
+SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?, intake_classification = ?, intake_catalog_related = ?
+WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), classification, catalogRelated, conversationID); err != nil {
 		return fmt.Errorf("conversations: write completeness: %w", err)
 	}
 	return nil

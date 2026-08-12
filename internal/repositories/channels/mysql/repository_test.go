@@ -33,6 +33,17 @@ func (f *fakeQuerier) ExecContext(_ context.Context, query string, args ...any) 
 }
 func (f *fakeQuerier) BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error) { return nil, nil }
 
+func TestFindByExternalIDRequiresCompany(t *testing.T) {
+	q := &fakeQuerier{}
+	repo := New(q)
+	if _, _, _, err := repo.FindByExternalID(context.Background(), "ext-1"); err == nil {
+		t.Fatal("FindByExternalID must reject a context with no company_id")
+	}
+	if q.queryCalled {
+		t.Fatal("FindByExternalID must not query before the company scope is known")
+	}
+}
+
 func TestUpsertConversationStoresSubject(t *testing.T) {
 	q := &fakeQuerier{}
 	repo := New(q)

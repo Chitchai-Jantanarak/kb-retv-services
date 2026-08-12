@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/domain/ports"
 )
+
+var intakeMailDelimiter = regexp.MustCompile(`(?i)\[\s*(?:begin|end)\s+mail\b[^\]]*\]`)
 
 const (
 	maxMessageChars = 8000
@@ -17,6 +20,7 @@ const (
 )
 
 const FieldClassification = "classification"
+const FieldCatalogRelated = "catalog_related"
 
 var skipModelBelowScore = 20
 
@@ -43,6 +47,7 @@ type Result struct {
 	Score          int
 	Reasons        []string
 	Classification string
+	CatalogRelated *bool
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -144,6 +149,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	if err != nil {
 		return Result{}, fmt.Errorf("intake: render prompt: %w", err)
 	}
+	prompt.Images = sig.Images
 
 	completion, err := provider.GenerateJSON(ctx, prompt)
 	if err != nil {
@@ -153,6 +159,14 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	decoded := decodeJSONObject(completion.Text)
 	fields := parseFields(decoded, spec)
 	classification := parseClassification(decoded)
+	catalogRelated := parseCatalogRelated(decoded)
+	if !catalogRelated {
+		classification = ClassificationNotActionable
+	}
+	var catalogRelatedPtr *bool
+	if len(sig.Images) > 0 {
+		catalogRelatedPtr = &catalogRelated
+	}
 
 	productChecked := len(products) > 0
 	if productChecked && unknownProduct(fields[FieldProduct], products) {
@@ -172,6 +186,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		Score:          score,
 		Reasons:        reasons,
 		Classification: classification,
+		CatalogRelated: catalogRelatedPtr,
 	}, nil
 }
 
@@ -199,8 +214,8 @@ func emptyResult(spec Spec) Result {
 }
 
 func composeMessage(subject, body string) string {
-	subject = strings.TrimSpace(subject)
-	body = strings.TrimSpace(body)
+	subject = intakeMailDelimiter.ReplaceAllString(strings.TrimSpace(subject), " ")
+	body = intakeMailDelimiter.ReplaceAllString(strings.TrimSpace(body), " ")
 	var b strings.Builder
 	if subject != "" {
 		fmt.Fprintf(&b, "Subject: %s\n\n", subject)
@@ -287,6 +302,18 @@ func parseClassification(decoded map[string]any) string {
 		return ""
 	}
 	return text
+}
+
+func parseCatalogRelated(decoded map[string]any) bool {
+	value, ok := decoded[FieldCatalogRelated]
+	if !ok {
+		return true
+	}
+	related, ok := value.(bool)
+	if !ok {
+		return true
+	}
+	return related
 }
 
 func unknownProduct(product string, products []string) bool {
