@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -197,6 +198,210 @@ func TestStreamNonOKStatusReturnsError(t *testing.T) {
 	}
 	if _, err := c.Stream(context.Background(), ports.Prompt{User: "x"}); err == nil {
 		t.Fatal("Stream() err = nil, want error on non-200")
+	}
+}
+
+func TestGenerateSendsInlineImagePart(t *testing.T) {
+	pngBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	var captured generateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(generateResponse{
+			Candidates: []struct {
+				Content content `json:"content"`
+			}{
+				{Content: content{Parts: []part{{Text: "ok"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	_, err = c.Generate(context.Background(), ports.Prompt{
+		User: "describe this",
+		Images: []ports.PromptImage{
+			{MIMEType: "image/png", Data: pngBytes},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() err = %v", err)
+	}
+
+	if len(captured.Contents) != 1 {
+		t.Fatalf("Contents len = %d, want 1", len(captured.Contents))
+	}
+	parts := captured.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("Parts len = %d, want 2", len(parts))
+	}
+	if parts[0].Text != "describe this" {
+		t.Fatalf("Parts[0].Text = %q, want 'describe this' (text must stay first)", parts[0].Text)
+	}
+	if parts[1].InlineData == nil {
+		t.Fatal("Parts[1].InlineData = nil, want populated inlineData")
+	}
+	if parts[1].InlineData.MIMEType != "image/png" {
+		t.Fatalf("InlineData.MIMEType = %q, want image/png", parts[1].InlineData.MIMEType)
+	}
+	wantData := base64.StdEncoding.EncodeToString(pngBytes)
+	if parts[1].InlineData.Data != wantData {
+		t.Fatalf("InlineData.Data = %q, want %q", parts[1].InlineData.Data, wantData)
+	}
+}
+
+func TestGenerateNoImagesOmitsInlineData(t *testing.T) {
+	var rawBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(generateResponse{
+			Candidates: []struct {
+				Content content `json:"content"`
+			}{
+				{Content: content{Parts: []part{{Text: "ok"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	if _, err := c.Generate(context.Background(), ports.Prompt{User: "ping"}); err != nil {
+		t.Fatalf("Generate() err = %v", err)
+	}
+
+	if strings.Contains(string(rawBody), "inlineData") {
+		t.Fatalf("body = %s, want no inlineData key when Images is empty", rawBody)
+	}
+	want, _ := json.Marshal(generateRequest{
+		Contents: []content{{Role: "user", Parts: []part{{Text: "ping"}}}},
+	})
+	if string(rawBody) != string(want) {
+		t.Fatalf("body = %s, want %s", rawBody, want)
+	}
+}
+
+func TestGenerateSkipsOversizedImage(t *testing.T) {
+	orig := maxPromptImageBytes
+	maxPromptImageBytes = 4
+	defer func() { maxPromptImageBytes = orig }()
+
+	var captured generateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(generateResponse{
+			Candidates: []struct {
+				Content content `json:"content"`
+			}{
+				{Content: content{Parts: []part{{Text: "ok"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	out, err := c.Generate(context.Background(), ports.Prompt{
+		User: "ping",
+		Images: []ports.PromptImage{
+			{MIMEType: "image/png", Data: []byte{1, 2, 3, 4, 5}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() err = %v, want success (oversized image skipped, not fatal)", err)
+	}
+	if out.Text != "ok" {
+		t.Fatalf("Text = %q, want ok", out.Text)
+	}
+	if len(captured.Contents) != 1 || len(captured.Contents[0].Parts) != 1 {
+		t.Fatalf("Parts = %+v, want text-only single part", captured.Contents[0].Parts)
+	}
+}
+
+func TestGenerateCapsImagesAtMax(t *testing.T) {
+	orig := maxPromptImages
+	maxPromptImages = 2
+	defer func() { maxPromptImages = orig }()
+
+	var captured generateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(generateResponse{
+			Candidates: []struct {
+				Content content `json:"content"`
+			}{
+				{Content: content{Parts: []part{{Text: "ok"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	_, err = c.Generate(context.Background(), ports.Prompt{
+		User: "ping",
+		Images: []ports.PromptImage{
+			{MIMEType: "image/png", Data: []byte("one")},
+			{MIMEType: "image/png", Data: []byte("two")},
+			{MIMEType: "image/png", Data: []byte("three")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() err = %v", err)
+	}
+	parts := captured.Contents[0].Parts
+	if len(parts) != 3 {
+		t.Fatalf("Parts len = %d, want 3 (1 text + 2 images)", len(parts))
+	}
+	if parts[1].InlineData.Data != base64.StdEncoding.EncodeToString([]byte("one")) {
+		t.Fatalf("first image = %q, want 'one'", parts[1].InlineData.Data)
+	}
+	if parts[2].InlineData.Data != base64.StdEncoding.EncodeToString([]byte("two")) {
+		t.Fatalf("second image = %q, want 'two'", parts[2].InlineData.Data)
+	}
+}
+
+func TestGenerateSkipsNonImageMIMEType(t *testing.T) {
+	var captured generateRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &captured)
+		_ = json.NewEncoder(w).Encode(generateResponse{
+			Candidates: []struct {
+				Content content `json:"content"`
+			}{
+				{Content: content{Parts: []part{{Text: "ok"}}}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	_, err = c.Generate(context.Background(), ports.Prompt{
+		User: "ping",
+		Images: []ports.PromptImage{
+			{MIMEType: "application/pdf", Data: []byte("not an image")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() err = %v", err)
+	}
+	if len(captured.Contents[0].Parts) != 1 {
+		t.Fatalf("Parts = %+v, want text-only single part", captured.Contents[0].Parts)
 	}
 }
 

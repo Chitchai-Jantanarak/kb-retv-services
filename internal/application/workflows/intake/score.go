@@ -3,6 +3,8 @@ package intake
 import (
 	"regexp"
 	"strings"
+
+	"github.com/my/app/internal/domain/ports"
 )
 
 const (
@@ -57,6 +59,7 @@ type Signals struct {
 	ReferencedCase  string
 	ThreadMatched   bool
 	SenderKnown     bool
+	Images          []ports.PromptImage
 }
 
 // Score grades an intake on deterministic evidence only, computable before

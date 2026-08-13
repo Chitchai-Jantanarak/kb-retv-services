@@ -18,17 +18,26 @@ const (
 const ActionIntakeAssessed = "ai_intake_assessed"
 const ActionTicketEnqueueFailed = "ai_ticket_enqueue_failed"
 
+type InboundAttachment struct {
+	Filename string
+	MIMEType string
+	Data     []byte
+}
+
 type Normalized struct {
-	Request           dto.InboundMessageRequest
-	ExternalSender    string
-	AccountExternalID string
-	AccountCandidates []string
-	InReplyTo         string
-	References        []string
-	SenderName        string
-	AutoSubmitted     string
-	ListUnsubscribe   bool
-	Precedence        string
+	Request             dto.InboundMessageRequest
+	ExternalSender      string
+	AccountExternalID   string
+	AccountCandidates   []string
+	InReplyTo           string
+	References          []string
+	SenderName          string
+	AutoSubmitted       string
+	ListUnsubscribe     bool
+	Precedence          string
+	AttachmentCount     int
+	AttachmentMIMETypes []string
+	Attachments         []InboundAttachment
 }
 
 type Normalizer interface {

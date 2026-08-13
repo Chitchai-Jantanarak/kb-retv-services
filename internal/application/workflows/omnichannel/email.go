@@ -1,6 +1,7 @@
 package omnichannel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,16 +63,49 @@ func (n EmailNormalizer) Normalize(raw []byte) (Normalized, error) {
 			Subject:           strings.TrimSpace(p.Subject),
 			Body:              body,
 		},
-		ExternalSender:    sender,
-		AccountExternalID: extractEmailAddress(p.To),
-		AccountCandidates: emailCandidates(p),
-		InReplyTo:         strings.TrimSpace(p.InReplyTo),
-		References:        trimmedNonEmpty(p.References),
-		SenderName:        strings.TrimSpace(p.FromName),
-		AutoSubmitted:     strings.TrimSpace(p.AutoSubmitted),
-		ListUnsubscribe:   p.ListUnsubscribe,
-		Precedence:        strings.TrimSpace(p.Precedence),
+		ExternalSender:      sender,
+		AccountExternalID:   extractEmailAddress(p.To),
+		AccountCandidates:   emailCandidates(p),
+		InReplyTo:           strings.TrimSpace(p.InReplyTo),
+		References:          trimmedNonEmpty(p.References),
+		SenderName:          strings.TrimSpace(p.FromName),
+		AutoSubmitted:       strings.TrimSpace(p.AutoSubmitted),
+		ListUnsubscribe:     p.ListUnsubscribe,
+		Precedence:          strings.TrimSpace(p.Precedence),
+		AttachmentCount:     len(p.Attachments),
+		AttachmentMIMETypes: attachmentMIMETypes(p.Attachments),
+		Attachments:         decodeAttachments(p.Attachments),
 	}, nil
+}
+
+func decodeAttachments(attachments []emailAttachment) []InboundAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]InboundAttachment, 0, len(attachments))
+	for _, a := range attachments {
+		data, err := base64.StdEncoding.DecodeString(a.ContentB64)
+		if err != nil {
+			continue
+		}
+		out = append(out, InboundAttachment{
+			Filename: strings.TrimSpace(a.Filename),
+			MIMEType: strings.TrimSpace(a.MIMEType),
+			Data:     data,
+		})
+	}
+	return out
+}
+
+func attachmentMIMETypes(attachments []emailAttachment) []string {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(attachments))
+	for _, a := range attachments {
+		out = append(out, strings.TrimSpace(a.MIMEType))
+	}
+	return out
 }
 
 func trimmedNonEmpty(in []string) []string {

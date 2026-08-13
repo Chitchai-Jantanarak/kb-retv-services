@@ -164,12 +164,29 @@ func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64
 	if res.CatalogRelated != nil {
 		catalogRelated.Bool = *res.CatalogRelated
 	}
+	referencedCase := sql.NullString{String: res.ReferencedCase, Valid: res.ReferencedCase != ""}
 
 	if _, err := r.db.ExecContext(ctx, `
 UPDATE conversations
-SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?, intake_classification = ?, intake_catalog_related = ?
-WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), classification, catalogRelated, conversationID); err != nil {
+SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?, intake_classification = ?, intake_catalog_related = ?, intake_referenced_case = ?
+WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), classification, catalogRelated, referencedCase, conversationID); err != nil {
 		return fmt.Errorf("conversations: write completeness: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) WriteBackfill(ctx context.Context, conversationID int64, customerID, siteID sql.NullInt64, source string) error {
+	if conversationID <= 0 {
+		return errors.New("conversations: conversation_id required")
+	}
+
+	backfillSource := sql.NullString{String: source, Valid: source != ""}
+
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE conversations
+SET intake_customer_id = ?, intake_site_id = ?, intake_backfill_source = ?
+WHERE id = ?`, customerID, siteID, backfillSource, conversationID); err != nil {
+		return fmt.Errorf("conversations: write backfill: %w", err)
 	}
 	return nil
 }
@@ -199,5 +216,6 @@ var (
 	_ omnichannel.AccountResolver   = (*Repository)(nil)
 	_ omnichannel.ConversationStore = (*Repository)(nil)
 	_ omnichannel.MessageStore      = (*Repository)(nil)
+	_ omnichannel.BackfillWriter    = (*Repository)(nil)
 	_ intake.Sink                   = (*Repository)(nil)
 )

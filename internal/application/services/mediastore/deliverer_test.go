@@ -160,3 +160,55 @@ func TestPromoterFetchFailurePropagates(t *testing.T) {
 type errStub string
 
 func (e errStub) Error() string { return string(e) }
+
+func TestPromoteBytesDelivers(t *testing.T) {
+	var gotPayload Payload
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotPayload)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	d, err := NewDeliverer(DeliveryConfig{BaseURL: srv.URL, Secret: "shhh"})
+	if err != nil {
+		t.Fatalf("NewDeliverer: %v", err)
+	}
+	p := NewPromoter(&stubFetcher{}, d)
+
+	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", []byte("email-bytes"))
+	if err != nil {
+		t.Fatalf("PromoteBytes: %v", err)
+	}
+	if gotPayload.CompanyID != 7 || gotPayload.ConversationID != 100 || gotPayload.MessageID != 200 {
+		t.Fatalf("payload ids = %+v", gotPayload)
+	}
+	if gotPayload.ExternalMessageID != "msg-1#0" {
+		t.Fatalf("external_message_id = %q, want msg-1#0", gotPayload.ExternalMessageID)
+	}
+	if gotPayload.MIMEType != "image/png" {
+		t.Fatalf("mime = %q, want image/png", gotPayload.MIMEType)
+	}
+	wantB64 := base64.StdEncoding.EncodeToString([]byte("email-bytes"))
+	if gotPayload.DataBase64 != wantB64 {
+		t.Fatalf("data_base64 = %q, want %q", gotPayload.DataBase64, wantB64)
+	}
+}
+
+func TestPromoteBytesPropagatesDeliveryFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	d, err := NewDeliverer(DeliveryConfig{BaseURL: srv.URL, Secret: "shhh"})
+	if err != nil {
+		t.Fatalf("NewDeliverer: %v", err)
+	}
+	p := NewPromoter(&stubFetcher{}, d)
+
+	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", []byte("email-bytes"))
+	if err == nil || !strings.Contains(err.Error(), "status 500") {
+		t.Fatalf("err = %v, want status 500", err)
+	}
+}

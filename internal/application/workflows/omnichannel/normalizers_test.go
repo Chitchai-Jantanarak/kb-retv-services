@@ -183,6 +183,69 @@ func TestEmailNormalizerCarriesExtendedSignals(t *testing.T) {
 	}
 }
 
+func TestEmailNormalizerCarriesAttachmentSignals(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"a.jpg","mime_type":"image/jpeg","size_bytes":100,"content_b64":"aGVsbG8="},{"filename":"b.png","mime_type":"image/png","size_bytes":200,"content_b64":"d29ybGQ="}]}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if got.AttachmentCount != 2 {
+		t.Fatalf("AttachmentCount = %d, want 2", got.AttachmentCount)
+	}
+	wantMIME := []string{"image/jpeg", "image/png"}
+	if !reflect.DeepEqual(got.AttachmentMIMETypes, wantMIME) {
+		t.Fatalf("AttachmentMIMETypes = %v, want %v", got.AttachmentMIMETypes, wantMIME)
+	}
+}
+
+func TestEmailNormalizerDecodesAttachmentBytes(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"a.jpg","mime_type":"image/jpeg","size_bytes":5,"content_b64":"aGVsbG8="},{"filename":"b.png","mime_type":"image/png","size_bytes":5,"content_b64":"d29ybGQ="}]}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if len(got.Attachments) != 2 {
+		t.Fatalf("Attachments = %+v, want 2", got.Attachments)
+	}
+	if got.Attachments[0].Filename != "a.jpg" || string(got.Attachments[0].Data) != "hello" {
+		t.Fatalf("Attachments[0] = %+v", got.Attachments[0])
+	}
+	if got.Attachments[1].Filename != "b.png" || string(got.Attachments[1].Data) != "world" {
+		t.Fatalf("Attachments[1] = %+v", got.Attachments[1])
+	}
+}
+
+func TestEmailNormalizerSkipsMalformedAttachmentButKeepsRest(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"bad.jpg","mime_type":"image/jpeg","size_bytes":5,"content_b64":"not-valid-base64!!"},{"filename":"good.png","mime_type":"image/png","size_bytes":5,"content_b64":"d29ybGQ="}]}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("Attachments = %+v, want 1 (malformed skipped)", got.Attachments)
+	}
+	if got.Attachments[0].Filename != "good.png" || string(got.Attachments[0].Data) != "world" {
+		t.Fatalf("Attachments[0] = %+v", got.Attachments[0])
+	}
+	if got.AttachmentCount != 2 {
+		t.Fatalf("AttachmentCount = %d, want 2 (unchanged, counts raw payload attachments)", got.AttachmentCount)
+	}
+}
+
+func TestEmailNormalizerNoAttachmentsLeavesSignalsZero(t *testing.T) {
+	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"any progress?"}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if got.AttachmentCount != 0 {
+		t.Fatalf("AttachmentCount = %d, want 0", got.AttachmentCount)
+	}
+	if len(got.AttachmentMIMETypes) != 0 {
+		t.Fatalf("AttachmentMIMETypes = %v, want empty", got.AttachmentMIMETypes)
+	}
+}
+
 func TestRegistryRejectsDuplicateChannel(t *testing.T) {
 	_, err := NewNormalizerRegistry(LineNormalizer{}, LineNormalizer{})
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {

@@ -2,6 +2,7 @@ package omnichannel
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,21 @@ import (
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 )
+
+const BackfillSourceReferencedCase = "referenced_case"
+
+type CaseLookupResult struct {
+	CustomerID sql.NullInt64
+	SiteID     sql.NullInt64
+}
+
+type CaseLookup interface {
+	CaseByCode(ctx context.Context, coverage []int64, code string) (CaseLookupResult, error)
+}
+
+type BackfillWriter interface {
+	WriteBackfill(ctx context.Context, conversationID int64, customerID, siteID sql.NullInt64, source string) error
+}
 
 var ErrAccountNotFound = errors.New("omnichannel: channel account not found")
 
@@ -60,10 +76,12 @@ type TicketEnqueuer interface {
 }
 
 type Completeness struct {
-	Status  string
-	Missing []string
-	Score   int
-	Reasons []string
+	Status         string
+	Missing        []string
+	Score          int
+	Reasons        []string
+	Classification string
+	CatalogRelated *bool
 }
 
 type IntakeSignals struct {
@@ -73,8 +91,10 @@ type IntakeSignals struct {
 	ListUnsubscribe bool
 	AutoSubmitted   string
 	Precedence      string
+	HasAttachments  bool
 	ReferencedCase  string
 	ThreadMatched   bool
+	Images          []ports.PromptImage
 }
 
 type CompletenessAssessor interface {
@@ -83,6 +103,7 @@ type CompletenessAssessor interface {
 
 type MediaPromoter interface {
 	Promote(ctx context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error
+	PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error
 }
 
 type Workflow struct {
@@ -92,6 +113,8 @@ type Workflow struct {
 	tickets       TicketEnqueuer
 	completeness  CompletenessAssessor
 	mediaPromoter MediaPromoter
+	caseLookup    CaseLookup
+	backfill      BackfillWriter
 	activity      ports.ActivityRecorder
 	log           *zap.Logger
 }
@@ -103,6 +126,8 @@ type Config struct {
 	Tickets       TicketEnqueuer
 	Completeness  CompletenessAssessor
 	MediaPromoter MediaPromoter
+	CaseLookup    CaseLookup
+	Backfill      BackfillWriter
 	Activity      ports.ActivityRecorder
 	Log           *zap.Logger
 }
@@ -128,6 +153,8 @@ func New(cfg Config) (*Workflow, error) {
 		tickets:       cfg.Tickets,
 		completeness:  cfg.Completeness,
 		mediaPromoter: cfg.MediaPromoter,
+		caseLookup:    cfg.CaseLookup,
+		backfill:      cfg.Backfill,
 		activity:      cfg.Activity,
 		log:           log,
 	}, nil
@@ -225,6 +252,20 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		}
 	}
 
+	if w.mediaPromoter != nil && req.Channel == ChannelEmail && len(n.Attachments) > 0 {
+		for i, att := range n.Attachments {
+			externalID := fmt.Sprintf("%s#%d", req.ExternalMessageID, i)
+			if perr := w.mediaPromoter.PromoteBytes(ctx, account.CompanyID, convoID, msgID, externalID, att.MIMEType, att.Data); perr != nil {
+				w.log.Warn("omnichannel: media promotion failed",
+					zap.Int64("company_id", account.CompanyID),
+					zap.Int64("conversation_id", convoID),
+					zap.Int64("message_id", msgID),
+					zap.String("attachment_id", externalID),
+					zap.Error(perr))
+			}
+		}
+	}
+
 	if w.activity != nil {
 		entry := ports.ActivityEntry{
 			CompanyID:     account.CompanyID,
@@ -256,6 +297,10 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
 	}
 
+	if res.ReferencedCase != "" && w.caseLookup != nil {
+		w.backfillReferencedCase(ctx, account.CompanyID, convoID, res.ReferencedCase)
+	}
+
 	if w.completeness != nil && req.Channel == ChannelEmail {
 		sig := IntakeSignals{
 			Sender:          customer,
@@ -264,8 +309,10 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 			ListUnsubscribe: n.ListUnsubscribe,
 			AutoSubmitted:   n.AutoSubmitted,
 			Precedence:      n.Precedence,
+			HasAttachments:  n.AttachmentCount > 0,
 			ReferencedCase:  res.ReferencedCase,
 			ThreadMatched:   threadMatched,
+			Images:          attachmentImages(n.Attachments),
 		}
 		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, sig); aerr == nil {
 			res.IntakeStatus = assessed.Status
@@ -291,6 +338,28 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	}
 
 	return res, nil
+}
+
+func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoID int64, code string) {
+	lookup, err := w.caseLookup.CaseByCode(ctx, []int64{companyID}, code)
+	if err != nil {
+		w.log.Info("omnichannel: referenced case backfill lookup miss",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
+			zap.String("referenced_case", code),
+			zap.Error(err))
+		return
+	}
+	if !lookup.CustomerID.Valid || w.backfill == nil {
+		return
+	}
+	if werr := w.backfill.WriteBackfill(ctx, convoID, lookup.CustomerID, lookup.SiteID, BackfillSourceReferencedCase); werr != nil {
+		w.log.Warn("omnichannel: referenced case backfill write failed",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
+			zap.String("referenced_case", code),
+			zap.Error(werr))
+	}
 }
 
 func (w *Workflow) recordIntakeAssessed(ctx context.Context, companyID, convoID int64, subject string, assessed Completeness) {
@@ -392,6 +461,17 @@ func threadReferences(n Normalized) []string {
 		}
 	}
 	return refs
+}
+
+func attachmentImages(attachments []InboundAttachment) []ports.PromptImage {
+	if len(attachments) == 0 {
+		return nil
+	}
+	images := make([]ports.PromptImage, 0, len(attachments))
+	for _, att := range attachments {
+		images = append(images, ports.PromptImage{MIMEType: att.MIMEType, Data: att.Data})
+	}
+	return images
 }
 
 func detectReferencedCase(subject, body string) string {

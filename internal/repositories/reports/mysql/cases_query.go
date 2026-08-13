@@ -36,7 +36,7 @@ func buildLatestCasesQuery(coverage []int64, status string, limit int) (string, 
 SELECT r.code, r.title, COALESCE(s.code, '')
 FROM reports r
 LEFT JOIN report_statuses s ON s.id = r.status_id
-WHERE r.company_id IN (%s)%s
+WHERE r.company_id IN (%s) AND r.code IS NOT NULL%s
 ORDER BY r.created_at DESC
 LIMIT ?`, strings.Join(placeholders, ","), statusFilter)
 
@@ -66,9 +66,11 @@ func buildCaseByCodeQuery(coverage []int64, code string) (string, []any) {
 		args = append(args, id)
 	}
 	query := fmt.Sprintf(`
-SELECT r.code, r.title, COALESCE(s.code, '')
+SELECT r.code, r.title, COALESCE(s.code, ''), cu.id, si.id
 FROM reports r
 LEFT JOIN report_statuses s ON s.id = r.status_id
+LEFT JOIN customers cu ON cu.id = r.customer_id AND cu.company_id = r.company_id
+LEFT JOIN sites si ON si.id = r.site_id AND si.company_id = r.company_id
 WHERE r.code = ? AND r.company_id IN (%s)
 LIMIT 1`, strings.Join(placeholders, ","))
 	return query, args
@@ -84,8 +86,9 @@ func (r *Repository) CaseByCode(ctx context.Context, coverage []int64, code stri
 	query, args := buildCaseByCodeQuery(coverage, code)
 
 	var codeVal, title, statusCode sql.NullString
+	var customerID, siteID sql.NullInt64
 	start := time.Now()
-	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode)
+	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode, &customerID, &siteID)
 	state := "completed"
 	errorCode := ""
 	safeError := ""
@@ -126,6 +129,78 @@ func (r *Repository) CaseByCode(ctx context.Context, coverage []int64, code stri
 		}
 		return CaseRow{}, fmt.Errorf("reports: case by code: %w", scanErr)
 	}
+	return CaseRow{Code: codeVal.String, Title: title.String, Status: statusCode.String, CustomerID: customerID, SiteID: siteID}, nil
+}
+
+func buildCaseByIDQuery(coverage []int64, id int64) (string, []any) {
+	placeholders := make([]string, len(coverage))
+	args := make([]any, 0, len(coverage)+1)
+	args = append(args, id)
+	for i, cid := range coverage {
+		placeholders[i] = "?"
+		args = append(args, cid)
+	}
+	query := fmt.Sprintf(`
+SELECT r.code, r.title, COALESCE(s.code, '')
+FROM reports r
+LEFT JOIN report_statuses s ON s.id = r.status_id
+WHERE r.id = ? AND r.code IS NULL AND r.company_id IN (%s)
+LIMIT 1`, strings.Join(placeholders, ","))
+	return query, args
+}
+
+func (r *Repository) CaseByID(ctx context.Context, coverage []int64, id int64) (CaseRow, error) {
+	if len(coverage) == 0 {
+		return CaseRow{}, errors.New("reports: coverage must not be empty")
+	}
+	if id <= 0 {
+		return CaseRow{}, errors.New("reports: id must be positive")
+	}
+	query, args := buildCaseByIDQuery(coverage, id)
+
+	var codeVal, title, statusCode sql.NullString
+	start := time.Now()
+	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode)
+	state := "completed"
+	errorCode := ""
+	safeError := ""
+	rowCount := "1"
+	if scanErr != nil {
+		state = "failed"
+		errorCode = "query_failed"
+		safeError = "The parameterized draft lookup failed."
+		rowCount = "0"
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			state = "not_found"
+			errorCode = "not_found"
+			safeError = "No code-less report matched the supplied id inside the permitted company scope."
+		}
+	}
+	debugtrace.Add(ctx, debugtrace.Event{
+		Stage:      "repository.reports.case_by_id",
+		State:      state,
+		Label:      "query draft report from MySQL",
+		DurationMS: debugtrace.Since(start),
+		ErrorCode:  errorCode,
+		Error:      safeError,
+		Context: map[string]string{
+			"repository":      "internal/repositories/reports/mysql",
+			"method":          "CaseByID",
+			"operation":       "SELECT",
+			"tables":          "reports, report_statuses",
+			"scope":           "company coverage",
+			"parameterized":   "true",
+			"parameter_count": strconv.Itoa(len(args)),
+			"limit":           "1",
+			"rows":            rowCount,
+		},
+	})
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return CaseRow{}, fmt.Errorf("reports: draft %d not found", id)
+		}
+		return CaseRow{}, fmt.Errorf("reports: case by id: %w", scanErr)
+	}
 	return CaseRow{Code: codeVal.String, Title: title.String, Status: statusCode.String}, nil
 }
 
@@ -145,7 +220,7 @@ SELECT r.code, r.title, COALESCE(s.code, '')
 FROM reports r
 JOIN nodes n ON n.id = r.product_node_id
 LEFT JOIN report_statuses s ON s.id = r.status_id
-WHERE r.company_id IN (%s) AND n.title LIKE ?
+WHERE r.company_id IN (%s) AND r.code IS NOT NULL AND n.title LIKE ?
 ORDER BY r.created_at DESC
 LIMIT ?`, strings.Join(placeholders, ","))
 	return query, args

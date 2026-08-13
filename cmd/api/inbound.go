@@ -21,6 +21,7 @@ import (
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
+	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/transport/http/handlers"
 )
@@ -35,6 +36,8 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		Accounts:      centralRepo,
 		Conversations: siloRepo,
 		Messages:      siloRepo,
+		CaseLookup:    caseLookupAdapter{repo: reportsmysql.New(router)},
+		Backfill:      siloRepo,
 		Activity:      activitymysql.New(router),
 		Log:           log,
 	}
@@ -42,7 +45,7 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		wfCfg.Completeness = assessor
 		log.Info("email intake completeness check configured")
 	}
-	if promoter := buildLineMediaPromoter(cfg, log); promoter != nil {
+	if promoter := buildMediaPromoter(cfg, log); promoter != nil {
 		wfCfg.MediaPromoter = promoter
 	}
 	if enqueuer := buildTicketEnqueuer(cfg, log); enqueuer != nil {
@@ -63,18 +66,19 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	}
 	opts := []handlers.InboundOption{handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)}
 	if strings.TrimSpace(cfg.Line.ChannelSecret) != "" {
-		opts = append(opts, handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineSignatureVerifier(cfg.Line.ChannelSecret)))
+		opts = append(opts,
+			handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineSignatureVerifier(cfg.Line.ChannelSecret)),
+			handlers.WithChannelSignatureHeader(omnichannel.ChannelLine, "X-Line-Signature"),
+		)
 		log.Info("line webhook signature verification enabled")
 	}
 	return handlers.NewInboundHandler(wf, registry, opts...), nil
 }
 
-func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Promoter {
-	if strings.TrimSpace(cfg.Line.ChannelAccessToken) == "" ||
-		strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" ||
+func buildMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Promoter {
+	if strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" ||
 		strings.TrimSpace(cfg.Laravel.BaseURL) == "" {
-		log.Warn("line media promotion disabled: missing config",
-			zap.Bool("line_channel_access_token", strings.TrimSpace(cfg.Line.ChannelAccessToken) != ""),
+		log.Warn("media promotion disabled: laravel delivery not configured",
 			zap.Bool("laravel_webhook_secret", strings.TrimSpace(cfg.Laravel.WebhookSecret) != ""),
 			zap.Bool("laravel_base_url", strings.TrimSpace(cfg.Laravel.BaseURL) != ""))
 		return nil
@@ -85,11 +89,17 @@ func buildLineMediaPromoter(cfg config.Config, log *zap.Logger) *mediastore.Prom
 		Timeout: time.Duration(cfg.Laravel.Timeout) * time.Second,
 	})
 	if err != nil {
-		log.Warn("line media promotion not configured", zap.Error(err))
+		log.Warn("media promotion not configured", zap.Error(err))
 		return nil
 	}
-	contentClient := lineinfra.New("", cfg.Line.ChannelAccessToken, 0)
-	log.Info("line media promotion configured")
+
+	var contentClient mediastore.ContentFetcher
+	if token := strings.TrimSpace(cfg.Line.ChannelAccessToken); token != "" {
+		contentClient = lineinfra.New("", token, 0)
+		log.Info("media promotion configured", zap.Bool("line_fetch", true))
+	} else {
+		log.Info("media promotion configured for inline payloads only", zap.Bool("line_fetch", false))
+	}
 	return mediastore.NewPromoter(contentClient, deliverer)
 }
 

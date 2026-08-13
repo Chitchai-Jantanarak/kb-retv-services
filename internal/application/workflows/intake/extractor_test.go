@@ -304,6 +304,30 @@ func TestExtractSkipsProviderForBulkMail(t *testing.T) {
 	}
 }
 
+func TestExtractSkipModelPathStillCarriesReferencedCase(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"never asked"}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Subject:         "You might like these products",
+		Body:            "Click here to unsubscribe from our mailing list at any time.",
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+		Precedence:      "bulk",
+		ReferencedCase:  "REP-4106",
+	})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 for obvious bulk mail even when it cites a case", provider.calls)
+	}
+	if got.ReferencedCase != "REP-4106" {
+		t.Fatalf("ReferencedCase = %q, want REP-4106", got.ReferencedCase)
+	}
+}
+
 func TestExtractPlainShortCustomerMailCallsProvider(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"stuck","product":"Bella Bot"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
@@ -324,16 +348,132 @@ func TestExtractReferencedCaseStillCallsProviderDespiteThinBody(t *testing.T) {
 	provider := &fakeProvider{json: `{"problem_detail":"ok"}`}
 	ext := newExtractor(t, provider)
 
-	if _, err := ext.Extract(context.Background(), 7, intake.Signals{
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{
 		Sender:         "somchai@customer.co.th",
 		Subject:        "Re: REP-4106",
 		Body:           "ok",
 		ReferencedCase: "REP-4106",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1 when a case is referenced even with a thin body", provider.calls)
+	}
+	if got.ReferencedCase != "REP-4106" {
+		t.Fatalf("ReferencedCase = %q, want REP-4106", got.ReferencedCase)
+	}
+}
+
+func TestExtractPromptCarriesImages(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"screen cracked"}`}
+	ext := newExtractor(t, provider)
+
+	images := []ports.PromptImage{
+		{MIMEType: "image/jpeg", Data: []byte("first")},
+		{MIMEType: "image/png", Data: []byte("second")},
+	}
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Screen broken", Body: "see attached", Images: images}); err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(provider.prompt.Images) != 2 {
+		t.Fatalf("prompt Images = %v, want 2 entries", provider.prompt.Images)
+	}
+}
+
+func TestExtractCatalogRelatedFalseForcesNotActionable(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"a cat in the photo","catalog_related":false}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Photo", Body: "see attached photo"})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != intake.ClassificationNotActionable {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNotActionable)
+	}
+}
+
+func TestExtractCatalogRelatedTrueKeepsModelClassification(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"robot stuck at dock","catalog_related":true}`}
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock."})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != intake.ClassificationNewIssue {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNewIssue)
+	}
+}
+
+func TestExtractCatalogRelatedMissingKeepsModelClassification(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"robot stuck at dock"}`}
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock."})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != intake.ClassificationNewIssue {
+		t.Fatalf("Classification = %q, want %q (fail open on missing catalog_related)", got.Classification, intake.ClassificationNewIssue)
+	}
+}
+
+func TestExtractSkipModelPathLeavesCatalogRelatedNil(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"never asked"}`}
+	ext := newExtractor(t, provider)
+
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{
+		Sender:          "no-reply@newsletter.com",
+		Subject:         "You might like these products",
+		Body:            "Click here to unsubscribe from our mailing list at any time.",
+		ListUnsubscribe: true,
+		AutoSubmitted:   "auto-generated",
+		Precedence:      "bulk",
+	})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.Classification != intake.ClassificationNotActionable {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNotActionable)
+	}
+	if got.CatalogRelated != nil {
+		t.Fatalf("CatalogRelated = %v, want nil on the skip-model path", got.CatalogRelated)
+	}
+}
+
+func TestExtractModelFalseCatalogRelatedYieldsNonNilFalse(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"a cat in the photo","catalog_related":false}`}
+	ext := newExtractor(t, provider)
+
+	images := []ports.PromptImage{{MIMEType: "image/jpeg", Data: []byte("photo")}}
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Photo", Body: "see attached photo", Images: images})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.CatalogRelated == nil {
+		t.Fatal("CatalogRelated = nil, want non-nil")
+	}
+	if *got.CatalogRelated != false {
+		t.Fatalf("CatalogRelated = %v, want false", *got.CatalogRelated)
+	}
+}
+
+func TestExtractModelOmittingCatalogRelatedYieldsNonNilTrue(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"robot stuck at dock"}`}
+	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
+
+	images := []ports.PromptImage{{MIMEType: "image/jpeg", Data: []byte("photo")}}
+	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock.", Images: images})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if got.CatalogRelated == nil {
+		t.Fatal("CatalogRelated = nil, want non-nil (fail-open still records what happened)")
+	}
+	if *got.CatalogRelated != true {
+		t.Fatalf("CatalogRelated = %v, want true", *got.CatalogRelated)
 	}
 }
 

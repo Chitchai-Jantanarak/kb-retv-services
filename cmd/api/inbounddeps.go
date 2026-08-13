@@ -6,6 +6,7 @@ import (
 	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
+	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 )
 
 type intakeProducts struct {
@@ -32,11 +33,32 @@ func (a intakeAssessor) Assess(ctx context.Context, companyID, conversationID in
 		ListUnsubscribe: sig.ListUnsubscribe,
 		AutoSubmitted:   sig.AutoSubmitted,
 		Precedence:      sig.Precedence,
+		HasAttachments:  sig.HasAttachments,
 		ReferencedCase:  sig.ReferencedCase,
 		ThreadMatched:   sig.ThreadMatched,
+		Images:          sig.Images,
 	})
 	if err != nil {
 		return omnichannel.Completeness{}, err
 	}
-	return omnichannel.Completeness{Status: res.Status, Missing: res.Missing, Score: res.Score, Reasons: res.Reasons}, nil
+	return omnichannel.Completeness{
+		Status:         res.Status,
+		Missing:        res.Missing,
+		Score:          res.Score,
+		Reasons:        res.Reasons,
+		Classification: res.Classification,
+		CatalogRelated: res.CatalogRelated,
+	}, nil
+}
+
+type caseLookupAdapter struct {
+	repo *reportsmysql.Repository
+}
+
+func (a caseLookupAdapter) CaseByCode(ctx context.Context, coverage []int64, code string) (omnichannel.CaseLookupResult, error) {
+	row, err := a.repo.CaseByCode(ctx, coverage, code)
+	if err != nil {
+		return omnichannel.CaseLookupResult{}, err
+	}
+	return omnichannel.CaseLookupResult{CustomerID: row.CustomerID, SiteID: row.SiteID}, nil
 }

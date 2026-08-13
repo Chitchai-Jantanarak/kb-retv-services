@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm/llmerr"
 )
+
+var maxPromptImages = 3
+var maxPromptImageBytes = 4 << 20
 
 const (
 	DefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
@@ -58,8 +62,14 @@ func New(cfg Config) (*Client, error) {
 	return c, nil
 }
 
+type inlineData struct {
+	MIMEType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
 type part struct {
-	Text string `json:"text"`
+	Text       string      `json:"text,omitempty"`
+	InlineData *inlineData `json:"inlineData,omitempty"`
 }
 
 type content struct {
@@ -67,11 +77,16 @@ type content struct {
 	Parts []part `json:"parts"`
 }
 
+type thinkingConfig struct {
+	ThinkingBudget int `json:"thinkingBudget"`
+}
+
 type generationConfig struct {
-	Temperature      *float32 `json:"temperature,omitempty"`
-	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string `json:"stopSequences,omitempty"`
-	ResponseMimeType string   `json:"responseMimeType,omitempty"`
+	Temperature      *float32        `json:"temperature,omitempty"`
+	ThinkingConfig   *thinkingConfig `json:"thinkingConfig,omitempty"`
+	MaxOutputTokens  int             `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string        `json:"stopSequences,omitempty"`
+	ResponseMimeType string          `json:"responseMimeType,omitempty"`
 }
 
 type generateRequest struct {
@@ -173,7 +188,7 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 				continue
 			}
 			select {
-			case out <- ports.Completion{Text: text.String(), Vendor: "gemini"}:
+			case out <- ports.Completion{Text: text.String(), Vendor: "gemini", Model: c.model}:
 			case <-ctx.Done():
 				return
 			}
@@ -182,20 +197,49 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	return out, nil
 }
 
+func imageParts(images []ports.PromptImage) []part {
+	if len(images) == 0 {
+		return nil
+	}
+	parts := make([]part, 0, maxPromptImages)
+	for _, img := range images {
+		if len(parts) >= maxPromptImages {
+			break
+		}
+		if !strings.HasPrefix(img.MIMEType, "image/") {
+			continue
+		}
+		if len(img.Data) > maxPromptImageBytes {
+			continue
+		}
+		parts = append(parts, part{
+			InlineData: &inlineData{
+				MIMEType: img.MIMEType,
+				Data:     base64.StdEncoding.EncodeToString(img.Data),
+			},
+		})
+	}
+	return parts
+}
+
 func (c *Client) buildRequest(p ports.Prompt, mime string) generateRequest {
+	parts := append([]part{{Text: p.User}}, imageParts(p.Images)...)
 	req := generateRequest{
 		Contents: []content{
-			{Role: "user", Parts: []part{{Text: p.User}}},
+			{Role: "user", Parts: parts},
 		},
 	}
 	if p.System != "" {
 		req.SystemInstruction = &content{Parts: []part{{Text: p.System}}}
 	}
-	if p.MaxToks > 0 || p.Temp > 0 || len(p.Stop) > 0 || mime != "" {
+	if p.MaxToks > 0 || p.Temp > 0 || len(p.Stop) > 0 || mime != "" || p.ThinkBudget != nil {
 		cfg := &generationConfig{
 			MaxOutputTokens:  p.MaxToks,
 			StopSequences:    p.Stop,
 			ResponseMimeType: mime,
+		}
+		if p.ThinkBudget != nil {
+			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: *p.ThinkBudget}
 		}
 		if p.Temp > 0 {
 			t := p.Temp
@@ -273,6 +317,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 			Total:  parsed.UsageMetadata.TotalTokenCount,
 		},
 		Vendor: "gemini",
+		Model:  c.model,
 	}, nil
 }
 

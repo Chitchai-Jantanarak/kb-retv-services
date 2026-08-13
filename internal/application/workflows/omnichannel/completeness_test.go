@@ -114,6 +114,8 @@ func TestRunPassesIntakeSignalsToAssessor(t *testing.T) {
 	norm.Request.Subject = "Re: REP-4106 progress?"
 	norm.InReplyTo = "<m-1@x>"
 	norm.ListUnsubscribe = true
+	norm.AttachmentCount = 1
+	norm.AttachmentMIMETypes = []string{"image/jpeg"}
 
 	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -129,6 +131,39 @@ func TestRunPassesIntakeSignalsToAssessor(t *testing.T) {
 	}
 	if !assessor.sig.ThreadMatched {
 		t.Fatal("ThreadMatched signal must reach the assessor")
+	}
+	if !assessor.sig.HasAttachments {
+		t.Fatal("HasAttachments signal must reach the assessor when the inbound payload has an attachment")
+	}
+}
+
+func TestRunPassesAttachmentImageBytesToAssessor(t *testing.T) {
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete"}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Completeness:  assessor,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Attachments = []InboundAttachment{
+		{Filename: "photo.jpg", MIMEType: "image/jpeg", Data: []byte("photo-bytes")},
+	}
+
+	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !assessor.called {
+		t.Fatal("assessor must be called")
+	}
+	if len(assessor.sig.Images) != 1 {
+		t.Fatalf("Images = %v, want 1 entry", assessor.sig.Images)
+	}
+	if assessor.sig.Images[0].MIMEType != "image/jpeg" || string(assessor.sig.Images[0].Data) != "photo-bytes" {
+		t.Fatalf("Images[0] = %+v, want mime/data from the inbound attachment", assessor.sig.Images[0])
 	}
 }
 

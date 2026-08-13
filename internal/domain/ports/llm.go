@@ -1,15 +1,23 @@
 package ports
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrAIDisabled means the company has no active ai_agents row. Callers degrade to human handling.
+var ErrAIDisabled = errors.New("ai disabled for company")
 
 type Prompt struct {
 	System      string
 	User        string
 	Vars        map[string]string
 	MaxToks     int
+	ThinkBudget *int
 	Temp        float32
 	Stop        []string
 	Attachments []Attachment
+	Images      []PromptImage
 }
 
 type Attachment struct {
@@ -20,10 +28,16 @@ type Attachment struct {
 	SizeBytes  int64
 }
 
+type PromptImage struct {
+	MIMEType string
+	Data     []byte
+}
+
 type Completion struct {
 	Text   string
 	Usage  TokenUsage
 	Vendor string
+	Model  string
 }
 
 type TokenUsage struct {

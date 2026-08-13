@@ -2,6 +2,7 @@ package omnichannel
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -199,13 +200,25 @@ type promoterCall struct {
 	ref                                   dto.AttachmentRef
 }
 
+type promoteBytesCall struct {
+	companyID, conversationID, messageID int64
+	externalID, mimeType                 string
+	data                                 []byte
+}
+
 type capturingPromoter struct {
-	calls []promoterCall
-	err   error
+	calls      []promoterCall
+	bytesCalls []promoteBytesCall
+	err        error
 }
 
 func (p *capturingPromoter) Promote(_ context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error {
 	p.calls = append(p.calls, promoterCall{companyID, conversationID, messageID, ref})
+	return p.err
+}
+
+func (p *capturingPromoter) PromoteBytes(_ context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error {
+	p.bytesCalls = append(p.bytesCalls, promoteBytesCall{companyID, conversationID, messageID, externalID, mimeType, data})
 	return p.err
 }
 
@@ -262,6 +275,68 @@ func TestRunMediaPromotionFailureDoesNotFailRun(t *testing.T) {
 	}
 	if len(promoter.calls) != 1 {
 		t.Fatalf("promoter calls = %d, want 1", len(promoter.calls))
+	}
+}
+
+func TestRunPromotesEmailAttachmentsAfterInsert(t *testing.T) {
+	promoter := &capturingPromoter{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		MediaPromoter: promoter,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Attachments = []InboundAttachment{
+		{Filename: "a.jpg", MIMEType: "image/jpeg", Data: []byte("img-a")},
+		{Filename: "b.png", MIMEType: "image/png", Data: []byte("img-b")},
+	}
+	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(promoter.bytesCalls) != 2 {
+		t.Fatalf("PromoteBytes calls = %d, want 2", len(promoter.bytesCalls))
+	}
+	first, second := promoter.bytesCalls[0], promoter.bytesCalls[1]
+	if first.externalID == second.externalID {
+		t.Fatalf("expected distinct externalIDs, got %q and %q", first.externalID, second.externalID)
+	}
+	if first.companyID != 7 || first.conversationID != 100 || first.messageID != 200 {
+		t.Fatalf("first call ids = %+v", first)
+	}
+	if first.mimeType != "image/jpeg" || string(first.data) != "img-a" {
+		t.Fatalf("first call = %+v", first)
+	}
+	if second.mimeType != "image/png" || string(second.data) != "img-b" {
+		t.Fatalf("second call = %+v", second)
+	}
+}
+
+func TestRunEmailMediaPromotionFailureDoesNotFailRun(t *testing.T) {
+	promoter := &capturingPromoter{err: errors.New("laravel down")}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		MediaPromoter: promoter,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Attachments = []InboundAttachment{{Filename: "a.jpg", MIMEType: "image/jpeg", Data: []byte("img-a")}}
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run must not fail when email media promotion fails: %v", err)
+	}
+	if res.MessageID != 200 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(promoter.bytesCalls) != 1 {
+		t.Fatalf("PromoteBytes calls = %d, want 1", len(promoter.bytesCalls))
 	}
 }
 
@@ -700,5 +775,137 @@ func TestRunReferencedCaseEmptyWhenNoRef(t *testing.T) {
 	}
 	if res.ReferencedCase != "" {
 		t.Fatalf("ReferencedCase = %q, want empty", res.ReferencedCase)
+	}
+}
+
+type stubCaseLookup struct {
+	result   CaseLookupResult
+	err      error
+	called   bool
+	coverage []int64
+	code     string
+}
+
+func (s *stubCaseLookup) CaseByCode(_ context.Context, coverage []int64, code string) (CaseLookupResult, error) {
+	s.called = true
+	s.coverage = coverage
+	s.code = code
+	return s.result, s.err
+}
+
+type backfillCall struct {
+	conversationID     int64
+	customerID, siteID sql.NullInt64
+	source             string
+}
+
+type capturingBackfill struct {
+	calls []backfillCall
+	err   error
+}
+
+func (b *capturingBackfill) WriteBackfill(_ context.Context, conversationID int64, customerID, siteID sql.NullInt64, source string) error {
+	b.calls = append(b.calls, backfillCall{conversationID: conversationID, customerID: customerID, siteID: siteID, source: source})
+	return b.err
+}
+
+func TestRunBackfillsCustomerAndSiteFromReferencedCase(t *testing.T) {
+	lookup := &stubCaseLookup{result: CaseLookupResult{
+		CustomerID: sql.NullInt64{Int64: 42, Valid: true},
+		SiteID:     sql.NullInt64{Int64: 7, Valid: true},
+	}}
+	backfill := &capturingBackfill{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		CaseLookup:    lookup,
+		Backfill:      backfill,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "Re: REP-4106 progress?"
+
+	if _, err := wf.Run(context.Background(), norm, []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !lookup.called || lookup.code != "REP-4106" {
+		t.Fatalf("caseLookup called = %v code = %q, want called with REP-4106", lookup.called, lookup.code)
+	}
+	if len(lookup.coverage) != 1 || lookup.coverage[0] != 7 {
+		t.Fatalf("caseLookup coverage = %v, want [7] (company-scoped)", lookup.coverage)
+	}
+	if len(backfill.calls) != 1 {
+		t.Fatalf("WriteBackfill calls = %d, want 1", len(backfill.calls))
+	}
+	call := backfill.calls[0]
+	if call.conversationID != 100 {
+		t.Fatalf("WriteBackfill conversationID = %d, want 100", call.conversationID)
+	}
+	if !call.customerID.Valid || call.customerID.Int64 != 42 {
+		t.Fatalf("WriteBackfill customerID = %+v, want valid 42", call.customerID)
+	}
+	if !call.siteID.Valid || call.siteID.Int64 != 7 {
+		t.Fatalf("WriteBackfill siteID = %+v, want valid 7", call.siteID)
+	}
+	if call.source != BackfillSourceReferencedCase {
+		t.Fatalf("WriteBackfill source = %q, want %q", call.source, BackfillSourceReferencedCase)
+	}
+}
+
+func TestRunReferencedCaseNotFoundSkipsBackfill(t *testing.T) {
+	lookup := &stubCaseLookup{err: errors.New("reports: case \"REP-9999\" not found")}
+	backfill := &capturingBackfill{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		CaseLookup:    lookup,
+		Backfill:      backfill,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "Re: REP-9999 progress?"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run must not fail when the referenced case lookup misses: %v", err)
+	}
+	if res.ConversationID != 100 {
+		t.Fatalf("result = %+v", res)
+	}
+	if !lookup.called {
+		t.Fatal("caseLookup must still be called for a referenced case")
+	}
+	if len(backfill.calls) != 0 {
+		t.Fatalf("WriteBackfill calls = %d, want 0 when the case lookup misses", len(backfill.calls))
+	}
+}
+
+func TestRunNoReferencedCaseSkipsLookupAndBackfill(t *testing.T) {
+	lookup := &stubCaseLookup{result: CaseLookupResult{CustomerID: sql.NullInt64{Int64: 42, Valid: true}}}
+	backfill := &capturingBackfill{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		CaseLookup:    lookup,
+		Backfill:      backfill,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if lookup.called {
+		t.Fatal("caseLookup must not be called when there is no referenced case")
+	}
+	if len(backfill.calls) != 0 {
+		t.Fatalf("WriteBackfill calls = %d, want 0 when there is no referenced case", len(backfill.calls))
 	}
 }

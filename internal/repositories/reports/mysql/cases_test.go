@@ -3,8 +3,11 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -403,4 +406,144 @@ func TestAssignCaseScopesToCoverage(t *testing.T) {
 	if !strings.Contains(q.execSQL, "INSERT INTO report_employee") {
 		t.Fatalf("execSQL = %q, want INSERT INTO report_employee", q.execSQL)
 	}
+}
+
+func TestBuildCaseByCodeQueryScopesToCoverageAndSelectsBackfillColumns(t *testing.T) {
+	query, args := buildCaseByCodeQuery([]int64{3, 4}, "REP-4106")
+	if !strings.Contains(query, "r.company_id IN (?,?)") {
+		t.Fatalf("query = %q, want company_id IN (?,?)", query)
+	}
+	if !strings.Contains(query, "cu.id, si.id") {
+		t.Fatalf("query = %q, want validated cu.id/si.id selected for backfill", query)
+	}
+	if !strings.Contains(query, "LEFT JOIN customers cu ON cu.id = r.customer_id AND cu.company_id = r.company_id") {
+		t.Fatalf("query = %q, want customer existence+scope guard", query)
+	}
+	if !strings.Contains(query, "LEFT JOIN sites si ON si.id = r.site_id AND si.company_id = r.company_id") {
+		t.Fatalf("query = %q, want site existence+scope guard", query)
+	}
+	if !strings.Contains(query, "r.code = ?") {
+		t.Fatalf("query = %q, want code filter", query)
+	}
+	if len(args) != 3 || args[0] != "REP-4106" || args[1] != int64(3) || args[2] != int64(4) {
+		t.Fatalf("args = %v, want [REP-4106 3 4]", args)
+	}
+}
+
+func TestCaseByCodeReturnsCustomerAndSiteWhenPresent(t *testing.T) {
+	db := newFakeScanDB(t, fakeScanRow{
+		cols: []string{"code", "title", "status", "customer_id", "site_id"},
+		vals: []driver.Value{"REP-4106", "Robot stuck", "open", int64(42), int64(7)},
+	})
+	repo := New(db)
+
+	row, err := repo.CaseByCode(context.Background(), []int64{3}, "REP-4106")
+	if err != nil {
+		t.Fatalf("CaseByCode: %v", err)
+	}
+	if !row.CustomerID.Valid || row.CustomerID.Int64 != 42 {
+		t.Fatalf("CustomerID = %+v, want valid 42", row.CustomerID)
+	}
+	if !row.SiteID.Valid || row.SiteID.Int64 != 7 {
+		t.Fatalf("SiteID = %+v, want valid 7", row.SiteID)
+	}
+}
+
+func TestCaseByCodeReturnsNullCustomerAndSiteWhenAbsent(t *testing.T) {
+	db := newFakeScanDB(t, fakeScanRow{
+		cols: []string{"code", "title", "status", "customer_id", "site_id"},
+		vals: []driver.Value{"REP-4200", "No customer yet", "open", nil, nil},
+	})
+	repo := New(db)
+
+	row, err := repo.CaseByCode(context.Background(), []int64{3}, "REP-4200")
+	if err != nil {
+		t.Fatalf("CaseByCode: %v", err)
+	}
+	if row.CustomerID.Valid {
+		t.Fatalf("CustomerID = %+v, want null", row.CustomerID)
+	}
+	if row.SiteID.Valid {
+		t.Fatalf("SiteID = %+v, want null", row.SiteID)
+	}
+}
+
+type fakeScanRow struct {
+	cols []string
+	vals []driver.Value
+	err  error
+}
+
+var (
+	fakeScanMu         sync.Mutex
+	fakeScanRegistry   = map[string]fakeScanRow{}
+	fakeScanDriverOnce sync.Once
+)
+
+type fakeScanDriver struct{}
+
+func (fakeScanDriver) Open(name string) (driver.Conn, error) {
+	fakeScanMu.Lock()
+	row, ok := fakeScanRegistry[name]
+	fakeScanMu.Unlock()
+	if !ok {
+		return nil, errors.New("fakeScanDriver: unknown dsn")
+	}
+	return &fakeScanConn{row: row}, nil
+}
+
+type fakeScanConn struct {
+	row fakeScanRow
+}
+
+func (c *fakeScanConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("fakeScanConn: Prepare unsupported")
+}
+
+func (c *fakeScanConn) Close() error { return nil }
+
+func (c *fakeScanConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("fakeScanConn: Begin unsupported")
+}
+
+func (c *fakeScanConn) QueryContext(_ context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	if c.row.err != nil {
+		return nil, c.row.err
+	}
+	return &fakeScanRows{cols: c.row.cols, vals: c.row.vals}, nil
+}
+
+type fakeScanRows struct {
+	cols []string
+	vals []driver.Value
+	done bool
+}
+
+func (r *fakeScanRows) Columns() []string { return r.cols }
+func (r *fakeScanRows) Close() error      { return nil }
+
+func (r *fakeScanRows) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	copy(dest, r.vals)
+	r.done = true
+	return nil
+}
+
+func newFakeScanDB(t *testing.T, row fakeScanRow) *sql.DB {
+	t.Helper()
+	fakeScanDriverOnce.Do(func() {
+		sql.Register("fakecasesscan", fakeScanDriver{})
+	})
+	dsn := t.Name()
+	fakeScanMu.Lock()
+	fakeScanRegistry[dsn] = row
+	fakeScanMu.Unlock()
+	db, err := sql.Open("fakecasesscan", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }

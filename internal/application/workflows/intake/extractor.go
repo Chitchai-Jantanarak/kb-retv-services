@@ -48,6 +48,7 @@ type Result struct {
 	Reasons        []string
 	Classification string
 	CatalogRelated *bool
+	ReferencedCase string
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -111,6 +112,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 			Score:          score,
 			Reasons:        reasons,
 			Classification: ClassificationNotActionable,
+			ReferencedCase: sig.ReferencedCase,
 		}, nil
 	}
 
@@ -125,12 +127,14 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 
 	message := composeMessage(sig.Subject, sig.Body)
 	if message == "" {
-		return emptyResult(spec), nil
+		result := emptyResult(spec)
+		result.ReferencedCase = sig.ReferencedCase
+		return result, nil
 	}
 
 	provider, err := e.resolve(ctx, companyID)
 	if errors.Is(err, ports.ErrAIDisabled) {
-		return Result{Status: StatusUnknown}, nil
+		return Result{Status: StatusUnknown, ReferencedCase: sig.ReferencedCase}, nil
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("intake: resolve provider: %w", err)
@@ -187,6 +191,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		Reasons:        reasons,
 		Classification: classification,
 		CatalogRelated: catalogRelatedPtr,
+		ReferencedCase: sig.ReferencedCase,
 	}, nil
 }
 
