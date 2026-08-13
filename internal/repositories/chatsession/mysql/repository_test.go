@@ -71,7 +71,7 @@ func TestAppendTurnRejectsUnknownRole(t *testing.T) {
 	db := &capturingQuerier{}
 	repo := New(db)
 
-	if err := repo.AppendTurn(context.Background(), Turn{SessionID: 1, Role: "system", Body: "x"}); err == nil {
+	if err := repo.AppendTurn(context.Background(), Turn{SessionID: 1, Role: "system"}); err == nil {
 		t.Fatal("want an error: role is an enum of user|assistant in the schema")
 	}
 	if db.lastQuery != "" {
@@ -84,9 +84,9 @@ func TestAppendTurnSerialisesCiteValues(t *testing.T) {
 	repo := New(db)
 
 	if err := repo.AppendTurn(context.Background(), Turn{
-		SessionID:  9001,
-		Role:       "assistant",
-		Body:       "2 cases match",
+		SessionID: 9001,
+		Role:      "assistant",
+
 		CiteKey:    "code",
 		CiteValues: []string{"REP-4106", "REP-4105"},
 	}); err != nil {

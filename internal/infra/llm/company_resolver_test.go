@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/my/app/internal/domain/ports"
 )
 
 type stubLookup struct {
@@ -157,7 +159,7 @@ func TestResolveForFailureCases(t *testing.T) {
 	}
 }
 
-func TestResolveForFallsBackToDefaultsWhenNoAgent(t *testing.T) {
+func TestResolveForDisabledWhenNoAgent(t *testing.T) {
 	r, err := NewCompanyResolver(NoopAgentLookup{}, Settings{
 		Vendor:    "openai",
 		OpenAIKey: "k",
@@ -167,11 +169,11 @@ func TestResolveForFallsBackToDefaultsWhenNoAgent(t *testing.T) {
 		t.Fatalf("NewCompanyResolver err = %v", err)
 	}
 	p, err := r.ResolveFor(context.Background(), 7)
-	if err != nil {
-		t.Fatalf("ResolveFor err = %v", err)
+	if !errors.Is(err, ports.ErrAIDisabled) {
+		t.Fatalf("ResolveFor err = %v, want ErrAIDisabled", err)
 	}
-	if p == nil {
-		t.Fatal("provider = nil")
+	if p != nil {
+		t.Fatalf("provider = %T, want nil when ai is disabled", p)
 	}
 }
 

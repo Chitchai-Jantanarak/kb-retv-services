@@ -53,6 +53,11 @@ func TestProbeSocialBucket(t *testing.T) {
 		{CaseStatus, "ตรวจสอบสถานะเคส REP-1234"},
 		{OpenCase, "open a new support case"},
 		{Handoff, "talk to a human agent"},
+		{GeneralSupport, "ช่วยเขียนอีเมลขอบคุณลูกค้าให้หน่อย"},
+		{GeneralSupport, "เขียนข้อความขอบคุณทีมงานหน่อย"},
+		{GeneralSupport, "สวัสดีตอนเช้าควรพูดยังไงให้ดูเป็นมืออาชีพ"},
+		{GeneralSupport, "help me write a thank you note to a customer"},
+		{GeneralSupport, "อธิบายหน่อยว่า docker คืออะไร"},
 	}
 
 	ok := 0

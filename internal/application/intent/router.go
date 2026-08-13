@@ -52,6 +52,7 @@ type Decision struct {
 	Reason         Reason
 	Confidence     float64
 	RetrievalScore float64
+	Vector         []float32
 }
 
 type anchor struct {
@@ -165,15 +166,15 @@ func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
 
 	pos, neg := r.scoreAnchors(query)
 	if neg >= pos.score+r.margin {
-		return Decision{Intent: OffDomain, Reason: ReasonOffDomainAnchor, Confidence: pos.score}, nil
+		return Decision{Intent: OffDomain, Reason: ReasonOffDomainAnchor, Confidence: pos.score, Vector: query}, nil
 	}
 
 	if pos.intent == Social && pos.score >= r.accept {
-		return Decision{Intent: Social, Reason: ReasonSocialAnchor, Confidence: pos.score}, nil
+		return Decision{Intent: Social, Reason: ReasonSocialAnchor, Confidence: pos.score, Vector: query}, nil
 	}
 
 	if isAction(pos.intent) && pos.score >= r.accept {
-		return Decision{Intent: pos.intent, Reason: ReasonActionAnchor, Confidence: pos.score}, nil
+		return Decision{Intent: pos.intent, Reason: ReasonActionAnchor, Confidence: pos.score, Vector: query}, nil
 	}
 
 	score, err := r.scorer.TopScore(ctx, text)
@@ -183,11 +184,11 @@ func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
 
 	switch {
 	case score > 0:
-		return Decision{Intent: KBSearch, Reason: ReasonRetrievalHit, Confidence: pos.score, RetrievalScore: score}, nil
+		return Decision{Intent: KBSearch, Reason: ReasonRetrievalHit, Confidence: pos.score, RetrievalScore: score, Vector: query}, nil
 	case pos.score >= r.floor:
-		return Decision{Intent: GeneralSupport, Reason: ReasonInDomainNoKB, Confidence: pos.score, RetrievalScore: score}, nil
+		return Decision{Intent: GeneralSupport, Reason: ReasonInDomainNoKB, Confidence: pos.score, RetrievalScore: score, Vector: query}, nil
 	default:
-		return Decision{Intent: OffDomain, Reason: ReasonOffDomainFloor, Confidence: pos.score, RetrievalScore: score}, nil
+		return Decision{Intent: OffDomain, Reason: ReasonOffDomainFloor, Confidence: pos.score, RetrievalScore: score, Vector: query}, nil
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 const (
 	knowledgeChunkLimit      = 3
+	knowledgeCandidateLimit  = 50
 	knowledgeSnippetMaxChars = 600
 	chatSearchLimit          = 5
 	chatSearchMaxLimit       = 20
@@ -16,6 +17,8 @@ const (
 	knowledgeMinRelevance    = 5.0
 	knowledgeMinRatio        = 0.5
 )
+
+var knowledgeMinSimilarity = 0.40
 
 func promptLanguage(locale string) string {
 	if locale == dto.ChatLocaleEnglish {

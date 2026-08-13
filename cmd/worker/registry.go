@@ -9,11 +9,8 @@ import (
 )
 
 const (
-	TaskReplyLine        = "reply:line"
-	TaskReplyEmail       = "reply:email"
 	TaskIngestReport     = "ingest:report"
 	TaskExtractBatch     = "extract:batch"
-	TaskClusterWeekly    = "cluster:weekly"
 	TaskPromoteKB        = "promote:kb"
 	TaskPromoteSymptom   = "promote:symptom"
 	TaskPromoteSubject   = "promote:subject"
@@ -23,11 +20,8 @@ const (
 
 func buildTaskMux(cfg config.Config, classifyQueue ports.Queue) *asynq.ServeMux {
 	mux := asynq.NewServeMux()
-	mux.HandleFunc(TaskReplyLine, makeHandler(stubHandler("reply:line")))
-	mux.HandleFunc(TaskReplyEmail, makeHandler(stubHandler("reply:email")))
 	mux.HandleFunc(TaskIngestReport, makeHandler(buildIngestHandler(cfg)))
 	mux.HandleFunc(TaskExtractBatch, makeHandler(buildExtractHandler(cfg)))
-	mux.HandleFunc(TaskClusterWeekly, makeHandler(stubHandler("cluster:weekly")))
 
 	promoteHandler := buildPromoteHandler(cfg)
 	mux.HandleFunc(TaskPromoteKB, makeHandler(promoteHandler))

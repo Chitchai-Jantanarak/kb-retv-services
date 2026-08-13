@@ -52,6 +52,7 @@ func LoadFS(fsys fs.FS, dir string) ([]Template, error) {
 //
 //	@name        rewrite
 //	@max_toks    120
+//	@thinking    0
 //	@temp        0.1
 //	@required    query
 //	@stop        \n\n
@@ -166,6 +167,12 @@ func applyDirective(t *Template, key, value string) error {
 			return fmt.Errorf("max_toks: %w", err)
 		}
 		t.MaxToks = n
+	case "thinking":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("thinking: %w", err)
+		}
+		t.ThinkBudget = &n
 	case "temp":
 		f, err := strconv.ParseFloat(value, 32)
 		if err != nil {

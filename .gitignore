@@ -56,3 +56,10 @@ assets/guard-embedder/
 /worker
 __pycache__/
 *.pyc
+
+train/*
+migrator
+scripts/*.sh
+internal/**/probe_*_test.go
+internal/**/*_live_test.go
+

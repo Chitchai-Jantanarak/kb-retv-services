@@ -42,3 +42,41 @@ func TestTrackCaseNeedsCode(t *testing.T) {
 		t.Fatal("err = nil, want error when code is missing")
 	}
 }
+
+func TestTrackCaseNormalizesLooseRepShapes(t *testing.T) {
+	shapes := []string{"where is REP-4105", "where is rep-4105", "where is REP4105", "where is rep4105", "where is rep:4105", "where is rep 4105"}
+	for _, text := range shapes {
+		repo := &stubCasesRepo{caseByCode: reportsmysql.CaseRow{Code: "REP-4105", Title: "motor down", Status: "doing"}}
+		h := NewTrackCase(repo)
+
+		rows, err := h.Run(context.Background(), skeleton.Query{Text: text, Coverage: []int64{3}})
+		if err != nil {
+			t.Fatalf("Run(%q): %v", text, err)
+		}
+		if repo.byCodeArg != "REP-4105" {
+			t.Fatalf("Run(%q) byCodeArg = %q, want REP-4105", text, repo.byCodeArg)
+		}
+		if len(rows) != 2 || rows[0]["value"] != "motor down" {
+			t.Fatalf("Run(%q) rows = %v", text, rows)
+		}
+	}
+}
+
+func TestTrackCaseResolvesDraftRefByID(t *testing.T) {
+	repo := &stubCasesRepo{caseByID: reportsmysql.CaseRow{Title: "unlinked mail", Status: ""}}
+	h := NewTrackCase(repo)
+
+	rows, err := h.Run(context.Background(), skeleton.Query{Text: "diagnose draft45", Coverage: []int64{3}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if repo.byIDArg != 45 {
+		t.Fatalf("byIDArg = %d, want 45", repo.byIDArg)
+	}
+	if repo.caseIDByCodeCalled {
+		t.Fatal("draft refs must not go through the code lookup path")
+	}
+	if len(rows) != 2 || rows[0]["value"] != "unlinked mail" {
+		t.Fatalf("rows = %v", rows)
+	}
+}

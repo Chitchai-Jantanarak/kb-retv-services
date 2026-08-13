@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,87 @@ func TestInboundHandlerRejectsOversizedBody(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+	}
+	if workflow.calls != 0 {
+		t.Fatalf("workflow calls = %d, want 0", workflow.calls)
+	}
+}
+
+func TestInboundHandlerAllowsLargerBodyForEmailOnly(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.LineNormalizer{}, omnichannel.EmailNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	padding := strings.Repeat("a", 3<<20)
+
+	t.Run("email between 1MB and 12MB is accepted", func(t *testing.T) {
+		workflow := &recordingInboundWorkflow{}
+		handler := NewInboundHandler(workflow, registry)
+		e := echo.New()
+		e.POST("/v1/inbound/:channel", handler.Receive)
+
+		body := `{"message_id":"<m-1@mail>","from":"alice@example.com","subject":"help","body":"` + padding + `"}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/inbound/email", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		e.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusRequestEntityTooLarge {
+			t.Fatalf("email body of %d bytes must not be rejected for size: status=%d body=%s", len(body), rec.Code, rec.Body.String())
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if workflow.calls != 1 {
+			t.Fatalf("workflow calls = %d, want 1", workflow.calls)
+		}
+	})
+
+	t.Run("same size to line is rejected", func(t *testing.T) {
+		workflow := &recordingInboundWorkflow{}
+		handler := NewInboundHandler(workflow, registry)
+		e := echo.New()
+		e.POST("/v1/inbound/:channel", handler.Receive)
+
+		body := `{"destination":"bot-1","events":[{"source":{"userId":"u"},"message":{"id":"m","type":"text","text":"` + padding + `"}}]}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		e.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+		}
+		if workflow.calls != 0 {
+			t.Fatalf("workflow calls = %d, want 0", workflow.calls)
+		}
+	})
+}
+
+type explodingReader struct{ t *testing.T }
+
+func (r *explodingReader) Read([]byte) (int, error) {
+	r.t.Fatal("body must not be read before the missing-signature-header guard runs")
+	return 0, io.EOF
+}
+
+func TestInboundHandlerRejectsMissingSignatureHeaderBeforeReadingBody(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.EmailNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	workflow := &recordingInboundWorkflow{}
+	handler := NewInboundHandler(workflow, registry, WithInboundWebhookSecret("secret"))
+	e := echo.New()
+	e.POST("/v1/inbound/:channel", handler.Receive)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/email", &explodingReader{t: t})
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
 	}
 	if workflow.calls != 0 {
 		t.Fatalf("workflow calls = %d, want 0", workflow.calls)

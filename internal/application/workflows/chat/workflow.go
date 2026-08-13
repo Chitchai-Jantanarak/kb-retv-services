@@ -30,6 +30,8 @@ type Workflow struct {
 	transcriber ports.Transcriber
 	sessions    SessionStore
 	turns       TurnRecorder
+
+	knowledgeReranker Embedder
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts rag.FTSSource, opts ...Option) (*Workflow, error) {
@@ -80,11 +82,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		resp := pre.resp
 		resp.Transcript = pre.transcript
 		w.persistTurns(ctx, pre.companyID, req, &resp, pre.tool)
-		w.recordTurn(ctx, pre.companyID, resp, pre.decision, TurnAudit{
-			ToolID:       toolIDOf(pre.tool),
-			ResolvedFrom: resolvedFrom(paramsOf(pre.tool), pre.candidates),
-			LatencyMS:    int(time.Since(started).Milliseconds()),
-		})
+		w.finalizeTurn(ctx, resp.Status, pre, started, 0, 0, detectLang(pre.lastUser))
 		resp = withChatTimings(resp, timings)
 		return attachChatDebug(resp, pre.toolDebug, timings, false), nil
 	}
@@ -113,13 +111,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	resp := buildChatResponse(req, pre.transcript, turn, sources)
 	w.applyCaseSearch(ctx, req.Locale, companyID, turn.Search, &resp, timings)
 	w.persistTurns(ctx, companyID, req, &resp, pre.tool)
-	w.recordTurn(ctx, companyID, resp, pre.decision, TurnAudit{
-		ToolID:       toolIDOf(pre.tool),
-		ResolvedFrom: resolvedFrom(paramsOf(pre.tool), pre.candidates),
-		LatencyMS:    int(time.Since(started).Milliseconds()),
-		TokensIn:     turn.TokensIn,
-		TokensOut:    turn.TokensOut,
-	})
+	w.finalizeTurn(ctx, resp.Status, pre, started, turn.TokensIn, turn.TokensOut, detectLang(pre.lastUser))
 	timedChat(timings, "store_cache", func() {
 		w.storeResponse(ctx, key, resp)
 	})
@@ -147,32 +139,25 @@ func (w *Workflow) fetchContext(ctx context.Context, companyID int64, lastUser s
 	return sources, knowledge, profileBlock
 }
 
-func offDomainReply(locale string) string {
-	if locale == dto.ChatLocaleEnglish {
-		return "I can only help with support cases, knowledge references, case status, and staff handoff for this service."
-	}
-	return "ฉันช่วยได้เฉพาะเรื่องเคสบริการ แหล่งอ้างอิง สถานะเคส และการติดต่อเจ้าหน้าที่ในระบบนี้"
-}
-
 func socialReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "Hello. I can look up support cases, case status, team workload, products, customers, and knowledge articles. What would you like to check?"
 	}
-	return "สวัสดีครับ ผมช่วยดูเคสบริการ สถานะเคส ภาระงานทีม สินค้า ลูกค้า และคลังความรู้ได้ ต้องการให้ช่วยเรื่องไหนครับ"
+	return "สวัสดีค่ะ ช่วยดูเคสบริการ สถานะเคส ภาระงานทีม สินค้า ลูกค้า และคลังความรู้ได้ ต้องการให้ช่วยเรื่องไหนคะ"
 }
 
 func handoffReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "I am routing you to a staff member. Please describe your issue and they will follow up."
 	}
-	return "กำลังส่งต่อให้เจ้าหน้าที่ กรุณาอธิบายปัญหาของคุณ แล้วเจ้าหน้าที่จะติดต่อกลับ"
+	return "กำลังส่งต่อให้เจ้าหน้าที่ค่ะ กรุณาอธิบายปัญหาของคุณ แล้วเจ้าหน้าที่จะติดต่อกลับค่ะ"
 }
 
 func noResultsReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "I could not find any cases matching that."
 	}
-	return "ไม่พบเคสที่ตรงกับที่ค้นหา"
+	return "ไม่พบเคสที่ตรงกับที่ค้นหาค่ะ"
 }
 
 func confirmActionReply(locale, summary string) string {
@@ -186,19 +171,19 @@ func permissionDeniedReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "You do not have permission for that lookup. Ask an administrator for access."
 	}
-	return "คุณไม่มีสิทธิ์ใช้งานคำสั่งนี้ กรุณาติดต่อผู้ดูแลระบบ"
+	return "คุณไม่มีสิทธิ์ใช้งานคำสั่งนี้ค่ะ กรุณาติดต่อผู้ดูแลระบบ"
 }
 
 func clarifyReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "I could not tell which case, employee, or product you meant. Please include the case code or the exact name."
 	}
-	return "ไม่แน่ใจว่าหมายถึงเคส พนักงาน หรือสินค้าใด กรุณาระบุรหัสเคสหรือชื่อที่ชัดเจน"
+	return "ไม่แน่ใจว่าหมายถึงเคส พนักงาน หรือสินค้าใดคะ กรุณาระบุรหัสเคสหรือชื่อที่ชัดเจนค่ะ"
 }
 
 func toolFailedReply(locale string) string {
 	if locale == dto.ChatLocaleEnglish {
 		return "I could not complete that lookup. Please try again."
 	}
-	return "ไม่สามารถดำเนินการค้นหาได้ กรุณาลองใหม่อีกครั้ง"
+	return "ไม่สามารถดำเนินการค้นหาได้ค่ะ กรุณาลองใหม่อีกครั้ง"
 }

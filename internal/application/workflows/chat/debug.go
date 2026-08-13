@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode/utf8"
 
@@ -167,14 +168,14 @@ func attachChatDebug(resp dto.ChatResponse, tool *dto.ChatToolDebug, timings map
 	}
 	resp.Debug = &dto.ChatDebug{
 		Tool:           tool,
-		Events:         buildDebugEvents(tool, timings, cacheHit, resp.Status),
+		Events:         buildDebugEvents(tool, timings, cacheHit),
 		StageTimingsMS: timings,
 		CacheHit:       cacheHit,
 	}
 	return resp
 }
 
-func buildDebugEvents(tool *dto.ChatToolDebug, timings map[string]int64, cacheHit bool, status string) []dto.ChatDebugEvent {
+func buildDebugEvents(tool *dto.ChatToolDebug, timings map[string]int64, cacheHit bool) []dto.ChatDebugEvent {
 	events := make([]dto.ChatDebugEvent, 0, len(timings)+6)
 	events = append(events,
 		dto.ChatDebugEvent{
@@ -234,9 +235,7 @@ func buildDebugEvents(tool *dto.ChatToolDebug, timings map[string]int64, cacheHi
 			callContext := make(map[string]string, len(tool.Params)+2)
 			callContext["handler"] = tool.Handler
 			callContext["operation"] = strings.ToUpper(tool.Kind)
-			for key, value := range tool.Params {
-				callContext[key] = value
-			}
+			maps.Copy(callContext, tool.Params)
 			events = append(events, dto.ChatDebugEvent{
 				Stage:      "tool.call",
 				State:      tool.Outcome,

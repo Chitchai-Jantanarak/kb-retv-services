@@ -14,7 +14,6 @@ import (
 type Turn struct {
 	SessionID  int64
 	Role       string
-	Body       string
 	CiteKey    string
 	CiteValues []string
 	ToolID     string
@@ -110,9 +109,9 @@ func (r *Repository) AppendTurn(ctx context.Context, turn Turn) error {
 		encoded = string(raw)
 	}
 	if _, err := r.db.ExecContext(ctx, `
-INSERT INTO chat_turns (session_id, role, body, cite_key, cite_values, tool_id, outcome)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		turn.SessionID, turn.Role, turn.Body,
+INSERT INTO chat_turns (session_id, role, cite_key, cite_values, tool_id, outcome)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		turn.SessionID, turn.Role,
 		nullableString(turn.CiteKey), encoded,
 		nullableString(turn.ToolID), nullableString(turn.Outcome)); err != nil {
 		return fmt.Errorf("chatsession: append turn: %w", err)

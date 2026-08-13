@@ -11,6 +11,8 @@ const (
 	principalKey
 	coverageKey
 	citeCandidatesKey
+	queryVectorKey
+	routerIntentKey
 )
 
 type Principal struct {
@@ -122,4 +124,28 @@ func WithCiteCandidates(ctx context.Context, candidates []string) context.Contex
 func CiteCandidates(ctx context.Context) []string {
 	candidates, _ := ctx.Value(citeCandidatesKey).([]string)
 	return candidates
+}
+
+func WithQueryVector(ctx context.Context, vector []float32) context.Context {
+	if len(vector) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, queryVectorKey, vector)
+}
+
+func QueryVector(ctx context.Context) []float32 {
+	vector, _ := ctx.Value(queryVectorKey).([]float32)
+	return vector
+}
+
+func WithRouterIntent(ctx context.Context, intent string) context.Context {
+	if intent == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, routerIntentKey, intent)
+}
+
+func RouterIntent(ctx context.Context) string {
+	intent, _ := ctx.Value(routerIntentKey).(string)
+	return intent
 }

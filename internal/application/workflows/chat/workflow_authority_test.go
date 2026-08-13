@@ -10,6 +10,7 @@ import (
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/tools"
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
@@ -77,6 +78,41 @@ func TestActivityReflectsExecutedStages(t *testing.T) {
 	}
 	if codes["searched_knowledge"] {
 		t.Fatalf("tool turn falsely claims searched_knowledge: %v", resp.Activity)
+	}
+}
+
+func TestTemplateModeToolWithTableNeverCallsComposeToolReply(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	table := &skeleton.ToolTable{
+		ToolID:  "f1_find_cases",
+		Columns: []tools.ToolColumn{{Key: "code", Type: "case_ref", Primary: true}},
+		Rows:    []map[string]string{{"code": "REP-4106"}},
+	}
+	orch := stubOrch{resp: skeleton.Response{
+		Matched:     true,
+		ToolID:      "f1_find_cases",
+		ComposeMode: "template",
+		Headline:    "latest case is REP-4106",
+		Lines:       []string{"REP-4106"},
+		Table:       table,
+	}}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	resp, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "latest case"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 for template-mode tool even with a table present", provider.calls)
+	}
+	if resp.Reply != "latest case is REP-4106" {
+		t.Fatalf("reply = %q, want the deterministic headline unchanged", resp.Reply)
 	}
 }
 

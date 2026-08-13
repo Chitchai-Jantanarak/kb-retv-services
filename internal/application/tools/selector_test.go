@@ -233,3 +233,74 @@ func TestSelectSurfacesOptionalParams(t *testing.T) {
 		t.Fatalf("params = %v, want empty when no keyword present", got.Params)
 	}
 }
+
+func runnerUpTools() []Tool {
+	return []Tool{
+		{ID: "top", Anchors: []string{"top"}, Thresholds: Thresholds{Accept: 0.3}, RBAC: RBAC{RequiresPermission: "report.view"}},
+		{ID: "mid", Anchors: []string{"mid"}, Thresholds: Thresholds{Accept: 0.3}, RBAC: RBAC{RequiresPermission: "report.view"}},
+		{ID: "low", Anchors: []string{"low"}, Thresholds: Thresholds{Accept: 0.3}, RBAC: RBAC{RequiresPermission: "team.view"}},
+	}
+}
+
+func runnerUpEmb() fakeEmbedder {
+	return fakeEmbedder{table: map[string][]float32{
+		"top":   {1, 0},
+		"mid":   {0.7, 0.7141428},
+		"low":   {0.5, 0.8660254},
+		"query": {1, 0},
+	}}
+}
+
+func TestSelectRunnerUpWithTwoEligible(t *testing.T) {
+	s, err := NewSelector(context.Background(), runnerUpEmb(), runnerUpTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "query", []string{"report.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.ToolID != "top" || !got.Matched {
+		t.Fatalf("want top matched, got %+v", got)
+	}
+	if got.RunnerUp < 0.69 || got.RunnerUp > 0.71 {
+		t.Fatalf("RunnerUp = %v, want ~0.7 (mid's score)", got.RunnerUp)
+	}
+}
+
+func TestSelectRunnerUpWithOneEligible(t *testing.T) {
+	s, err := NewSelector(context.Background(), runnerUpEmb(), runnerUpTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "query", []string{"team.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.ToolID != "low" || !got.Matched {
+		t.Fatalf("want low matched, got %+v", got)
+	}
+	if got.RunnerUp != 0 {
+		t.Fatalf("RunnerUp = %v, want 0 with a single eligible candidate", got.RunnerUp)
+	}
+}
+
+func TestSelectRunnerUpWithZeroEligible(t *testing.T) {
+	s, err := NewSelector(context.Background(), runnerUpEmb(), runnerUpTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+
+	got, err := s.Select(context.Background(), "query", nil)
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Matched {
+		t.Fatalf("nothing should be eligible, got %+v", got)
+	}
+	if got.RunnerUp != 0 {
+		t.Fatalf("RunnerUp = %v, want 0 with zero eligible candidates", got.RunnerUp)
+	}
+}

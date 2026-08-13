@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestBuildFTSBooleanQueryRequiresEveryTerm(t *testing.T) {
+func TestBuildFTSBooleanQueryTermsAreOptional(t *testing.T) {
 	got := buildFTSBooleanQuery("reset the robot")
-	want := `+"reset" +"the" +"robot"`
+	want := `"reset" "the" "robot"`
 	if got != want {
 		t.Fatalf("buildFTSBooleanQuery() = %q, want %q", got, want)
 	}
@@ -15,7 +15,7 @@ func TestBuildFTSBooleanQueryRequiresEveryTerm(t *testing.T) {
 
 func TestBuildFTSBooleanQueryDropsSingleCharacterWords(t *testing.T) {
 	got := buildFTSBooleanQuery("a robot is x")
-	want := `+"robot" +"is"`
+	want := `"robot" "is"`
 	if got != want {
 		t.Fatalf("buildFTSBooleanQuery() = %q, want %q", got, want)
 	}
@@ -28,28 +28,28 @@ func TestBuildFTSBooleanQueryWindowsUnsegmentedRuns(t *testing.T) {
 		t.Fatalf("buildFTSBooleanQuery() = %q, want several overlapping windows", got)
 	}
 	for _, term := range terms {
-		if !strings.HasPrefix(term, `+"`) || !strings.HasSuffix(term, `"`) {
-			t.Fatalf("term %q is not a required phrase", term)
+		if !strings.HasPrefix(term, `"`) || !strings.HasSuffix(term, `"`) {
+			t.Fatalf("term %q is not quoted", term)
 		}
-		if runes := []rune(term); len(runes) != ftsWindowSize+3 {
-			t.Fatalf("term %q has %d runes, want a %d-rune window", term, len(runes)-3, ftsWindowSize)
+		if runes := []rune(term); len(runes) != ftsWindowSize+2 {
+			t.Fatalf("term %q has %d runes, want a %d-rune window", term, len(runes)-2, ftsWindowSize)
 		}
 	}
 }
 
 func TestBuildFTSBooleanQuerySplitsScripts(t *testing.T) {
 	got := buildFTSBooleanQuery("Bella Bot พัง")
-	if !strings.Contains(got, `+"Bella"`) || !strings.Contains(got, `+"Bot"`) {
+	if !strings.Contains(got, `"Bella"`) || !strings.Contains(got, `"Bot"`) {
 		t.Fatalf("buildFTSBooleanQuery() = %q, want latin words kept whole", got)
 	}
-	if !strings.Contains(got, `+"พัง"`) {
+	if !strings.Contains(got, `"พัง"`) {
 		t.Fatalf("buildFTSBooleanQuery() = %q, want the short thai run kept whole", got)
 	}
 }
 
 func TestBuildFTSBooleanQueryRejectsBooleanOperators(t *testing.T) {
 	got := buildFTSBooleanQuery(`robot" -exclude +(force) ~near*`)
-	for _, bad := range []string{`-`, `~`, `*`, `(`, `)`} {
+	for _, bad := range []string{`-`, `~`, `*`, `(`, `)`, `+`} {
 		if strings.Contains(got, bad) {
 			t.Fatalf("buildFTSBooleanQuery() = %q, leaked operator %q", got, bad)
 		}

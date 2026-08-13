@@ -6,16 +6,15 @@ import (
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/tools"
 	"github.com/my/app/internal/application/workflows/intake"
 )
 
 var replyRe = regexp.MustCompile(`"reply"\s*:\s*"((?:[^"\\]|\\.)*)`)
 
-var caseCodeRe = regexp.MustCompile(`(?i)\b(REP-\d+)\b`)
-
 func searchQueryText(raw string) string {
-	if m := caseCodeRe.FindString(raw); m != "" {
-		return strings.ToUpper(m)
+	if ref, ok := tools.ParseCaseRef(raw); ok && ref.Namespace == tools.CaseRefRep {
+		return ref.Code
 	}
 	if len(strings.Fields(raw)) > searchQueryMaxWords {
 		return ""

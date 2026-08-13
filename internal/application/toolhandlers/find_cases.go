@@ -6,12 +6,13 @@ import (
 	"strconv"
 
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/tools"
 )
 
 var countRe = regexp.MustCompile(`\b([1-9][0-9]?)\b`)
 
 func requestedLimit(text string, cap int) int {
-	cleaned := caseCodeRe.ReplaceAllString(text, "")
+	cleaned := tools.StripCaseRefs(text)
 	m := countRe.FindStringSubmatch(cleaned)
 	if m == nil {
 		return cap

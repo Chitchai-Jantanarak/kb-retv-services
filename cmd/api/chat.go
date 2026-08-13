@@ -156,6 +156,11 @@ func appendChatIntelligenceOptions(
 		log.Info("chat intent router configured")
 	}
 
+	if guardEmbedder != nil {
+		chatOpts = append(chatOpts, chatwf.WithKnowledgeReranker(guardEmbedder))
+		log.Info("chat knowledge reranker configured")
+	}
+
 	catalog, err := tools.Load(os.DirFS("config/tools"), perms.Set())
 	if err != nil {
 		log.Warn("tool orchestrator not configured", zap.Error(err))

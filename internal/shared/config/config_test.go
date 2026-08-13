@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadFromReadsConfigFileAndDerivesProductionSwagger(t *testing.T) {
+	isolateEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	body := []byte(`
@@ -94,6 +95,7 @@ apiKeys:
 }
 
 func TestLoadDefaultsToDevSwaggerEnabled(t *testing.T) {
+	isolateEnv(t)
 	cfg, err := LoadFrom("")
 	if err != nil {
 		t.Fatalf("LoadFrom() error = %v", err)
@@ -114,6 +116,7 @@ func TestLoadDefaultsToDevSwaggerEnabled(t *testing.T) {
 }
 
 func TestLoadFromReadsDotEnvNextToConfigFile(t *testing.T) {
+	isolateEnv(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	envPath := filepath.Join(dir, ".env")

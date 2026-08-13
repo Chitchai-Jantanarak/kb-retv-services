@@ -181,7 +181,7 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 				continue
 			}
 			select {
-			case out <- ports.Completion{Text: chunk.Delta.Text, Vendor: "anthropic"}:
+			case out <- ports.Completion{Text: chunk.Delta.Text, Vendor: "anthropic", Model: c.model}:
 			case <-ctx.Done():
 				return
 			}
@@ -291,6 +291,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (port
 			Total:  parsed.Usage.InputTokens + parsed.Usage.OutputTokens,
 		},
 		Vendor: "anthropic",
+		Model:  c.model,
 	}, nil
 }
 

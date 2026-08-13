@@ -55,7 +55,13 @@ func (s *Selector) extractParams(ctx context.Context, params []compiledParam, te
 	for _, p := range params {
 		value := ""
 		if p.re != nil {
-			value = strings.ToUpper(strings.TrimSpace(p.re.FindString(text)))
+			if isCaseRefParamPattern(p.pattern) {
+				if ref, ok := ParseCaseRef(text); ok {
+					value = ref.Code
+				}
+			} else {
+				value = strings.ToUpper(strings.TrimSpace(p.re.FindString(text)))
+			}
 		}
 		if value == "" && p.keywords != nil {
 			bestLen := 0
@@ -186,10 +192,20 @@ func requiredCount(params []compiledParam) int {
 	return n
 }
 
+func missingRequired(params []compiledParam, extracted map[string]string) []string {
+	var missing []string
+	for _, p := range params {
+		if p.required && extracted[p.name] == "" {
+			missing = append(missing, p.name)
+		}
+	}
+	return missing
+}
+
 func entityMatched(params []compiledParam, extracted map[string]string) int {
 	n := 0
 	for _, p := range params {
-		if p.required && p.lookup != "" && extracted[p.name] != "" {
+		if p.required && extracted[p.name] != "" && (p.lookup != "" || isCaseRefParamPattern(p.pattern)) {
 			n++
 		}
 	}

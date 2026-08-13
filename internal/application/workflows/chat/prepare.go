@@ -27,14 +27,15 @@ type chatPreamble struct {
 	toolDebug  *dto.ChatToolDebug
 	transcript string
 	tool       *skeleton.Response
+	toolTrace  *skeleton.Response
 	decision   intent.Decision
 	candidates []string
 }
 
 // prepare runs the pre-stages shared by Run and RunStream: request scope
-// checks, audio transcription, the fast off-domain guard, intent routing,
-// and the tool orchestrator short-circuit. It returns handled=true when the
-// caller should use resp as the final answer without touching the LLM.
+// checks, audio transcription, intent routing, and the tool orchestrator
+// short-circuit. It returns handled=true when the caller should use resp as
+// the final answer without touching the LLM.
 func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map[string]int64) (chatPreamble, error) {
 	companyID, ok := ctxkey.CompanyID(ctx)
 	if !ok || companyID <= 0 {
@@ -65,6 +66,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		return chatPreamble{}, err
 	}
 	var selectedToolDebug *dto.ChatToolDebug
+	var toolTrace *skeleton.Response
 	if w.orch != nil && decision.Intent != intent.Social {
 		var toolResp skeleton.Response
 		var toolErr error
@@ -75,9 +77,12 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		}
 		candidates := w.citeCandidates(ctx, companyID, req)
 		toolCtx = ctxkey.WithCiteCandidates(toolCtx, candidates)
+		toolCtx = ctxkey.WithQueryVector(toolCtx, decision.Vector)
+		toolCtx = ctxkey.WithRouterIntent(toolCtx, string(decision.Intent))
 		timedChat(timings, "tool", func() {
 			toolResp, toolErr = w.orch.Handle(toolCtx, toolActor(ctx, companyID), lastUser)
 		})
+		toolTrace = &toolResp
 		if req.Debug {
 			selectedToolDebug = buildToolDebug(toolResp, toolErr, timings["tool"], traceCollector.Events())
 			if selectedToolDebug != nil {
@@ -100,6 +105,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 				handled:    true,
 				toolDebug:  selectedToolDebug,
 				transcript: transcript,
+				toolTrace:  toolTrace,
 				resp: dto.ChatResponse{
 					Reply:    reply,
 					Status:   dto.ChatStatusNeedsClarification,
@@ -115,6 +121,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 				handled:    true,
 				toolDebug:  selectedToolDebug,
 				transcript: transcript,
+				toolTrace:  toolTrace,
 				resp: dto.ChatResponse{
 					Reply:    toolFailedReply(req.Locale),
 					Status:   dto.ChatStatusToolFailed,
@@ -126,9 +133,11 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		if toolErr == nil && toolResp.Matched {
 			resp := toolChatResponse(req.Locale, toolResp)
 			if summaryComposeMode(toolResp, req) {
-				if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
-					resp.Reply = summary
-				}
+				timedChat(timings, "compose", func() {
+					if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
+						resp.Reply = summary
+					}
+				})
 			}
 			return chatPreamble{
 				companyID:  companyID,
@@ -136,10 +145,31 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 				handled:    true,
 				toolDebug:  selectedToolDebug,
 				transcript: transcript,
+				toolTrace:  toolTrace,
 				resp:       resp,
 				tool:       &toolResp,
 				decision:   decision,
 				candidates: candidates,
+			}, nil
+		}
+		if toolErr == nil && !toolResp.Matched && len(toolResp.MissingParams) > 0 {
+			reply := clarifyReply(req.Locale)
+			if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, toolResp.MissingParams, toolResp.Params); ok {
+				reply = modelReply
+			}
+			return chatPreamble{
+				companyID:  companyID,
+				lastUser:   lastUser,
+				handled:    true,
+				toolDebug:  selectedToolDebug,
+				transcript: transcript,
+				toolTrace:  toolTrace,
+				resp: dto.ChatResponse{
+					Reply:    reply,
+					Status:   dto.ChatStatusNeedsClarification,
+					Activity: activity(req.Locale, "request_checked", "permission_checked"),
+				},
+				decision: decision,
 			}, nil
 		}
 		if authoritativeIntent(decision.Intent) {
@@ -153,6 +183,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 				handled:    true,
 				toolDebug:  selectedToolDebug,
 				transcript: transcript,
+				toolTrace:  toolTrace,
 				resp: dto.ChatResponse{
 					Reply:    reply,
 					Status:   status,
@@ -163,10 +194,10 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		}
 	}
 	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, toolDebug: selectedToolDebug, transcript: transcript, resp: resp, decision: decision}, nil
+		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, toolDebug: selectedToolDebug, transcript: transcript, toolTrace: toolTrace, resp: resp, decision: decision}, nil
 	}
 
-	return chatPreamble{companyID: companyID, lastUser: lastUser, toolDebug: selectedToolDebug, transcript: transcript, decision: decision}, nil
+	return chatPreamble{companyID: companyID, lastUser: lastUser, toolDebug: selectedToolDebug, transcript: transcript, toolTrace: toolTrace, decision: decision}, nil
 }
 
 // transcribeLastUserAudio finds the first audio attachment on the last user
@@ -279,7 +310,6 @@ func (w *Workflow) persistTurns(ctx context.Context, companyID int64, req dto.Ch
 	if err := w.sessions.AppendTurn(ctx, chatsession.Turn{
 		SessionID: sessionID,
 		Role:      "user",
-		Body:      req.LastUserMessage(),
 	}); err != nil {
 		log.Warn("chat: append user turn", zap.Error(err))
 		return
@@ -288,8 +318,8 @@ func (w *Workflow) persistTurns(ctx context.Context, companyID int64, req dto.Ch
 	turn := chatsession.Turn{
 		SessionID: sessionID,
 		Role:      "assistant",
-		Body:      resp.Reply,
-		Outcome:   resp.Status,
+
+		Outcome: resp.Status,
 	}
 	if tool != nil {
 		turn.CiteKey, turn.CiteValues, turn.ToolID = tool.Cite, tool.CiteValues, tool.ToolID

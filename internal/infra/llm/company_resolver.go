@@ -49,6 +49,8 @@ type cacheEntry struct {
 
 const DefaultConfidenceThreshold = 0.85
 
+var ErrAIDisabled = ports.ErrAIDisabled
+
 func NewCompanyResolver(lookup AgentLookup, defaults Settings) (*CompanyResolver, error) {
 	if strings.TrimSpace(defaults.Vendor) == "" {
 		return nil, errors.New("llm: company resolver: defaults.Vendor is required")
@@ -121,31 +123,34 @@ func (r *CompanyResolver) AgentFor(ctx context.Context, companyID int64) (AgentC
 	return cfg, nil
 }
 
+// No active ai_agents row means AI is off for the silo: never borrow the platform provider.
 func (r *CompanyResolver) lookupAgent(ctx context.Context, companyID int64) (AgentConfig, error) {
-	cfg := AgentConfig{
-		Vendor:              r.defaults.Vendor,
-		Model:               r.defaults.Model,
-		ConfidenceThreshold: r.defaultThreshold,
-	}
-
 	agent, ok, err := r.lookup.AgentFor(ctx, companyID)
 	if err != nil {
 		return AgentConfig{}, fmt.Errorf("llm: company resolver: lookup company %d: %w", companyID, err)
 	}
-	if ok {
-		cfg.ID = agent.ID
-		if v := strings.TrimSpace(agent.Vendor); v != "" && !strings.EqualFold(v, "default") {
-			cfg.Vendor = v
-		}
-		if m := strings.TrimSpace(agent.Model); m != "" {
-			cfg.Model = m
-		}
-		if agent.ConfidenceThreshold > 0 {
-			cfg.ConfidenceThreshold = agent.ConfidenceThreshold
-		}
-		cfg.APIKey = agent.APIKey
-		cfg.BaseURL = agent.BaseURL
+	if !ok {
+		return AgentConfig{}, ErrAIDisabled
 	}
+
+	cfg := AgentConfig{
+		ID:                  agent.ID,
+		Vendor:              r.defaults.Vendor,
+		Model:               r.defaults.Model,
+		ConfidenceThreshold: r.defaultThreshold,
+	}
+	if v := strings.TrimSpace(agent.Vendor); v != "" && !strings.EqualFold(v, "default") {
+		cfg.Vendor = v
+	}
+	if m := strings.TrimSpace(agent.Model); m != "" {
+		cfg.Model = m
+	}
+	if agent.ConfidenceThreshold > 0 {
+		cfg.ConfidenceThreshold = agent.ConfidenceThreshold
+	}
+	cfg.APIKey = agent.APIKey
+	cfg.BaseURL = agent.BaseURL
+
 	return cfg, nil
 }
 

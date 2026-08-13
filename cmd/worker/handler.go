@@ -42,13 +42,6 @@ func makeHandler(fn taskHandler) asynq.HandlerFunc {
 	}
 }
 
-func stubHandler(name string) taskHandler {
-	return func(_ context.Context, job ports.Job) error {
-		log.Printf("TODO handler type=%s company=%d", name, job.CompanyID)
-		return nil
-	}
-}
-
 func unavailable(name, reason string) taskHandler {
 	err := fmt.Errorf("%s unavailable: %s", name, reason)
 	return func(_ context.Context, _ ports.Job) error { return err }

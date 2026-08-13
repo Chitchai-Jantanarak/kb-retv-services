@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"maps"
 	"strings"
 	"time"
 )
@@ -78,8 +79,6 @@ func copyStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }

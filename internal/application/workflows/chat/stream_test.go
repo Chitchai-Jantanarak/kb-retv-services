@@ -8,6 +8,7 @@ import (
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/application/skeleton"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 )
@@ -188,6 +189,76 @@ func TestRunStreamOffDomainSkipsProviderStream(t *testing.T) {
 	}
 	if events[1].Status != dto.ChatStatusHandoff {
 		t.Fatalf("status = %q, want handoff", events[1].Status)
+	}
+}
+
+func TestRunStreamGenerativePathRecordsExactlyOneTurn(t *testing.T) {
+	provider := &streamStubProvider{chunks: []string{"Hel", "lo"}}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB-1", Content: "known fix", Relevance: 7.5}}}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	emit := func(dto.ChatStreamEvent) error { return nil }
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	err = wf.RunStream(ctx, dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broke"}},
+		Locale:   dto.ChatLocaleEnglish,
+	}, emit)
+	if err != nil {
+		t.Fatalf("RunStream() error = %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+}
+
+func TestRunStreamFallbackRecordsExactlyOneTurn(t *testing.T) {
+	provider := &streamStubProvider{streamErr: errStreamUnavailable, fallback: "fallback answer"}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	emit := func(dto.ChatStreamEvent) error { return nil }
+	ctx := ctxkey.WithCompanyID(context.Background(), 7)
+	err = wf.RunStream(ctx, dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hi"}},
+	}, emit)
+	if err != nil {
+		t.Fatalf("RunStream() error = %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+}
+
+func TestRunStreamToolShortCircuitRecordsExactlyOneTurn(t *testing.T) {
+	provider := &streamStubProvider{chunks: []string{"should not run"}}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{resp: skeleton.Response{Matched: true, ToolID: "f1_find_cases", Headline: "2 cases match", Lines: []string{"C1|open"}}}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch), WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	emit := func(dto.ChatStreamEvent) error { return nil }
+	ctx := ctxkey.WithCompanyID(context.Background(), 3)
+	err = wf.RunStream(ctx, dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	}, emit)
+	if err != nil {
+		t.Fatalf("RunStream() error = %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+	if turns.audits[0].ToolID != "f1_find_cases" {
+		t.Fatalf("audit.ToolID = %q, want f1_find_cases", turns.audits[0].ToolID)
 	}
 }
 

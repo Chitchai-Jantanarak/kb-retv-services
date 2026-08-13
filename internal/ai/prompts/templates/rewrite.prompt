@@ -1,6 +1,7 @@
 @name      rewrite
 @required  query
 @max_toks  120
+@thinking  0
 @temp      0.1
 
 @system

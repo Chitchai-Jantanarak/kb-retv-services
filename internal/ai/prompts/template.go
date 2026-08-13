@@ -18,6 +18,7 @@ type Template struct {
 	User         string
 	RequiredVars []string
 	MaxToks      int
+	ThinkBudget  *int
 	Temp         float32
 	Stop         []string
 }
@@ -40,12 +41,13 @@ func (t Template) Render(vars map[string]string) (ports.Prompt, error) {
 	user := substitute(t.User, vars)
 
 	return ports.Prompt{
-		System:  system,
-		User:    user,
-		Vars:    vars,
-		MaxToks: t.MaxToks,
-		Temp:    t.Temp,
-		Stop:    t.Stop,
+		System:      system,
+		User:        user,
+		Vars:        vars,
+		MaxToks:     t.MaxToks,
+		ThinkBudget: t.ThinkBudget,
+		Temp:        t.Temp,
+		Stop:        t.Stop,
 	}, nil
 }
 

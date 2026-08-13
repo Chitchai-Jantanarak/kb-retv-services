@@ -8,13 +8,18 @@ import (
 	"log"
 	"time"
 
+	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/application/services/kbbootstrap"
+	"github.com/my/app/internal/application/workflows/classify"
 	"github.com/my/app/internal/application/workflows/graphsync"
 	"github.com/my/app/internal/infra/memgraph"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
+	classifymysql "github.com/my/app/internal/repositories/classify/mysql"
 	"github.com/my/app/internal/repositories/graph"
 	mysqlkb "github.com/my/app/internal/repositories/kb/mysql"
+	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
 	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/shared/llmboot"
 )
 
 func main() {
@@ -23,6 +28,7 @@ func main() {
 	limit := flag.Int("limit", 0, "maximum records to process")
 	chunkRunes := flag.Int("chunk-runes", kbbootstrap.DefaultChunkRunes, "chunk size in runes")
 	sinceText := flag.String("since", "", "graph-sync lower bound, RFC3339 or YYYY-MM-DD")
+	timeout := flag.Duration("timeout", 10*time.Minute, "overall task deadline, e.g. 45m or 2h")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -39,7 +45,7 @@ func main() {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
 	switch *task {
@@ -99,6 +105,39 @@ func main() {
 			log.Fatalf("graph sync: %v", err)
 		}
 		fmt.Printf("graph sync complete: company=%d articles=%d edges=%d skipped=%d\n", *company, result.Articles, result.Edges, result.Skipped)
+	case "classify":
+		if *company <= 0 {
+			log.Fatal("classify: -company must be positive")
+		}
+		resolver, err := llmboot.Resolver(cfg, db)
+		if err != nil {
+			log.Fatalf("classify: resolver: %v", err)
+		}
+		registry, err := prompts.NewRegistry()
+		if err != nil {
+			log.Fatalf("classify: load prompts: %v", err)
+		}
+		repository := classifymysql.New(db)
+		workflow, err := classify.New(classify.Config{
+			Registry: registry,
+			Source:   repository,
+			Lookup:   repository,
+			Sink:     repository,
+			Resolve:  resolver.ResolveFor,
+			Review:   reviewmysql.NewOutboxWriter(db),
+			Model:    cfg.LLM.DefaultModel,
+		})
+		if err != nil {
+			log.Fatalf("classify: build workflow: %v", err)
+		}
+		result, err := workflow.Run(ctx, classify.Options{
+			CompanyID: *company,
+			Limit:     *limit,
+		})
+		if err != nil {
+			log.Fatalf("classify: %v", err)
+		}
+		fmt.Printf("classify complete: company=%d examined=%d classified=%d failed=%d\n", *company, result.Examined, result.Classified, result.Failed)
 	default:
 		log.Fatalf("unknown task %q", *task)
 	}

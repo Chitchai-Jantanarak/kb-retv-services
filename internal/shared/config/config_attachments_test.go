@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadFromReadsLaravelAttachmentFetchFields(t *testing.T) {
+	isolateEnv(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	envPath := filepath.Join(dir, ".env")

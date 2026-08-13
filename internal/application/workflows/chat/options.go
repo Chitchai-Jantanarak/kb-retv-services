@@ -29,6 +29,10 @@ type CaseSource interface {
 	SearchCases(ctx context.Context, coverage []int64, query, product, status string, limit int) ([]dto.ChatCaseResult, error)
 }
 
+type Embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 type Option func(*Workflow)
 
 func WithCache(cache ports.Cache, ttl time.Duration) Option {
@@ -77,6 +81,14 @@ func WithTranscription(fetcher ports.AttachmentFetcher, transcriber ports.Transc
 		if fetcher != nil && transcriber != nil {
 			w.fetcher = fetcher
 			w.transcriber = transcriber
+		}
+	}
+}
+
+func WithKnowledgeReranker(emb Embedder) Option {
+	return func(w *Workflow) {
+		if emb != nil {
+			w.knowledgeReranker = emb
 		}
 	}
 }

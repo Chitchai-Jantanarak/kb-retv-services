@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -33,9 +34,7 @@ func (p *openaiCompatProvider) embed(ctx context.Context, texts []string) ([][]f
 		"model": p.model,
 	}
 	if p.extraFields != nil {
-		for k, v := range p.extraFields() {
-			body[k] = v
-		}
+		maps.Copy(body, p.extraFields())
 	}
 
 	payload, err := json.Marshal(body)

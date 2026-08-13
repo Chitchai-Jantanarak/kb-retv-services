@@ -51,7 +51,7 @@ func EmbeddingSettings(cfg config.Config) embeddings.ProviderSettings {
 
 func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error) {
 	var lookup llm.AgentLookup
-	if db != nil {
+	if db != nil && cfg.LLM.Enabled {
 		lookup = mysqlai.NewAgentLookup(db, cfg.LLM.ProviderConfigKey)
 	}
 	resolver, err := llm.NewCompanyResolver(lookup, LLMSettings(cfg))

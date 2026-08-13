@@ -47,6 +47,8 @@ func TestProbeKnowledgeMiss(t *testing.T) {
 		{"หาเคสที่ยังรออยู่", "f1_find_cases"},
 		{"รายงานล่าสุดที่ต้องดู", "f1_find_cases"},
 		{"show me tickets waiting", "f1_find_cases"},
+		{"ปัญหาใกล้กับ rep4105", "f7_knowledge"},
+		{"หาเคสที่คล้ายกับ REP-4105", "f7_knowledge"},
 		{"status of rep-4106", "f2_case_status"},
 		{"เคส REP-4106 ตอนนี้เป็นยังไง", "f2_case_status"},
 		{"cases for bella bot", "f5_product_cases"},

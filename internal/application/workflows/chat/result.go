@@ -82,9 +82,10 @@ func toolChatResponse(locale string, r skeleton.Response) dto.ChatResponse {
 			Activity: activity(locale, "request_checked", "permission_checked"),
 		}
 	}
-	reply := r.Headline
+	headline := resolveHeadline(locale, r)
+	reply := headline
 	if len(r.Lines) > 0 && r.Table == nil {
-		reply = r.Headline + "\n" + strings.Join(r.Lines, "\n")
+		reply = headline + "\n" + strings.Join(r.Lines, "\n")
 	}
 	return dto.ChatResponse{
 		Reply:      reply,
@@ -92,6 +93,13 @@ func toolChatResponse(locale string, r skeleton.Response) dto.ChatResponse {
 		Activity:   activity(locale, "request_checked", "permission_checked", "used_tool", "answer_prepared"),
 		ToolResult: toChatToolResult(r.Table),
 	}
+}
+
+func resolveHeadline(locale string, r skeleton.Response) string {
+	if headline, ok := r.HeadlineVariants[locale]; ok {
+		return headline
+	}
+	return r.Headline
 }
 
 func toChatToolResult(table *skeleton.ToolTable) *dto.ChatToolResult {

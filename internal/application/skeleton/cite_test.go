@@ -25,7 +25,7 @@ func TestResponseCarriesCiteKeyAndValues(t *testing.T) {
 		{"code": "REP-4105", "title": "second"},
 	}
 
-	got := compose(tool, rows)
+	got := compose(tool, rows, nil)
 
 	if got.Cite != "code" {
 		t.Fatalf("Cite = %q, want %q", got.Cite, "code")
@@ -43,7 +43,7 @@ func TestResponseCarriesCiteKeyAndValues(t *testing.T) {
 
 func TestResponseCiteValuesEmptyWhenToolDeclaresNoCite(t *testing.T) {
 	tool := tools.Tool{ID: "f4_workload", Kind: "read", Compose: tools.Compose{Mode: "template"}}
-	got := compose(tool, []Row{{"name": "somchai"}})
+	got := compose(tool, []Row{{"name": "somchai"}}, nil)
 
 	if got.Cite != "" || len(got.CiteValues) != 0 {
 		t.Fatalf("Cite=%q CiteValues=%v, want both empty", got.Cite, got.CiteValues)

@@ -134,8 +134,14 @@ func TestRunReturnsReplySourcesAndCase(t *testing.T) {
 	if !strings.Contains(provider.prompt.System, "English") {
 		t.Fatal("System prompt missing rendered language")
 	}
-	if !strings.Contains(provider.prompt.System, "known fix") {
-		t.Fatal("System prompt missing rendered knowledge block")
+	if strings.Contains(provider.prompt.System, "known fix") {
+		t.Fatal("retrieved content reached the system slot, where it reads as instruction")
+	}
+	if !strings.Contains(provider.prompt.User, "known fix") {
+		t.Fatal("User prompt missing rendered knowledge block")
+	}
+	if !strings.Contains(provider.prompt.User, "[BEGIN REFERENCE NOTES") {
+		t.Fatal("knowledge block missing untrusted-data delimiters")
 	}
 	if !strings.Contains(provider.prompt.User, "User: robot broke") {
 		t.Fatal("User prompt missing transcript")
@@ -404,7 +410,7 @@ func TestRunWithoutCacheCallsProviderEveryTime(t *testing.T) {
 
 	ctx := ctxkey.WithCompanyID(context.Background(), 7)
 	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}}}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := wf.Run(ctx, req); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
 		}
@@ -428,7 +434,7 @@ func TestRunDoesNotCacheEmptyReply(t *testing.T) {
 
 	ctx := ctxkey.WithCompanyID(context.Background(), 7)
 	req := dto.ChatRequest{Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}}}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := wf.Run(ctx, req); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
 		}
@@ -472,6 +478,132 @@ type stubOrch struct {
 
 func (s stubOrch) Handle(_ context.Context, _ skeleton.Actor, _ string) (skeleton.Response, error) {
 	return s.resp, s.err
+}
+
+type fakeTurnRecorder struct {
+	calls  int
+	audits []TurnAudit
+}
+
+func (f *fakeTurnRecorder) RecordChatTurn(_ context.Context, _ int64, audit TurnAudit) error {
+	f.calls++
+	f.audits = append(f.audits, audit)
+	return nil
+}
+
+func TestRunToolPathRecordsExactlyOneTurn(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{resp: skeleton.Response{Matched: true, ToolID: "f1_find_cases", Headline: "2 cases match", Lines: []string{"C1|open", "C2|done"}}}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch), WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+	if turns.audits[0].ToolID != "f1_find_cases" {
+		t.Fatalf("audit.ToolID = %q, want f1_find_cases", turns.audits[0].ToolID)
+	}
+}
+
+func TestRunGenerativePathRecordsExactlyOneTurn(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"llm answer","case":null}`}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "hello"}},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+}
+
+func TestRunToolPathRecordsDecisionKindToolWithScoreAndMargin(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"should not run","case":null}`}
+	fts := &stubFTS{chunks: []rag.FTSChunk{{Title: "KB", Content: "x", Relevance: 7.5}}}
+	orch := stubOrch{resp: skeleton.Response{
+		Matched:        true,
+		ToolID:         "f1_find_cases",
+		Headline:       "2 cases match",
+		Lines:          []string{"C1|open", "C2|done"},
+		SelectionScore: 0.82,
+		RunnerUpScore:  0.61,
+		RowCount:       2,
+	}}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), fts, WithRouter(routerForTest(t, fts)), WithOrchestrator(orch), WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 3), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "robot broken"}},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+	audit := turns.audits[0]
+	if audit.DecisionKind != "tool" {
+		t.Fatalf("DecisionKind = %q, want tool", audit.DecisionKind)
+	}
+	if audit.Score != 0.82 || audit.RunnerUpScore != 0.61 {
+		t.Fatalf("Score/RunnerUpScore = %v/%v, want 0.82/0.61", audit.Score, audit.RunnerUpScore)
+	}
+	if audit.Margin < 0.20 || audit.Margin > 0.22 {
+		t.Fatalf("Margin = %v, want ~0.21", audit.Margin)
+	}
+	if audit.RowsReturned != 2 {
+		t.Fatalf("RowsReturned = %d, want 2", audit.RowsReturned)
+	}
+}
+
+func TestDecisionKindClassifiesOffDomainAsBlocked(t *testing.T) {
+	pre := chatPreamble{handled: true}
+	got := decisionKindOf(dto.ChatStatusOffDomain, intent.Decision{Intent: intent.OffDomain}, pre)
+	if got != "blocked" {
+		t.Fatalf("decisionKindOf = %q, want blocked", got)
+	}
+}
+
+func TestRunGenerativePathRecordsThaiLangAndGenerativeKind(t *testing.T) {
+	provider := &stubProvider{text: `{"reply":"llm answer","case":null}`}
+	turns := &fakeTurnRecorder{}
+	wf, err := New(prompts.MustNewRegistry(), resolverFor(provider), nil, WithTurnRecorder(turns))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(ctxkey.WithCompanyID(context.Background(), 7), dto.ChatRequest{
+		Messages: []dto.ChatMessage{{Role: dto.ChatRoleUser, Content: "สวัสดีครับ ช่วยดูเคสให้หน่อย"}},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if turns.calls != 1 {
+		t.Fatalf("RecordChatTurn calls = %d, want exactly 1", turns.calls)
+	}
+	audit := turns.audits[0]
+	if audit.DecisionKind != "generative" {
+		t.Fatalf("DecisionKind = %q, want generative", audit.DecisionKind)
+	}
+	if audit.Lang != "th" {
+		t.Fatalf("Lang = %q, want th", audit.Lang)
+	}
 }
 
 func TestRunToolMatchSkipsLLM(t *testing.T) {

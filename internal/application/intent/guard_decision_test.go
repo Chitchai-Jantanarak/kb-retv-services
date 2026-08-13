@@ -33,10 +33,6 @@ func TestGuardRouterClassifiesProbes(t *testing.T) {
 		t.Fatalf("read probes: %v", err)
 	}
 	var pf struct {
-		Anchors struct {
-			InDomain  []string `json:"in_domain"`
-			OffDomain []string `json:"off_domain"`
-		} `json:"anchors"`
 		Probes []struct {
 			Text  string `json:"text"`
 			Label string `json:"label"`
@@ -47,10 +43,6 @@ func TestGuardRouterClassifiesProbes(t *testing.T) {
 	}
 
 	r, err := intent.New(context.Background(), emb, zeroScorer{},
-		intent.WithAnchors(map[intent.Intent][]string{
-			intent.GeneralSupport: pf.Anchors.InDomain,
-			intent.OffDomain:      pf.Anchors.OffDomain,
-		}),
 		intent.WithThresholds(floor, accept),
 		intent.WithMargin(margin),
 	)

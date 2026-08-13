@@ -6,9 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/my/app/internal/shared/ctxkey"
+	"github.com/my/app/internal/shared/debugtrace"
 )
 
 type Querier interface {
@@ -50,7 +54,32 @@ func (p *Pool) Close() {
 	}
 }
 
-func (p *Pool) connFor(ctx context.Context) (*sql.DB, error) {
+func (p *Pool) connFor(ctx context.Context) (db *sql.DB, err error) {
+	if debugtrace.Enabled(ctx) {
+		start := time.Now()
+		defer func() {
+			state := "resolved"
+			errorCode := ""
+			safeError := ""
+			if err != nil {
+				state = "failed"
+				errorCode = "tenant_route_failed"
+				safeError = "Could not resolve the company-scoped MySQL connection."
+			}
+			debugtrace.Add(ctx, debugtrace.Event{
+				Stage:      "mysql.route",
+				State:      state,
+				Label:      "resolve company-scoped MySQL connection",
+				DurationMS: debugtrace.Since(start),
+				ErrorCode:  errorCode,
+				Error:      safeError,
+				Context: map[string]string{
+					"scope_source":  "verified context",
+					"database_name": "[hidden]",
+				},
+			})
+		}()
+	}
 	cid, ok := ctxkey.CompanyID(ctx)
 	if !ok || cid <= 0 {
 		return nil, errors.New("tenant: company_id missing from context")
@@ -121,7 +150,10 @@ func (r *Router) QueryContext(ctx context.Context, query string, args ...any) (*
 	if err != nil {
 		return nil, err
 	}
-	return db.QueryContext(ctx, query, args...)
+	start := sqlTraceStart(ctx)
+	rows, err := db.QueryContext(ctx, query, args...)
+	recordSQLTrace(ctx, "mysql.query", query, len(args), start, err)
+	return rows, err
 }
 
 func (r *Router) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
@@ -129,7 +161,10 @@ func (r *Router) QueryRowContext(ctx context.Context, query string, args ...any)
 	if err != nil {
 		panic(err)
 	}
-	return db.QueryRowContext(ctx, query, args...)
+	start := sqlTraceStart(ctx)
+	row := db.QueryRowContext(ctx, query, args...)
+	recordSQLTrace(ctx, "mysql.query_row", query, len(args), start, nil)
+	return row
 }
 
 func (r *Router) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -137,7 +172,10 @@ func (r *Router) ExecContext(ctx context.Context, query string, args ...any) (sq
 	if err != nil {
 		return nil, err
 	}
-	return db.ExecContext(ctx, query, args...)
+	start := sqlTraceStart(ctx)
+	result, err := db.ExecContext(ctx, query, args...)
+	recordSQLTrace(ctx, "mysql.exec", query, len(args), start, err)
+	return result, err
 }
 
 func (r *Router) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
@@ -145,7 +183,52 @@ func (r *Router) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, err
 	if err != nil {
 		return nil, err
 	}
-	return db.BeginTx(ctx, opts)
+	start := sqlTraceStart(ctx)
+	tx, err := db.BeginTx(ctx, opts)
+	recordSQLTrace(ctx, "mysql.transaction", "BEGIN", 0, start, err)
+	return tx, err
+}
+
+func sqlTraceStart(ctx context.Context) time.Time {
+	if !debugtrace.Enabled(ctx) {
+		return time.Time{}
+	}
+	return time.Now()
+}
+
+func recordSQLTrace(ctx context.Context, stage string, query string, parameterCount int, start time.Time, err error) {
+	if !debugtrace.Enabled(ctx) {
+		return
+	}
+	state := "completed"
+	errorCode := ""
+	safeError := ""
+	if err != nil {
+		state = "failed"
+		errorCode = "mysql_failed"
+		safeError = "The parameterized MySQL operation failed."
+	}
+	debugtrace.Add(ctx, debugtrace.Event{
+		Stage:      stage,
+		State:      state,
+		Label:      "dispatch parameterized MySQL operation",
+		DurationMS: debugtrace.Since(start),
+		ErrorCode:  errorCode,
+		Error:      safeError,
+		Context: map[string]string{
+			"operation":       sqlOperation(query),
+			"parameter_count": strconv.Itoa(parameterCount),
+			"raw_sql":         "[hidden]",
+		},
+	})
+}
+
+func sqlOperation(query string) string {
+	fields := strings.Fields(query)
+	if len(fields) == 0 {
+		return "UNKNOWN"
+	}
+	return strings.ToUpper(fields[0])
 }
 
 var (

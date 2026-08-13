@@ -12,6 +12,8 @@ const (
 
 	ChatLocaleThai    = "th"
 	ChatLocaleEnglish = "en"
+
+	ChatModeVoice = "voice"
 )
 
 const (
@@ -31,6 +33,7 @@ type ChatRequest struct {
 	Locale         string        `json:"locale"`
 	Debug          bool          `json:"debug,omitempty"`
 	ConversationID int64         `json:"conversation_id,omitempty"`
+	Mode           string        `json:"mode,omitempty"`
 }
 
 func (r *ChatRequest) Normalize() {
@@ -234,7 +237,8 @@ type ChatStreamEvent struct {
 	ToolResult    *ChatToolResult    `json:"tool_result,omitempty"`
 	PendingAction *ChatPendingAction `json:"pending_action,omitempty"`
 	Debug         *ChatDebug         `json:"debug,omitempty"`
-	Transcript    string             `json:"transcript,omitempty"`
-	Code          string             `json:"code,omitempty"`
-	Message       string             `json:"message,omitempty"`
+	Transcript     string             `json:"transcript,omitempty"`
+	Code           string             `json:"code,omitempty"`
+	Message        string             `json:"message,omitempty"`
+	ConversationID int64              `json:"conversation_id,omitempty"`
 }

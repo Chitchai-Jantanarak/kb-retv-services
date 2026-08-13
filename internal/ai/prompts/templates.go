@@ -15,6 +15,8 @@ const (
 	NameGenerate       = "generate"
 	NameChat           = "chat"
 	NameChatStream     = "chat_stream"
+	NameToolSummary    = "tool_summary"
+	NameClarify        = "clarify"
 	NameIntakeExtract  = "intake_extract"
 )
 
@@ -33,6 +35,8 @@ func canonicalNames() []string {
 		NameGenerate,
 		NameChat,
 		NameChatStream,
+		NameToolSummary,
+		NameClarify,
 		NameIntakeExtract,
 	}
 }

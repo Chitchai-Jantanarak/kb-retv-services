@@ -77,10 +77,7 @@ SELECT
   CONCAT_WS(
     '\n',
     COALESCE(r.problem_detail, ''),
-    COALESCE(r.fix_detail, ''),
-    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problem_full')), ''),
-    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.problemdetail')), ''),
-    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(r.custom_fields, '$.fixproblem')), '')
+    COALESCE(r.fix_detail, '')
   )
 FROM reports r
 LEFT JOIN report_classification rc ON rc.report_id = r.id

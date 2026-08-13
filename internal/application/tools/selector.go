@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/perms"
 	"github.com/my/app/internal/shared/vec"
 )
@@ -16,18 +17,21 @@ type Embedder interface {
 }
 
 type Selection struct {
-	ToolID       string
-	Score        float64
-	Matched      bool
-	Params       map[string]string
-	Specificity  int
-	Entities     int
-	PermFiltered bool
+	ToolID        string
+	Score         float64
+	RunnerUp      float64
+	Matched       bool
+	Params        map[string]string
+	Specificity   int
+	Entities      int
+	PermFiltered  bool
+	MissingParams []string
 }
 
 type toolVectors struct {
 	id     string
 	perm   string
+	intent string
 	accept float64
 	floor  float64
 	vecs   [][]float32
@@ -76,6 +80,12 @@ func thresholdsFor(t Tool) (float64, float64) {
 }
 
 const specificityMargin = 0.05
+
+const entityEvidenceWeight = 0.145
+
+const requiredEvidenceWeight = 0.05
+
+const intentEvidenceWeight = 0.05
 
 func preferOver(cand, best Selection) bool {
 	switch {
@@ -129,6 +139,7 @@ func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorO
 		sel.tools = append(sel.tools, toolVectors{
 			id:     t.ID,
 			perm:   t.RBAC.RequiresPermission,
+			intent: t.Intent,
 			accept: accept,
 			floor:  floor,
 			vecs:   normed,
@@ -140,30 +151,39 @@ func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorO
 }
 
 func (s *Selector) Select(ctx context.Context, text string, granted []string) (Selection, error) {
-	vecs, err := s.emb.Embed(ctx, []string{text})
-	if err != nil {
-		select {
-		case <-ctx.Done():
-			return Selection{}, fmt.Errorf("tools: embed query: %w", err)
-		case <-time.After(embedRetryDelay):
+	embedText := normalizeQuery(text)
+	var query []float32
+	if shared := ctxkey.QueryVector(ctx); len(shared) > 0 && embedText == text {
+		query = shared
+	} else {
+		vecs, err := s.emb.Embed(ctx, []string{embedText})
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return Selection{}, fmt.Errorf("tools: embed query: %w", err)
+			case <-time.After(embedRetryDelay):
+			}
+			var retryErr error
+			vecs, retryErr = s.emb.Embed(ctx, []string{embedText})
+			if retryErr != nil {
+				return Selection{}, fmt.Errorf("tools: embed query: %w (retry: %v)", err, retryErr)
+			}
 		}
-		var retryErr error
-		vecs, retryErr = s.emb.Embed(ctx, []string{text})
-		if retryErr != nil {
-			return Selection{}, fmt.Errorf("tools: embed query: %w (retry: %v)", err, retryErr)
+		if len(vecs) != 1 {
+			return Selection{}, fmt.Errorf("tools: query embedding count %d != 1", len(vecs))
 		}
+		query = vec.Normalize(vecs[0])
 	}
-	if len(vecs) != 1 {
-		return Selection{}, fmt.Errorf("tools: query embedding count %d != 1", len(vecs))
-	}
-	query := vec.Normalize(vecs[0])
 	if len(s.tools) > 0 && len(s.tools[0].vecs) > 0 && len(query) != len(s.tools[0].vecs[0]) {
 		return Selection{}, fmt.Errorf("tools: query dim %d != anchor dim %d", len(query), len(s.tools[0].vecs[0]))
 	}
 
 	best := Selection{}
 	nearMiss := Selection{}
+	needsParams := Selection{}
+	routerIntent := ctxkey.RouterIntent(ctx)
 	permPassed, permBlocked := 0, 0
+	var top1, top2 float64
 	for _, t := range s.tools {
 		if !perms.Can(granted, t.perm) {
 			permBlocked++
@@ -176,6 +196,15 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 			if d := vec.Dot(query, v); d > score {
 				score = d
 			}
+		}
+		if t.intent != "" && t.intent == routerIntent {
+			score += intentEvidenceWeight
+		}
+
+		if score > top1 {
+			top1, top2 = score, top1
+		} else if score > top2 {
+			top2 = score
 		}
 
 		if score > nearMiss.Score {
@@ -191,10 +220,22 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 			return Selection{}, err
 		}
 		if !satisfied {
+			if score >= t.accept && score > needsParams.Score {
+				needsParams = Selection{
+					ToolID:        t.id,
+					Score:         score,
+					Params:        extracted,
+					MissingParams: missingRequired(t.params, extracted),
+				}
+			}
 			continue
 		}
-		corroborated := requiredCount(t.params) > 0
-		if !corroborated && score < t.accept {
+		specificity := requiredMatched(t.params, extracted)
+		entities := entityMatched(t.params, extracted)
+		evidence := score +
+			entityEvidenceWeight*float64(entities) +
+			requiredEvidenceWeight*float64(specificity-entities)
+		if evidence < t.accept {
 			continue
 		}
 
@@ -203,18 +244,30 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 			Score:       score,
 			Matched:     true,
 			Params:      extracted,
-			Specificity: requiredMatched(t.params, extracted),
-			Entities:    entityMatched(t.params, extracted),
+			Specificity: specificity,
+			Entities:    entities,
 		}
 		if preferOver(cand, best) {
 			best = cand
 		}
 	}
 
+	runnerUp := 0.0
+	if permPassed >= 2 {
+		runnerUp = top2
+	}
+
 	if !best.Matched {
+		if needsParams.ToolID != "" {
+			needsParams.PermFiltered = permBlocked > 0
+			needsParams.RunnerUp = runnerUp
+			return needsParams, nil
+		}
 		nearMiss.PermFiltered = permBlocked > 0
+		nearMiss.RunnerUp = runnerUp
 		return nearMiss, nil
 	}
 
+	best.RunnerUp = runnerUp
 	return best, nil
 }

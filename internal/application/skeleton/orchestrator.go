@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -83,13 +84,16 @@ type Response struct {
 	RequiredPermission string
 	Params             map[string]string
 	SelectionScore     float64
+	RunnerUpScore      float64
 	RowCount           int
 	Incomplete         bool
 	Headline           string
+	HeadlineVariants   map[string]string
 	Lines              []string
 	Table              *ToolTable
 	ComposeMode        string
 	PermFiltered       bool
+	MissingParams      []string
 	Pending            *PendingRef
 	Cite               string
 	CiteValues         []string
@@ -143,10 +147,21 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 			RequiredPermission: requiredPermission,
 			Params:             cloneParams(sel.Params),
 			SelectionScore:     sel.Score,
+			RunnerUpScore:      sel.RunnerUp,
 			PermFiltered:       sel.PermFiltered,
+			MissingParams:      append([]string(nil), sel.MissingParams...),
 		}, nil
 	}
 
+	return o.ExecuteSelection(ctx, actor, msg, sel)
+}
+
+func (o *Orchestrator) Selector() ToolSelector {
+	return o.selector
+}
+
+func (o *Orchestrator) ExecuteSelection(ctx context.Context, actor Actor, msg string, sel tools.Selection) (Response, error) {
+	var err error
 	tool, ok := o.catalog[sel.ToolID]
 	if !ok {
 		return Response{
@@ -154,6 +169,7 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 			ToolID:         sel.ToolID,
 			Params:         cloneParams(sel.Params),
 			SelectionScore: sel.Score,
+			RunnerUpScore:  sel.RunnerUp,
 		}, fmt.Errorf("skeleton: unknown tool %q", sel.ToolID)
 	}
 	resp := Response{
@@ -164,6 +180,7 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 		RequiredPermission: tool.RBAC.RequiresPermission,
 		Params:             cloneParams(sel.Params),
 		SelectionScore:     sel.Score,
+		RunnerUpScore:      sel.RunnerUp,
 	}
 	requiredPermission := tool.RBAC.RequiresPermission
 	if requiredPermission == "" {
@@ -202,11 +219,13 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 		return resp, nil
 	}
 
-	auditStart := time.Now()
-	auditErr := o.auditor.Log(ctx, tool.Audit, actor, tool.ID)
-	recordAuditTrace(ctx, tool.Audit, auditStart, auditErr)
-	if auditErr != nil {
-		return resp, fmt.Errorf("skeleton: audit: %w", auditErr)
+	if tool.IsWrite() {
+		auditStart := time.Now()
+		auditErr := o.auditor.Log(ctx, tool.Audit, actor, tool.ID)
+		recordAuditTrace(ctx, tool.Audit, auditStart, auditErr)
+		if auditErr != nil {
+			return resp, fmt.Errorf("skeleton: audit: %w", auditErr)
+		}
 	}
 
 	resp.Called = true
@@ -243,12 +262,13 @@ func (o *Orchestrator) Handle(ctx context.Context, actor Actor, msg string) (Res
 		return resp, fmt.Errorf("skeleton: handler %q: %w", tool.Handler, err)
 	}
 
-	composed := compose(tool, rows)
+	composed := compose(tool, rows, sel.Params)
 	composed.Called = resp.Called
 	composed.Handler = resp.Handler
 	composed.RequiredPermission = resp.RequiredPermission
 	composed.Params = resp.Params
 	composed.SelectionScore = resp.SelectionScore
+	composed.RunnerUpScore = resp.RunnerUpScore
 	composed.RowCount = len(rows)
 	return composed, nil
 }
@@ -285,9 +305,7 @@ func cloneParams(params map[string]string) map[string]string {
 		return nil
 	}
 	cloned := make(map[string]string, len(params))
-	for key, value := range params {
-		cloned[key] = value
-	}
+	maps.Copy(cloned, params)
 	return cloned
 }
 
@@ -308,13 +326,37 @@ func tidyTemplate(s string) string {
 	return strings.Trim(strings.TrimSpace(s), "|")
 }
 
-func compose(tool tools.Tool, rows []Row) Response {
-	headline := strings.ReplaceAll(tool.Compose.Headline, "{n}", strconv.Itoa(len(rows)))
+func headlineFields(rows []Row, params map[string]string) Row {
+	merged := make(Row, len(params))
+	maps.Copy(merged, params)
 	if len(rows) > 0 {
-		headline = fillTemplate(headline, rows[0])
+		maps.Copy(merged, rows[0])
 	}
+	return merged
+}
+
+func renderHeadline(tmpl string, n int, fields Row) (string, bool) {
+	headline := strings.ReplaceAll(tmpl, "{n}", strconv.Itoa(n))
+	headline = fillTemplate(headline, fields)
 	incomplete := placeholderRe.MatchString(headline)
-	headline = tidyTemplate(headline)
+	return tidyTemplate(headline), incomplete
+}
+
+func renderHeadlineVariants(tmpls map[string]string, n int, fields Row) map[string]string {
+	if len(tmpls) == 0 {
+		return nil
+	}
+	variants := make(map[string]string, len(tmpls))
+	for locale, tmpl := range tmpls {
+		rendered, _ := renderHeadline(tmpl, n, fields)
+		variants[locale] = rendered
+	}
+	return variants
+}
+
+func compose(tool tools.Tool, rows []Row, params map[string]string) Response {
+	fields := headlineFields(rows, params)
+	headline, incomplete := renderHeadline(tool.Compose.Headline, len(rows), fields)
 
 	lines := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -322,16 +364,17 @@ func compose(tool tools.Tool, rows []Row) Response {
 	}
 
 	return Response{
-		Matched:     true,
-		ToolID:      tool.ID,
-		Kind:        tool.Kind,
-		Incomplete:  incomplete,
-		Headline:    headline,
-		Lines:       lines,
-		Table:       buildTable(tool, rows),
-		ComposeMode: tool.Compose.Mode,
-		Cite:        tool.Compose.Cite,
-		CiteValues:  citeValues(tool.Compose.Cite, rows),
+		Matched:          true,
+		ToolID:           tool.ID,
+		Kind:             tool.Kind,
+		Incomplete:       incomplete,
+		Headline:         headline,
+		HeadlineVariants: renderHeadlineVariants(tool.Compose.HeadlineI18n, len(rows), fields),
+		Lines:            lines,
+		Table:            buildTable(tool, rows),
+		ComposeMode:      tool.Compose.Mode,
+		Cite:             tool.Compose.Cite,
+		CiteValues:       citeValues(tool.Compose.Cite, rows),
 	}
 }
 

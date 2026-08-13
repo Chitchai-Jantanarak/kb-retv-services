@@ -38,6 +38,11 @@ type stubCasesRepo struct {
 	caseByCode        reportsmysql.CaseRow
 	caseByCodeErr     error
 	byCodeCoverage    []int64
+	byCodeArg         string
+	caseByID          reportsmysql.CaseRow
+	caseByIDErr       error
+	byIDCoverage      []int64
+	byIDArg           int64
 	casesByProduct    []reportsmysql.CaseRow
 	byProductCoverage []int64
 	byProductTerm     string
@@ -79,12 +84,22 @@ func (s *stubCasesRepo) LatestCases(_ context.Context, coverage []int64, status 
 	return s.latestCases, nil
 }
 
-func (s *stubCasesRepo) CaseByCode(_ context.Context, coverage []int64, _ string) (reportsmysql.CaseRow, error) {
+func (s *stubCasesRepo) CaseByCode(_ context.Context, coverage []int64, code string) (reportsmysql.CaseRow, error) {
 	s.byCodeCoverage = coverage
+	s.byCodeArg = code
 	if s.caseByCodeErr != nil {
 		return reportsmysql.CaseRow{}, s.caseByCodeErr
 	}
 	return s.caseByCode, nil
+}
+
+func (s *stubCasesRepo) CaseByID(_ context.Context, coverage []int64, id int64) (reportsmysql.CaseRow, error) {
+	s.byIDCoverage = coverage
+	s.byIDArg = id
+	if s.caseByIDErr != nil {
+		return reportsmysql.CaseRow{}, s.caseByIDErr
+	}
+	return s.caseByID, nil
 }
 
 func (s *stubCasesRepo) CasesByProduct(_ context.Context, coverage []int64, product string, _ int) ([]reportsmysql.CaseRow, error) {

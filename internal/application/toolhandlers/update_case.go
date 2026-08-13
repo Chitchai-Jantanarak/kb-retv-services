@@ -3,10 +3,10 @@ package toolhandlers
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/application/tools"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 )
 
@@ -17,16 +17,30 @@ type CasesRepo interface {
 	AssignCase(ctx context.Context, coverage []int64, reportID, employeeID int64) error
 	LatestCases(ctx context.Context, coverage []int64, status string, limit int) ([]reportsmysql.CaseRow, error)
 	CaseByCode(ctx context.Context, coverage []int64, code string) (reportsmysql.CaseRow, error)
+	CaseByID(ctx context.Context, coverage []int64, id int64) (reportsmysql.CaseRow, error)
 	CasesByProduct(ctx context.Context, coverage []int64, product string, limit int) ([]reportsmysql.CaseRow, error)
 }
 
-var caseCodeRe = regexp.MustCompile(`(?i)REP-?\d+`)
-
 func paramOrParse(q skeleton.Query, name string) string {
 	if v := q.Params[name]; v != "" {
+		if ref, ok := tools.ParseCaseRef(v); ok {
+			return ref.Code
+		}
 		return v
 	}
-	return strings.ToUpper(caseCodeRe.FindString(q.Text))
+	if ref, ok := tools.ParseCaseRef(q.Text); ok {
+		return ref.Code
+	}
+	return ""
+}
+
+func caseRefOrParse(q skeleton.Query) (tools.CaseRef, bool) {
+	if v := q.Params["code"]; v != "" {
+		if ref, ok := tools.ParseCaseRef(v); ok {
+			return ref, true
+		}
+	}
+	return tools.ParseCaseRef(q.Text)
 }
 
 type UpdateCase struct {

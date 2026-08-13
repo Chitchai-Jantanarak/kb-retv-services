@@ -180,7 +180,7 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 				continue
 			}
 			select {
-			case out <- ports.Completion{Text: chunk.Choices[0].Delta.Content, Vendor: "openai"}:
+			case out <- ports.Completion{Text: chunk.Choices[0].Delta.Content, Vendor: "openai", Model: c.model}:
 			case <-ctx.Done():
 				return
 			}
@@ -247,6 +247,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseForma
 			Total:  parsed.Usage.TotalTokens,
 		},
 		Vendor: "openai",
+		Model:  c.model,
 	}, nil
 }
 

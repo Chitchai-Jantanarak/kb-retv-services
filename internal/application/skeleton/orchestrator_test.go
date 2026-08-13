@@ -316,8 +316,8 @@ func TestHandleRunsSkeletonAndComposes(t *testing.T) {
 	if !reflect.DeepEqual(resp.Lines, []string{"R1", "R2"}) {
 		t.Fatalf("compose lines wrong: %v", resp.Lines)
 	}
-	if a.calls != 1 || a.tag != "ai.find_cases" {
-		t.Fatalf("audit not logged correctly: %+v", a)
+	if a.calls != 0 {
+		t.Fatalf("audit must not run for read tools: %+v", a)
 	}
 }
 
@@ -338,8 +338,8 @@ func TestHandleSkipsGuardedHandlerOnEmptyCoverage(t *testing.T) {
 	if resp.RowCount != 0 || len(resp.Lines) != 0 {
 		t.Fatalf("resp = %+v, want empty rows on empty coverage", resp)
 	}
-	if a.calls != 1 {
-		t.Fatalf("audit calls = %d, want 1 (audit still runs before the guard)", a.calls)
+	if a.calls != 0 {
+		t.Fatalf("audit calls = %d, want 0 (read tools never audit from the orchestrator)", a.calls)
 	}
 }
 
@@ -403,10 +403,10 @@ func TestNoMatchSkipsHandlerAndAudit(t *testing.T) {
 func TestHandleDoesNotRunHandlerWhenAuditFails(t *testing.T) {
 	h := &fakeHandler{}
 	a := &failAuditor{}
-	sel := fakeSelector{sel: tools.Selection{ToolID: "f1_find_cases", Matched: true}}
-	o := New(sel, []tools.Tool{findTool()}, map[string]Handler{"reports.find": h}, a)
+	sel := fakeSelector{sel: tools.Selection{ToolID: "f5_close_case", Matched: true}}
+	o := New(sel, []tools.Tool{writeTool()}, map[string]Handler{"reports.close": h}, a)
 
-	actor := Actor{CompanyID: 7, Perms: []string{"report.view"}, Coverage: []int64{7, 8}}
+	actor := Actor{CompanyID: 7, Perms: []string{"report.close"}, Coverage: []int64{7}}
 	_, err := o.Handle(context.Background(), actor, "close case R1")
 	if err == nil {
 		t.Fatalf("expected error when audit fails")

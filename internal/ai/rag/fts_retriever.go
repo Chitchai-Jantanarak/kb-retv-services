@@ -161,9 +161,9 @@ func buildFTSBooleanQuery(text string) string {
 		if i > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(`+"`)
+		b.WriteByte('"')
 		b.WriteString(term)
-		b.WriteString(`"`)
+		b.WriteByte('"')
 	}
 	return b.String()
 }

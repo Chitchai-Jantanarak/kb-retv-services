@@ -8,9 +8,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/skeleton"
+	"github.com/my/app/internal/shared/debugtrace"
 )
 
 func summaryComposeMode(r skeleton.Response, req dto.ChatRequest) bool {
@@ -31,17 +33,35 @@ func (w *Workflow) composeToolReply(ctx context.Context, locale, question string
 	key := toolSummaryCacheKey(r, rowsText, locale)
 	if w.cache != nil {
 		if raw, err := w.cache.Get(ctx, key); err == nil && len(raw) > 0 {
+			debugtrace.Add(ctx, debugtrace.Event{
+				Stage: "compose.summary",
+				State: "cache_hit",
+				Label: "tool summary compose",
+			})
 			return string(raw), true
 		}
 	}
 
+	start := time.Now()
 	summary, ok := w.smallModelCall(ctx, w.summaryTmpl, map[string]string{
 		"language": promptLanguage(locale),
 		"question": question,
 		"count":    strconv.Itoa(len(r.Table.Rows)),
 		"rows":     rowsText,
 	}, companyID)
-	if !ok || !summaryCodesGrounded(summary, rowsText) {
+	state := "ok"
+	if !ok {
+		state = "llm_failed"
+	} else if !summaryCodesGrounded(summary, rowsText) {
+		state = "ungrounded"
+	}
+	debugtrace.Add(ctx, debugtrace.Event{
+		Stage:      "compose.summary",
+		State:      state,
+		Label:      "tool summary compose",
+		DurationMS: time.Since(start).Milliseconds(),
+	})
+	if state != "ok" {
 		return "", false
 	}
 

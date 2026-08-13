@@ -7,6 +7,7 @@ import (
 )
 
 func TestLoadFromReadsLineChannelSecret(t *testing.T) {
+	isolateEnv(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
 	envPath := filepath.Join(dir, ".env")
@@ -28,6 +29,7 @@ func TestLoadFromReadsLineChannelSecret(t *testing.T) {
 }
 
 func TestLoadDefaultsLineChannelSecretEmpty(t *testing.T) {
+	isolateEnv(t)
 	cfg, err := LoadFrom("")
 	if err != nil {
 		t.Fatalf("LoadFrom() error = %v", err)

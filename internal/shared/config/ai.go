@@ -1,6 +1,7 @@
 package config
 
 type LLM struct {
+	Enabled           bool
 	DefaultVendor     string
 	DefaultModel      string
 	EmbeddingProvider string
