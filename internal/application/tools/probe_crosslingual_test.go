@@ -96,6 +96,69 @@ var langProbes = []langProbe{
 	{"es", "quién está disponible ahora", "f4_workload"},
 	{"es", "prueba", ""},
 	{"es", "cuéntame un chiste", ""},
+
+	{"en", "which cases is Somchai handling", "f3_employee_status"},
+	{"th", "สมชายกำลังดูแลเคสไหนอยู่", "f3_employee_status"},
+	{"ja", "ソムチャイはどのケースを担当していますか", "f3_employee_status"},
+	{"ko", "솜차이는 어떤 케이스를 담당하고 있나요", "f3_employee_status"},
+	{"ru", "какими заявками занимается Сомчай", "f3_employee_status"},
+	{"zh", "Somchai 正在处理哪些工单", "f3_employee_status"},
+	{"vi", "Somchai đang phụ trách những ca nào", "f3_employee_status"},
+	{"es", "qué casos está llevando Somchai", "f3_employee_status"},
+
+	{"en", "show the service contract for customer ACME", "f6_customer_service"},
+	{"th", "ขอดูสัญญาบริการของลูกค้า ACME", "f6_customer_service"},
+	{"ja", "顧客 ACME のサービス契約を見せて", "f6_customer_service"},
+	{"ko", "고객 ACME 의 서비스 계약을 보여줘", "f6_customer_service"},
+	{"ru", "покажи сервисный контракт клиента ACME", "f6_customer_service"},
+	{"zh", "显示客户 ACME 的服务合同", "f6_customer_service"},
+	{"vi", "xem hợp đồng dịch vụ của khách hàng ACME", "f6_customer_service"},
+	{"es", "muestra el contrato de servicio del cliente ACME", "f6_customer_service"},
+
+	{"en", "how did we solve this error before", "f7_knowledge"},
+	{"th", "ปัญหานี้เคยแก้ยังไงมาก่อน", "f7_knowledge"},
+	{"ja", "このエラーは以前どうやって解決しましたか", "f7_knowledge"},
+	{"ko", "이 오류는 전에 어떻게 해결했었나요", "f7_knowledge"},
+	{"ru", "как мы раньше решали эту ошибку", "f7_knowledge"},
+	{"zh", "这个错误以前是怎么解决的", "f7_knowledge"},
+	{"vi", "lỗi này trước đây đã xử lý thế nào", "f7_knowledge"},
+	{"es", "cómo resolvimos este error antes", "f7_knowledge"},
+
+	{"en", "move case REP-1234 to in progress", "f8_update_case"},
+	{"th", "เปลี่ยนสถานะเคส REP-1234 เป็นกำลังดำเนินการ", "f8_update_case"},
+	{"ja", "ケース REP-1234 を対応中に変更して", "f8_update_case"},
+	{"ko", "REP-1234 케이스를 진행 중으로 변경해줘", "f8_update_case"},
+	{"ru", "переведи заявку REP-1234 в работу", "f8_update_case"},
+	{"zh", "把工单 REP-1234 改为处理中", "f8_update_case"},
+	{"vi", "chuyển ca REP-1234 sang đang xử lý", "f8_update_case"},
+	{"es", "cambia el caso REP-1234 a en progreso", "f8_update_case"},
+
+	{"en", "give case REP-1234 to Somchai", "f9_assign_case"},
+	{"th", "มอบเคส REP-1234 ให้สมชาย", "f9_assign_case"},
+	{"ja", "ケース REP-1234 をソムチャイに割り当てて", "f9_assign_case"},
+	{"ko", "REP-1234 케이스를 솜차이에게 배정해줘", "f9_assign_case"},
+	{"ru", "назначь заявку REP-1234 на Сомчая", "f9_assign_case"},
+	{"zh", "把工单 REP-1234 分配给 Somchai", "f9_assign_case"},
+	{"vi", "giao ca REP-1234 cho Somchai", "f9_assign_case"},
+	{"es", "asigna el caso REP-1234 a Somchai", "f9_assign_case"},
+
+	{"en", "mark case REP-1234 as done", "f10_close_case"},
+	{"th", "เคส REP-1234 เสร็จแล้ว ปิดได้เลย", "f10_close_case"},
+	{"ja", "ケース REP-1234 を完了として閉じて", "f10_close_case"},
+	{"ko", "REP-1234 케이스를 완료 처리해줘", "f10_close_case"},
+	{"ru", "закрой заявку REP-1234, всё готово", "f10_close_case"},
+	{"zh", "工单 REP-1234 已完成，请关闭", "f10_close_case"},
+	{"vi", "đóng ca REP-1234, đã xong rồi", "f10_close_case"},
+	{"es", "cierra el caso REP-1234, ya está resuelto", "f10_close_case"},
+
+	{"en", "the robot broke down, open a new ticket", "open_case"},
+	{"th", "หุ่นยนต์เสีย ช่วยเปิดเคสใหม่ให้หน่อย", "open_case"},
+	{"ja", "ロボットが故障しました、新しいケースを起票して", "open_case"},
+	{"ko", "로봇이 고장났어요, 새 케이스를 접수해줘", "open_case"},
+	{"ru", "робот сломался, заведи новую заявку", "open_case"},
+	{"zh", "机器人坏了，帮我新建一个工单", "open_case"},
+	{"vi", "robot bị hỏng, tạo ca mới giúp tôi", "open_case"},
+	{"es", "el robot se averió, abre un caso nuevo", "open_case"},
 }
 
 func isASCII(s string) bool {
@@ -252,9 +315,14 @@ func embedAllProbes(ctx context.Context, t *testing.T, emb Embedder) map[string]
 	for _, p := range langProbes {
 		texts = append(texts, p.text)
 	}
-	vecs, err := emb.Embed(ctx, texts)
-	if err != nil {
-		t.Fatalf("embed probes: %v", err)
+	vecs := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += 100 {
+		end := min(start+100, len(texts))
+		batch, err := emb.Embed(ctx, texts[start:end])
+		if err != nil {
+			t.Fatalf("embed probes [%d:%d]: %v", start, end, err)
+		}
+		vecs = append(vecs, batch...)
 	}
 	if len(vecs) != len(texts) {
 		t.Fatalf("embed count %d != %d", len(vecs), len(texts))
