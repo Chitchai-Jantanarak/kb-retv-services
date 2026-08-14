@@ -17,6 +17,7 @@ type ArticleRecord struct {
 	UpdatedAt      time.Time
 	SymptomID      int64
 	SymptomName    string
+	SymptomConf    float64
 }
 
 type ArticleSource interface {
@@ -83,7 +84,7 @@ func (w *Workflow) Run(ctx context.Context, opts Options) (Result, error) {
 			}
 		}
 
-		articleProps := map[string]any{"title": a.Title}
+		articleProps := map[string]any{"title": a.Title, "source_report_id": a.SourceReportID}
 		if err := w.graph.UpsertArticle(ctx, opts.CompanyID, a.ID, articleProps); err != nil {
 			return res, fmt.Errorf("graphsync: upsert article %d: %w", a.ID, err)
 		}
@@ -100,7 +101,7 @@ func (w *Workflow) Run(ctx context.Context, opts Options) (Result, error) {
 				if err := w.graph.UpsertSymptom(ctx, opts.CompanyID, a.SymptomID, symptomProps); err != nil {
 					return res, fmt.Errorf("graphsync: upsert symptom %d: %w", a.SymptomID, err)
 				}
-				if err := w.graph.LinkArticleSolvesSymptom(ctx, opts.CompanyID, a.ID, a.SymptomID, nil); err != nil {
+				if err := w.graph.LinkArticleSolvesSymptom(ctx, opts.CompanyID, a.ID, a.SymptomID, map[string]any{"score": a.SymptomConf}); err != nil {
 					return res, fmt.Errorf("graphsync: link article->symptom %d->%d: %w", a.ID, a.SymptomID, err)
 				}
 				res.Edges++

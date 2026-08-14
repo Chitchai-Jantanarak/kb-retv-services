@@ -4,6 +4,10 @@ app:
 server:
   port: "8080"
 
+intake:
+  assess_mode: async
+  assess_timeout_ms: 30000
+
 mysql:
   enabled: false
   dsn: "user:password@tcp(localhost:3306)/dbname"

@@ -125,13 +125,32 @@ func (w *Workflow) Run(ctx context.Context, req dto.SearchRequest) (dto.SearchRe
 		resp.Results = append(resp.Results, articles...)
 	}
 
-	sort.SliceStable(resp.Results, func(i, j int) bool {
-		return resp.Results[i].Score > resp.Results[j].Score
-	})
-	if len(resp.Results) > req.Limit {
-		resp.Results = resp.Results[:req.Limit]
-	}
+	resp.Results = rrfMerge(resp.Results, req.Limit)
 	return resp, nil
+}
+
+const rrfK = 60
+
+func rrfMerge(results []dto.SearchResult, limit int) []dto.SearchResult {
+	rankInSource := map[string]int{}
+	fused := make([]float64, len(results))
+	for i, r := range results {
+		rankInSource[r.Source]++
+		fused[i] = 1.0 / float64(rrfK+rankInSource[r.Source])
+	}
+	idx := make([]int, len(results))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return fused[idx[a]] > fused[idx[b]] })
+	out := make([]dto.SearchResult, 0, len(results))
+	for _, i := range idx {
+		out = append(out, results[i])
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
 }
 
 func (w *Workflow) vectorReportScores(ctx context.Context, coverage []int64, vector []float32, limit int) (map[int64]float64, []int64, error) {
@@ -173,6 +192,10 @@ func (w *Workflow) vectorReportScores(ctx context.Context, coverage []int64, vec
 func (w *Workflow) graphArticles(ctx context.Context, companyID int64, coverage []int64, rows []CaseRecord) ([]dto.SearchResult, int, error) {
 	seenSymptom := make(map[int64]struct{}, len(rows))
 	seenArticle := make(map[string]struct{}, len(rows))
+	vectorReports := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		vectorReports[row.ID] = struct{}{}
+	}
 	out := make([]dto.SearchResult, 0, len(rows))
 
 	for _, row := range rows {
@@ -195,6 +218,11 @@ func (w *Workflow) graphArticles(ctx context.Context, companyID int64, coverage 
 			}
 			if _, dup := seenArticle[id]; dup {
 				continue
+			}
+			if src := graphInt64(article["source_report_id"]); src > 0 {
+				if _, echoed := vectorReports[src]; echoed {
+					continue
+				}
 			}
 			seenArticle[id] = struct{}{}
 			out = append(out, dto.SearchResult{
@@ -261,6 +289,19 @@ func graphString(value any) string {
 		return ""
 	}
 	return s
+}
+
+func graphInt64(value any) int64 {
+	switch v := value.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	default:
+		return 0
+	}
 }
 
 func graphFloat(value any) float64 {

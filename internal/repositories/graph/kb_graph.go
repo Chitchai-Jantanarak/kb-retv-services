@@ -64,7 +64,7 @@ func (g *KBGraph) ArticlesForSymptom(ctx context.Context, companyID int64, cover
 	stmt := fmt.Sprintf(`
 		MATCH (a:%s)-[r:%s { company_id: $company_id }]->(s:%s { company_id: $company_id, id: $symptom_id })
 		WHERE a.company_id IN $coverage
-		RETURN a.id AS article_id, a.title AS title, r.score AS score
+		RETURN a.id AS article_id, a.title AS title, r.score AS score, a.source_report_id AS source_report_id
 		ORDER BY r.score DESC
 		LIMIT %d
 	`, LabelKbArticle, EdgeSolves, LabelSymptom, limit)

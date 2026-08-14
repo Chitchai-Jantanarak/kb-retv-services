@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -185,8 +186,20 @@ const (
 	classifyRetryMax   = 8 * time.Second
 )
 
+const maxReportRunes = 20000
+
+var dataURIRe = regexp.MustCompile(`data:[a-zA-Z0-9/+.-]+;base64,[A-Za-z0-9+/=]+`)
+
+func promptText(title, body string) string {
+	text := strings.TrimSpace(title + "\n\n" + dataURIRe.ReplaceAllString(body, "[image]"))
+	if runes := []rune(text); len(runes) > maxReportRunes {
+		return string(runes[:maxReportRunes])
+	}
+	return text
+}
+
 func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, r ReportRecord, severityOptions, symptomOptions string) (Classification, error) {
-	reportText := strings.TrimSpace(r.Title + "\n\n" + r.Body)
+	reportText := promptText(r.Title, r.Body)
 	if reportText == "" {
 		return Classification{}, errors.New("empty report body")
 	}

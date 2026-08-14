@@ -129,10 +129,9 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	}
 
 	endpoint := fmt.Sprintf(
-		"%s/models/%s:streamGenerateContent?alt=sse&key=%s",
+		"%s/models/%s:streamGenerateContent?alt=sse",
 		c.baseURL,
 		url.PathEscape(c.model),
-		url.QueryEscape(c.apiKey),
 	)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -141,6 +140,7 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -259,10 +259,9 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 	}
 
 	endpoint := fmt.Sprintf(
-		"%s/models/%s:generateContent?key=%s",
+		"%s/models/%s:generateContent",
 		c.baseURL,
 		url.PathEscape(c.model),
-		url.QueryEscape(c.apiKey),
 	)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -270,6 +269,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 		return ports.Completion{}, fmt.Errorf("gemini: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

@@ -36,7 +36,8 @@ SELECT
   COALESCE(a.title, ''),
   a.created_at,
   COALESCE(rc.ai_symptom_node_id, 0),
-  COALESCE(sn.name, '')
+  COALESCE(sn.name, ''),
+  COALESCE(rc.ai_symptom_conf, 0)
 FROM kb_articles a
 LEFT JOIN report_classification rc
   ON rc.report_id = a.source_report_id AND rc.company_id = a.company_id
@@ -62,7 +63,7 @@ LIMIT ?`
 	out := make([]graphsync.ArticleRecord, 0, 16)
 	for rows.Next() {
 		var rec graphsync.ArticleRecord
-		if err := rows.Scan(&rec.ID, &rec.CompanyID, &rec.SourceReportID, &rec.Title, &rec.UpdatedAt, &rec.SymptomID, &rec.SymptomName); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.CompanyID, &rec.SourceReportID, &rec.Title, &rec.UpdatedAt, &rec.SymptomID, &rec.SymptomName, &rec.SymptomConf); err != nil {
 			return nil, fmt.Errorf("kb_articles: scan: %w", err)
 		}
 		out = append(out, rec)

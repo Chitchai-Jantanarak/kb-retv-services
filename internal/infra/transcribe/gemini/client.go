@@ -107,12 +107,13 @@ func (c *Client) Transcribe(ctx context.Context, in ports.AudioInput) (ports.Tra
 		return ports.Transcript{}, apperr.Wrap(apperr.CodeInternal, "transcribe: marshal request", err)
 	}
 
-	endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, url.PathEscape(c.model), url.QueryEscape(c.apiKey))
+	endpoint := fmt.Sprintf("%s/models/%s:generateContent", c.baseURL, url.PathEscape(c.model))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return ports.Transcript{}, apperr.Wrap(apperr.CodeInternal, "transcribe: build request", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {

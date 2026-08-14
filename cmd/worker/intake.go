@@ -16,6 +16,7 @@ import (
 	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/shared/ctxkey"
 	infraasynq "github.com/my/app/internal/infra/asynq"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
@@ -48,7 +49,11 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 		log.Printf("intake:assess disabled: tenant router unavailable: %v", err)
 		return unavailable("intake:assess", "tenant router not configured")
 	}
-	resolver, err := llmboot.Resolver(cfg, router)
+	acfg := cfg
+	if cfg.Intake.AssessTimeoutMs > 0 {
+		acfg.LLM.RequestTimeoutSeconds = cfg.Intake.AssessTimeoutMs / 1000
+	}
+	resolver, err := llmboot.Resolver(acfg, router)
 	if err != nil {
 		log.Printf("intake:assess disabled: llm resolver unavailable: %v", err)
 		return unavailable("intake:assess", "llm resolver not configured")
@@ -105,6 +110,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
+		cctx = ctxkey.WithCompanyID(cctx, job.CompanyID)
 
 		res, err := svc.Assess(cctx, job.CompanyID, p.ConversationID, intake.Signals{
 			Sender:          p.Customer,

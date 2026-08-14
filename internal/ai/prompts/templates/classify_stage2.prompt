@@ -1,6 +1,7 @@
 @name      classify_stage2
 @required  report, severity_options
 @max_toks  500
+@thinking  0
 @temp      0.0
 
 @system

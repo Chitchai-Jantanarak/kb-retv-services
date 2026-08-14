@@ -51,13 +51,15 @@ func TestNewRejectsEmptyAPIKey(t *testing.T) {
 
 func TestGenerateSendsExpectedRequest(t *testing.T) {
 	var captured struct {
-		path  string
-		query string
-		body  generateRequest
+		path   string
+		query  string
+		apiKey string
+		body   generateRequest
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured.path = r.URL.Path
 		captured.query = r.URL.RawQuery
+		captured.apiKey = r.Header.Get("x-goog-api-key")
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &captured.body)
 		_ = json.NewEncoder(w).Encode(generateResponse{
@@ -88,8 +90,11 @@ func TestGenerateSendsExpectedRequest(t *testing.T) {
 	if !strings.Contains(captured.path, "models/gemini-2.0-flash:generateContent") {
 		t.Fatalf("path = %s", captured.path)
 	}
-	if !strings.Contains(captured.query, "key=gk") {
-		t.Fatalf("query = %s, want key=gk", captured.query)
+	if captured.apiKey != "gk" {
+		t.Fatalf("x-goog-api-key = %s, want gk", captured.apiKey)
+	}
+	if strings.Contains(captured.query, "key=") {
+		t.Fatalf("query = %s, api key must not ride the URL", captured.query)
 	}
 	if captured.body.SystemInstruction == nil || captured.body.SystemInstruction.Parts[0].Text != "be brief" {
 		t.Fatalf("systemInstruction wrong: %+v", captured.body.SystemInstruction)

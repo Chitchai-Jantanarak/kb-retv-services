@@ -1,6 +1,7 @@
 @name      classify_stage1
 @required  report
 @max_toks  400
+@thinking  0
 @temp      0.0
 
 @system
