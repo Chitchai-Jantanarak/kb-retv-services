@@ -4,6 +4,7 @@ import "strings"
 
 type App struct {
 	Env string
+	Key string
 }
 
 func (a App) IsProduction() bool {
@@ -44,6 +45,7 @@ type Chat struct {
 	CacheMaxEntries       int
 	GuardEmbedderProvider string
 	GuardEmbedderAssetDir string
+	SelectorRejectMargin  float64
 }
 
 type Embedding struct {

@@ -855,6 +855,61 @@ func TestRunBackfillsCustomerAndSiteFromReferencedCase(t *testing.T) {
 	}
 }
 
+type stubCustomerLookup struct {
+	id       sql.NullInt64
+	err      error
+	called   bool
+	hash     string
+	coverage []int64
+}
+
+func (s *stubCustomerLookup) CustomerByEmailHash(_ context.Context, coverage []int64, hash string) (sql.NullInt64, error) {
+	s.called = true
+	s.hash = hash
+	s.coverage = coverage
+	return s.id, s.err
+}
+
+func TestRunBackfillsCustomerFromSenderEmail(t *testing.T) {
+	custLookup := &stubCustomerLookup{id: sql.NullInt64{Int64: 55, Valid: true}}
+	backfill := &capturingBackfill{}
+	wf, err := New(Config{
+		Accounts:       &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations:  &stubConvos{id: 100, created: true},
+		Messages:       &stubMessages{id: 200},
+		CustomerLookup: custLookup,
+		AppKey:         "test-key-123",
+		Backfill:       backfill,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !custLookup.called || custLookup.hash == "" {
+		t.Fatalf("CustomerByEmailHash called = %v hash = %q, want called with a non-empty hash", custLookup.called, custLookup.hash)
+	}
+	if len(custLookup.coverage) != 1 || custLookup.coverage[0] != 7 {
+		t.Fatalf("customer lookup coverage = %v, want [7] (company-scoped)", custLookup.coverage)
+	}
+	if len(backfill.calls) != 1 {
+		t.Fatalf("WriteBackfill calls = %d, want 1", len(backfill.calls))
+	}
+	call := backfill.calls[0]
+	if !call.customerID.Valid || call.customerID.Int64 != 55 {
+		t.Fatalf("WriteBackfill customerID = %+v, want valid 55", call.customerID)
+	}
+	if call.siteID.Valid {
+		t.Fatalf("WriteBackfill siteID = %+v, want invalid (sender email gives no site)", call.siteID)
+	}
+	if call.source != BackfillSourceSenderEmail {
+		t.Fatalf("WriteBackfill source = %q, want %q", call.source, BackfillSourceSenderEmail)
+	}
+}
+
 func TestRunReferencedCaseNotFoundSkipsBackfill(t *testing.T) {
 	lookup := &stubCaseLookup{err: errors.New("reports: case \"REP-9999\" not found")}
 	backfill := &capturingBackfill{}

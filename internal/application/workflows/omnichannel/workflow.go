@@ -16,7 +16,10 @@ import (
 	"github.com/my/app/internal/shared/ctxkey"
 )
 
-const BackfillSourceReferencedCase = "referenced_case"
+const (
+	BackfillSourceReferencedCase = "referenced_case"
+	BackfillSourceSenderEmail    = "sender_email"
+)
 
 type CaseLookupResult struct {
 	CustomerID sql.NullInt64
@@ -25,6 +28,10 @@ type CaseLookupResult struct {
 
 type CaseLookup interface {
 	CaseByCode(ctx context.Context, coverage []int64, code string) (CaseLookupResult, error)
+}
+
+type CustomerLookup interface {
+	CustomerByEmailHash(ctx context.Context, coverage []int64, hash string) (sql.NullInt64, error)
 }
 
 type BackfillWriter interface {
@@ -113,23 +120,27 @@ type Workflow struct {
 	tickets       TicketEnqueuer
 	completeness  CompletenessAssessor
 	mediaPromoter MediaPromoter
-	caseLookup    CaseLookup
-	backfill      BackfillWriter
-	activity      ports.ActivityRecorder
-	log           *zap.Logger
+	caseLookup     CaseLookup
+	customerLookup CustomerLookup
+	appKey         string
+	backfill       BackfillWriter
+	activity       ports.ActivityRecorder
+	log            *zap.Logger
 }
 
 type Config struct {
-	Accounts      AccountResolver
-	Conversations ConversationStore
-	Messages      MessageStore
-	Tickets       TicketEnqueuer
-	Completeness  CompletenessAssessor
-	MediaPromoter MediaPromoter
-	CaseLookup    CaseLookup
-	Backfill      BackfillWriter
-	Activity      ports.ActivityRecorder
-	Log           *zap.Logger
+	Accounts       AccountResolver
+	Conversations  ConversationStore
+	Messages       MessageStore
+	Tickets        TicketEnqueuer
+	Completeness   CompletenessAssessor
+	MediaPromoter  MediaPromoter
+	CaseLookup     CaseLookup
+	CustomerLookup CustomerLookup
+	AppKey         string
+	Backfill       BackfillWriter
+	Activity       ports.ActivityRecorder
+	Log            *zap.Logger
 }
 
 func New(cfg Config) (*Workflow, error) {
@@ -153,10 +164,12 @@ func New(cfg Config) (*Workflow, error) {
 		tickets:       cfg.Tickets,
 		completeness:  cfg.Completeness,
 		mediaPromoter: cfg.MediaPromoter,
-		caseLookup:    cfg.CaseLookup,
-		backfill:      cfg.Backfill,
-		activity:      cfg.Activity,
-		log:           log,
+		caseLookup:     cfg.CaseLookup,
+		customerLookup: cfg.CustomerLookup,
+		appKey:         cfg.AppKey,
+		backfill:       cfg.Backfill,
+		activity:       cfg.Activity,
+		log:            log,
 	}, nil
 }
 
@@ -297,8 +310,12 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
 	}
 
+	customerFilled := false
 	if res.ReferencedCase != "" && w.caseLookup != nil {
-		w.backfillReferencedCase(ctx, account.CompanyID, convoID, res.ReferencedCase)
+		customerFilled = w.backfillReferencedCase(ctx, account.CompanyID, convoID, res.ReferencedCase)
+	}
+	if !customerFilled && customer != "" && w.customerLookup != nil {
+		w.backfillSenderCustomer(ctx, account.CompanyID, convoID, customer)
 	}
 
 	if w.completeness != nil && req.Channel == ChannelEmail {
@@ -340,7 +357,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	return res, nil
 }
 
-func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoID int64, code string) {
+func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoID int64, code string) bool {
 	lookup, err := w.caseLookup.CaseByCode(ctx, []int64{companyID}, code)
 	if err != nil {
 		w.log.Info("omnichannel: referenced case backfill lookup miss",
@@ -348,16 +365,48 @@ func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoI
 			zap.Int64("conversation_id", convoID),
 			zap.String("referenced_case", code),
 			zap.Error(err))
-		return
+		return false
 	}
 	if !lookup.CustomerID.Valid || w.backfill == nil {
-		return
+		return false
 	}
 	if werr := w.backfill.WriteBackfill(ctx, convoID, lookup.CustomerID, lookup.SiteID, BackfillSourceReferencedCase); werr != nil {
 		w.log.Warn("omnichannel: referenced case backfill write failed",
 			zap.Int64("company_id", companyID),
 			zap.Int64("conversation_id", convoID),
 			zap.String("referenced_case", code),
+			zap.Error(werr))
+		return false
+	}
+	return true
+}
+
+// backfillSenderCustomer fills the customer suggestion from the sender's email
+// when no referenced case supplied one. It writes a suggestion only (never the
+// real customer_id) and only on an existence-guaranteed, company-scoped match.
+func (w *Workflow) backfillSenderCustomer(ctx context.Context, companyID, convoID int64, sender string) {
+	if w.customerLookup == nil || w.backfill == nil || w.appKey == "" {
+		return
+	}
+	hash := EmailHash(sender, w.appKey)
+	if hash == "" {
+		return
+	}
+	customerID, err := w.customerLookup.CustomerByEmailHash(ctx, []int64{companyID}, hash)
+	if err != nil {
+		w.log.Info("omnichannel: sender-email backfill lookup miss",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
+			zap.Error(err))
+		return
+	}
+	if !customerID.Valid {
+		return
+	}
+	if werr := w.backfill.WriteBackfill(ctx, convoID, customerID, sql.NullInt64{}, BackfillSourceSenderEmail); werr != nil {
+		w.log.Warn("omnichannel: sender-email backfill write failed",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", convoID),
 			zap.Error(werr))
 	}
 }

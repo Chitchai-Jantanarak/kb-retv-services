@@ -32,14 +32,17 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	}
 	centralRepo := channelsmysql.New(central)
 	siloRepo := channelsmysql.New(router)
+	reportsRepo := reportsmysql.New(router)
 	wfCfg := omnichannel.Config{
-		Accounts:      centralRepo,
-		Conversations: siloRepo,
-		Messages:      siloRepo,
-		CaseLookup:    caseLookupAdapter{repo: reportsmysql.New(router)},
-		Backfill:      siloRepo,
-		Activity:      activitymysql.New(router),
-		Log:           log,
+		Accounts:       centralRepo,
+		Conversations:  siloRepo,
+		Messages:       siloRepo,
+		CaseLookup:     caseLookupAdapter{repo: reportsRepo},
+		CustomerLookup: reportsRepo,
+		AppKey:         cfg.App.Key,
+		Backfill:       siloRepo,
+		Activity:       activitymysql.New(router),
+		Log:            log,
 	}
 	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {
 		wfCfg.Completeness = assessor

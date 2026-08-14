@@ -39,6 +39,7 @@ func configFrom(v *viper.Viper) Config {
 	return Config{
 		App: App{
 			Env: v.GetString("app.env"),
+			Key: v.GetString("app.key"),
 		},
 		Server: Server{
 			Port:               v.GetString("server.port"),
@@ -137,6 +138,7 @@ func configFrom(v *viper.Viper) Config {
 			CacheMaxEntries:       v.GetInt("chat.cacheMaxEntries"),
 			GuardEmbedderProvider: v.GetString("chat.guardEmbedderProvider"),
 			GuardEmbedderAssetDir: v.GetString("chat.guardEmbedderAssetDir"),
+			SelectorRejectMargin:  v.GetFloat64("chat.selectorRejectMargin"),
 		},
 		Embedding: Embedding{
 			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),
