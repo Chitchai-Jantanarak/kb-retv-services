@@ -40,7 +40,7 @@ func (fakeCasesResult) LastInsertId() (int64, error) { return 0, nil }
 func (fakeCasesResult) RowsAffected() (int64, error) { return 1, nil }
 
 func TestBuildLatestCasesQueryScopesToCoverage(t *testing.T) {
-	query, args := buildLatestCasesQuery([]int64{3, 4}, "", 10)
+	query, args := buildLatestCasesQuery([]int64{3, 4}, "", "", 10)
 	if !strings.Contains(query, "r.company_id IN (?,?)") {
 		t.Fatalf("query = %q, want company_id IN (?,?)", query)
 	}
@@ -49,8 +49,38 @@ func TestBuildLatestCasesQueryScopesToCoverage(t *testing.T) {
 	}
 }
 
+func TestBuildLatestCasesQueryDefaultScopeExcludesDrafts(t *testing.T) {
+	query, _ := buildLatestCasesQuery([]int64{3, 4}, "", "", 10)
+	if !strings.Contains(query, "r.code IS NOT NULL") {
+		t.Fatalf("query = %q, want r.code IS NOT NULL for default scope", query)
+	}
+	if strings.Contains(query, "CONCAT('draft:'") {
+		t.Fatalf("query = %q, default scope must not label drafts", query)
+	}
+}
+
+func TestBuildLatestCasesQueryDraftScopeSelectsOnlyCodeless(t *testing.T) {
+	query, _ := buildLatestCasesQuery([]int64{3, 4}, "", "draft", 10)
+	if !strings.Contains(query, "r.code IS NULL") {
+		t.Fatalf("query = %q, want r.code IS NULL for draft scope", query)
+	}
+	if !strings.Contains(query, "COALESCE(r.code, CONCAT('draft:', r.id))") {
+		t.Fatalf("query = %q, want draft-labeled code column", query)
+	}
+}
+
+func TestBuildLatestCasesQueryAllScopeOmitsCodePredicate(t *testing.T) {
+	query, _ := buildLatestCasesQuery([]int64{3, 4}, "", "all", 10)
+	if strings.Contains(query, "r.code IS NULL") || strings.Contains(query, "r.code IS NOT NULL") {
+		t.Fatalf("query = %q, want no code predicate for all scope", query)
+	}
+	if !strings.Contains(query, "COALESCE(r.code, CONCAT('draft:', r.id))") {
+		t.Fatalf("query = %q, want draft-labeled code column", query)
+	}
+}
+
 func TestBuildLatestCasesQueryWithStatusFilter(t *testing.T) {
-	query, args := buildLatestCasesQuery([]int64{3, 4}, "open", 10)
+	query, args := buildLatestCasesQuery([]int64{3, 4}, "open", "", 10)
 	if !strings.Contains(query, "AND s.code = ?") {
 		t.Fatalf("query = %q, want status filter", query)
 	}
@@ -165,7 +195,7 @@ func TestSearchCasesEmptyCoverageReturnsEmpty(t *testing.T) {
 }
 
 func TestBuildLatestCasesQueryWithoutStatusOmitsFilter(t *testing.T) {
-	query, args := buildLatestCasesQuery([]int64{3, 4}, "", 10)
+	query, args := buildLatestCasesQuery([]int64{3, 4}, "", "", 10)
 	if strings.Contains(query, "s.code = ?") {
 		t.Fatalf("query = %q, must not filter by status when empty", query)
 	}
@@ -178,7 +208,7 @@ func TestLatestCasesEmptyCoverageRunsNoQuery(t *testing.T) {
 	q := &fakeCasesQuerier{}
 	repo := New(q)
 
-	rows, err := repo.LatestCases(context.Background(), nil, "", 10)
+	rows, err := repo.LatestCases(context.Background(), nil, "", "", 10)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}

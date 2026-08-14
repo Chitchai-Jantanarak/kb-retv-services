@@ -515,9 +515,9 @@ func TestRunWithoutEnqueuerIsStillOK(t *testing.T) {
 	}
 }
 
-func TestRunEmailCompleteIntakeEnqueuesTicket(t *testing.T) {
+func TestRunEmailTicketClassificationEnqueuesEvenWhenIncomplete(t *testing.T) {
 	tickets := &captureTickets{}
-	assessor := &stubAssessor{result: Completeness{Status: "ready"}}
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Missing: []string{"product"}, Classification: "new_issue"}}
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
 		Conversations: &stubConvos{id: 100, created: true},
@@ -533,16 +533,16 @@ func TestRunEmailCompleteIntakeEnqueuesTicket(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if !tickets.called {
-		t.Fatal("email conversation with complete intake must enqueue a ticket")
+		t.Fatal("a ticket-classified email must enqueue even with missing fields")
 	}
 	if !res.TicketEnqueued {
 		t.Fatalf("TicketEnqueued = false, want true: res=%+v", res)
 	}
 }
 
-func TestRunEmailIncompleteIntakeDoesNotEnqueue(t *testing.T) {
+func TestRunEmailNonTicketDoesNotEnqueue(t *testing.T) {
 	tickets := &captureTickets{}
-	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Missing: []string{"product"}}}
+	assessor := &stubAssessor{result: Completeness{Status: "ready", Classification: "not_actionable"}}
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
 		Conversations: &stubConvos{id: 100, created: true},
@@ -558,7 +558,7 @@ func TestRunEmailIncompleteIntakeDoesNotEnqueue(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if res.TicketEnqueued || tickets.called {
-		t.Fatalf("incomplete email intake must not enqueue a ticket: res=%+v tickets=%+v", res, tickets)
+		t.Fatalf("a non-ticket email must not enqueue even when complete: res=%+v tickets=%+v", res, tickets)
 	}
 }
 

@@ -46,6 +46,7 @@ type Chat struct {
 	GuardEmbedderProvider string
 	GuardEmbedderAssetDir string
 	SelectorRejectMargin  float64
+	OffTopicMargin        float64
 }
 
 type Embedding struct {
@@ -56,4 +57,9 @@ type Embedding struct {
 
 type Reply struct {
 	DefaultMode string
+}
+
+type Intake struct {
+	AssessMode      string
+	AssessTimeoutMs int
 }

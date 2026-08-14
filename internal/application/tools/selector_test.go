@@ -304,3 +304,38 @@ func TestSelectRunnerUpWithZeroEligible(t *testing.T) {
 		t.Fatalf("RunnerUp = %v, want 0 with zero eligible candidates", got.RunnerUp)
 	}
 }
+
+func TestSelectMarginRejection(t *testing.T) {
+	closeEmb := fakeEmbedder{table: map[string][]float32{
+		"cases":        {1, 0},
+		"workload":     {0.97, 0.24},
+		"nearby query": {1, 0},
+	}}
+
+	s, err := NewSelector(context.Background(), closeEmb, twoTools(), WithRejectMargin(0.1))
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+	got, err := s.Select(context.Background(), "nearby query", []string{"report.view", "team.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if got.Matched || !got.MarginRejected {
+		t.Fatalf("want margin-rejected non-match, got %+v", got)
+	}
+	if got.ToolID != "f1" || got.RunnerUp == 0 {
+		t.Fatalf("rejected selection must keep scores for audit, got %+v", got)
+	}
+
+	off, err := NewSelector(context.Background(), closeEmb, twoTools())
+	if err != nil {
+		t.Fatalf("NewSelector: %v", err)
+	}
+	got, err = off.Select(context.Background(), "nearby query", []string{"report.view", "team.view"})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if !got.Matched || got.MarginRejected {
+		t.Fatalf("margin off must not reject, got %+v", got)
+	}
+}

@@ -8,6 +8,8 @@ import (
 
 func isolateEnv(t *testing.T) {
 	t.Helper()
+	// NOTE: primes testing's once-per-binary TempDir root before env is cleared, else it caches the no-perm Windows fallback dir.
+	t.TempDir()
 	saved := os.Environ()
 	os.Clearenv()
 	t.Cleanup(func() {

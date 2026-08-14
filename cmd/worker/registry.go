@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hibiken/asynq"
 
+	"github.com/my/app/internal/application/services/intakeassess"
 	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/config"
@@ -31,6 +32,7 @@ func buildTaskMux(cfg config.Config, classifyQueue ports.Queue) *asynq.ServeMux 
 	mux.HandleFunc(TaskOutboxFlush, makeHandler(buildOutboxHandler(cfg)))
 	mux.HandleFunc(TaskEmbeddingRefresh, makeHandler(buildRefreshHandler(cfg)))
 	mux.HandleFunc(tickets.TaskCreate, makeHandler(buildTicketCreateHandler(cfg, classifyQueue)))
+	mux.HandleFunc(intakeassess.TaskAssess, makeHandler(buildIntakeAssessHandler(cfg)))
 
 	return mux
 }

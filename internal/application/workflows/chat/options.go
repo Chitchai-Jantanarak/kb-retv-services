@@ -92,3 +92,21 @@ func WithKnowledgeReranker(emb Embedder) Option {
 		}
 	}
 }
+
+func WithReplyPool(provider ports.LLMProvider) Option {
+	return func(w *Workflow) {
+		if provider == nil {
+			return
+		}
+		w.pool = newReplyPool(provider)
+		go w.pool.warm(context.Background())
+	}
+}
+
+func WithOffTopicMargin(margin float64) Option {
+	return func(w *Workflow) {
+		if margin > 0 {
+			w.offTopicMargin = margin
+		}
+	}
+}

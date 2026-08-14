@@ -108,6 +108,10 @@ type CompletenessAssessor interface {
 	Assess(ctx context.Context, companyID, conversationID int64, sig IntakeSignals) (Completeness, error)
 }
 
+type AssessEnqueuer interface {
+	EnqueueAssess(ctx context.Context, companyID, conversationID, messageID int64, customer string, sig IntakeSignals, req dto.InboundMessageRequest) error
+}
+
 type MediaPromoter interface {
 	Promote(ctx context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error
 	PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error
@@ -119,6 +123,8 @@ type Workflow struct {
 	messages      MessageStore
 	tickets       TicketEnqueuer
 	completeness  CompletenessAssessor
+	assessQueue   AssessEnqueuer
+	assessMode    string
 	mediaPromoter MediaPromoter
 	caseLookup     CaseLookup
 	customerLookup CustomerLookup
@@ -134,6 +140,8 @@ type Config struct {
 	Messages       MessageStore
 	Tickets        TicketEnqueuer
 	Completeness   CompletenessAssessor
+	AssessQueue    AssessEnqueuer
+	AssessMode     string
 	MediaPromoter  MediaPromoter
 	CaseLookup     CaseLookup
 	CustomerLookup CustomerLookup
@@ -163,6 +171,8 @@ func New(cfg Config) (*Workflow, error) {
 		messages:      cfg.Messages,
 		tickets:       cfg.Tickets,
 		completeness:  cfg.Completeness,
+		assessQueue:   cfg.AssessQueue,
+		assessMode:    cfg.AssessMode,
 		mediaPromoter: cfg.MediaPromoter,
 		caseLookup:     cfg.CaseLookup,
 		customerLookup: cfg.CustomerLookup,
@@ -309,6 +319,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		MessageID:      msgID,
 		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
 	}
+	intakeClassification := ""
 
 	customerFilled := false
 	if res.ReferencedCase != "" && w.caseLookup != nil {
@@ -318,7 +329,9 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		w.backfillSenderCustomer(ctx, account.CompanyID, convoID, customer)
 	}
 
-	if w.completeness != nil && req.Channel == ChannelEmail {
+	asyncEmail := w.assessMode == "async" && req.Channel == ChannelEmail && w.assessQueue != nil && created
+
+	if req.Channel == ChannelEmail && (w.completeness != nil || asyncEmail) {
 		sig := IntakeSignals{
 			Sender:          customer,
 			Subject:         req.Subject,
@@ -331,15 +344,29 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 			ThreadMatched:   threadMatched,
 			Images:          attachmentImages(n.Attachments),
 		}
-		if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, sig); aerr == nil {
-			res.IntakeStatus = assessed.Status
-			res.IntakeMissing = assessed.Missing
-			w.recordIntakeAssessed(ctx, account.CompanyID, convoID, req.Subject, assessed)
+		if asyncEmail {
+			if err := w.assessQueue.EnqueueAssess(ctx, account.CompanyID, convoID, msgID, customer, sig, req); err != nil {
+				w.log.Warn("omnichannel: assess enqueue failed, falling back to inline",
+					zap.Int64("company_id", account.CompanyID),
+					zap.Int64("conversation_id", convoID),
+					zap.Error(err))
+			} else {
+				return res, nil
+			}
+		}
+		if w.completeness != nil {
+			if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, sig); aerr == nil {
+				res.IntakeStatus = assessed.Status
+				res.IntakeMissing = assessed.Missing
+				intakeClassification = assessed.Classification
+				w.recordIntakeAssessed(ctx, account.CompanyID, convoID, req.Subject, assessed)
+			}
 		}
 	}
 
 	if w.tickets != nil && created {
-		shouldEnqueue := req.Channel == ChannelLine || (req.Channel == ChannelEmail && res.IntakeStatus == intake.StatusReady)
+		promotableTicket := intakeClassification == intake.ClassificationNewIssue || intakeClassification == intake.ClassificationFollowUp
+		shouldEnqueue := req.Channel == ChannelLine || (req.Channel == ChannelEmail && promotableTicket)
 		if shouldEnqueue {
 			if terr := w.tickets.EnqueueTicket(ctx, account.CompanyID, convoID, msgID, customer, req); terr != nil {
 				w.log.Warn("omnichannel: ticket enqueue failed",

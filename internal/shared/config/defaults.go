@@ -9,6 +9,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.deadline_headroom_ms", 2000)
 	v.SetDefault("server.deadline_min_ms", 1000)
 	v.SetDefault("server.deadline_max_ms", 60000)
+
+	v.SetDefault("intake.assess_mode", "inline")
+	v.SetDefault("intake.assess_timeout_ms", 30000)
 	v.SetDefault("mysql.enabled", false)
 	v.SetDefault("mysql.maxOpenConns", 25)
 	v.SetDefault("mysql.maxIdleConns", 5)

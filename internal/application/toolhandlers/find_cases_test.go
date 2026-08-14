@@ -38,6 +38,39 @@ func TestFindCasesMapsRows(t *testing.T) {
 	}
 }
 
+func TestFindCasesPassesScopeParamThrough(t *testing.T) {
+	repo := &stubCasesRepo{}
+	h := NewFindCases(repo)
+
+	if _, err := h.Run(context.Background(), skeleton.Query{
+		Text:     "show latest drafts",
+		Coverage: []int64{3},
+		Params:   map[string]string{"scope": "draft"},
+		Tool:     tools.Tool{Limit: 10},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if repo.latestScope != "draft" {
+		t.Fatalf("latestScope = %q, want draft", repo.latestScope)
+	}
+}
+
+func TestFindCasesDefaultScopeIsEmpty(t *testing.T) {
+	repo := &stubCasesRepo{}
+	h := NewFindCases(repo)
+
+	if _, err := h.Run(context.Background(), skeleton.Query{
+		Text:     "show latest cases",
+		Coverage: []int64{3},
+		Tool:     tools.Tool{Limit: 10},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if repo.latestScope != "" {
+		t.Fatalf("latestScope = %q, want empty for default listing", repo.latestScope)
+	}
+}
+
 func TestFindCasesHonoursRequestedCount(t *testing.T) {
 	repo := &stubCasesRepo{}
 	h := NewFindCases(repo)

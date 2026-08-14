@@ -142,6 +142,54 @@ func TestRouterPropagatesRetrievalError(t *testing.T) {
 	}
 }
 
+func TestRouterRouteSocialSubIntent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		query   string
+		wantSub string
+	}{
+		{name: "test phrase tagged test", query: "ทดสอบ", wantSub: "test"},
+		{name: "greeting phrase tagged greeting", query: "สวัสดี", wantSub: "greeting"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			emb := &stubEmbedder{vecs: map[string][]float32{
+				"ทดสอบ":         {0, 0, 0, 0, 1},
+				"สวัสดี":        {0, 0, 0, 0, 0, 1},
+				"ไม่เกี่ยวข้อง": {0, 0, 0, 0, 0, 0, 1},
+			}}
+			scorer := &stubScorer{}
+
+			r, err := New(context.Background(), emb, scorer,
+				WithAnchors(map[Intent][]string{
+					Social:    {"ทดสอบ", "สวัสดี"},
+					OffDomain: {"ไม่เกี่ยวข้อง"},
+				}),
+				WithThresholds(0.4, 0.6),
+			)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			got, err := r.Route(context.Background(), tt.query)
+			if err != nil {
+				t.Fatalf("Route() error = %v", err)
+			}
+			if got.Intent != Social {
+				t.Fatalf("Intent = %q, want %q", got.Intent, Social)
+			}
+			if got.SubIntent != tt.wantSub {
+				t.Errorf("SubIntent = %q, want %q", got.SubIntent, tt.wantSub)
+			}
+		})
+	}
+}
+
 func TestNewEmbedsAnchorsAtBoot(t *testing.T) {
 	t.Parallel()
 

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/ai/prompts"
+	"github.com/my/app/internal/application/services/intakeassess"
 	"github.com/my/app/internal/application/services/mediastore"
 	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/intake"
@@ -54,6 +55,11 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	if enqueuer := buildTicketEnqueuer(cfg, log); enqueuer != nil {
 		wfCfg.Tickets = enqueuer
 		log.Info("ticket auto-enqueue configured")
+	}
+	wfCfg.AssessMode = cfg.Intake.AssessMode
+	if assessQueue := buildAssessEnqueuer(cfg, log); assessQueue != nil {
+		wfCfg.AssessQueue = assessQueue
+		log.Info("email intake async assess configured", zap.String("mode", cfg.Intake.AssessMode))
 	}
 
 	wf, err := omnichannel.New(wfCfg)
@@ -122,6 +128,27 @@ func buildTicketEnqueuer(cfg config.Config, log *zap.Logger) *tickets.Enqueuer {
 	enqueuer, err := tickets.NewEnqueuer(queue)
 	if err != nil {
 		log.Warn("ticket auto-enqueue not configured", zap.Error(err))
+		return nil
+	}
+	return enqueuer
+}
+
+func buildAssessEnqueuer(cfg config.Config, log *zap.Logger) *intakeassess.Enqueuer {
+	redisURL := cfg.Redis.URL
+	if redisURL == "" {
+		redisURL = os.Getenv("REDIS_URL")
+	}
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+	queue, err := infraasynq.NewQueue(infraasynq.Config{RedisURL: redisURL})
+	if err != nil {
+		log.Warn("email intake async assess not configured", zap.Error(err))
+		return nil
+	}
+	enqueuer, err := intakeassess.NewEnqueuer(queue)
+	if err != nil {
+		log.Warn("email intake async assess not configured", zap.Error(err))
 		return nil
 	}
 	return enqueuer

@@ -32,6 +32,9 @@ type Workflow struct {
 	turns       TurnRecorder
 
 	knowledgeReranker Embedder
+
+	pool           *replyPool
+	offTopicMargin float64
 }
 
 func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts rag.FTSSource, opts ...Option) (*Workflow, error) {
@@ -186,4 +189,11 @@ func toolFailedReply(locale string) string {
 		return "I could not complete that lookup. Please try again."
 	}
 	return "ไม่สามารถดำเนินการค้นหาได้ค่ะ กรุณาลองใหม่อีกครั้ง"
+}
+
+func offTopicReply(locale string) string {
+	if locale == dto.ChatLocaleEnglish {
+		return "I can help with support cases, products, customers, and our knowledge base — I can't help with that topic."
+	}
+	return "ขออภัยค่ะ ช่วยได้เฉพาะเรื่องเคสบริการ สินค้า ลูกค้า และคลังความรู้ค่ะ"
 }

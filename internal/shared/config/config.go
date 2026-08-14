@@ -17,6 +17,7 @@ type Config struct {
 	Chat      Chat
 	Embedding Embedding
 	Reply     Reply
+	Intake    Intake
 }
 
 func Load() (Config, error) {

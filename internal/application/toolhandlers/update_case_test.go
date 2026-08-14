@@ -34,6 +34,7 @@ type stubCasesRepo struct {
 	latestCases       []reportsmysql.CaseRow
 	latestCoverage    []int64
 	latestStatus      string
+	latestScope       string
 	latestLimit       int
 	caseByCode        reportsmysql.CaseRow
 	caseByCodeErr     error
@@ -77,9 +78,10 @@ func (s *stubCasesRepo) AssignCase(_ context.Context, coverage []int64, reportID
 	return s.assignErr
 }
 
-func (s *stubCasesRepo) LatestCases(_ context.Context, coverage []int64, status string, limit int) ([]reportsmysql.CaseRow, error) {
+func (s *stubCasesRepo) LatestCases(_ context.Context, coverage []int64, status string, scope string, limit int) ([]reportsmysql.CaseRow, error) {
 	s.latestCoverage = coverage
 	s.latestStatus = status
+	s.latestScope = scope
 	s.latestLimit = limit
 	return s.latestCases, nil
 }

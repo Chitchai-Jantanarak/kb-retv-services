@@ -2,11 +2,11 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/my/app/internal/application/decide"
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/intent"
 	"github.com/my/app/internal/application/skeleton"
@@ -56,148 +56,112 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 		return chatPreamble{companyID: companyID, lastUser: lastUser, transcript: transcript}, nil
 	}
 
-	var decision intent.Decision
-	err = timedChatErr(timings, "router", func() error {
-		var err error
-		decision, err = w.router.Route(ctx, lastUser)
-		return err
+	decider := decide.Decider{Router: w.router, OffTopicMargin: w.offTopicMargin}
+	if w.orch != nil {
+		decider.Runner = w.orch
+	}
+	decideCtx := ctx
+	var traceCollector *debugtrace.Collector
+	if req.Debug {
+		decideCtx, traceCollector = debugtrace.WithCollector(ctx)
+	}
+	candidates := w.citeCandidates(ctx, companyID, req)
+
+	outcome, err := decider.Decide(decideCtx, decide.Input{
+		Actor:          toolActor(ctx, companyID),
+		Text:           lastUser,
+		CiteCandidates: candidates,
+	}, func(stage string, fn func() error) error {
+		return timedChatErr(timings, stage, fn)
 	})
 	if err != nil {
 		return chatPreamble{}, err
 	}
+	decision := outcome.Decision
+
 	var selectedToolDebug *dto.ChatToolDebug
-	var toolTrace *skeleton.Response
-	if w.orch != nil && decision.Intent != intent.Social {
-		var toolResp skeleton.Response
-		var toolErr error
-		toolCtx := ctx
-		var traceCollector *debugtrace.Collector
+	toolTrace := outcome.Tool
+	if outcome.Tool != nil {
 		if req.Debug {
-			toolCtx, traceCollector = debugtrace.WithCollector(ctx)
-		}
-		candidates := w.citeCandidates(ctx, companyID, req)
-		toolCtx = ctxkey.WithCiteCandidates(toolCtx, candidates)
-		toolCtx = ctxkey.WithQueryVector(toolCtx, decision.Vector)
-		toolCtx = ctxkey.WithRouterIntent(toolCtx, string(decision.Intent))
-		timedChat(timings, "tool", func() {
-			toolResp, toolErr = w.orch.Handle(toolCtx, toolActor(ctx, companyID), lastUser)
-		})
-		toolTrace = &toolResp
-		if req.Debug {
-			selectedToolDebug = buildToolDebug(toolResp, toolErr, timings["tool"], traceCollector.Events())
+			selectedToolDebug = buildToolDebug(*outcome.Tool, outcome.ToolErr, timings["tool"], traceCollector.Events())
 			if selectedToolDebug != nil {
 				selectedToolDebug.RouterIntent = string(decision.Intent)
 				selectedToolDebug.RouterConfidence = decision.Confidence
 				selectedToolDebug.RetrievalScore = decision.RetrievalScore
 			}
 		}
-		if toolErr != nil {
-			logger.FromContext(ctx).Error("chat: tool orchestrator failed", zap.Int64("company_id", companyID), zap.Error(toolErr))
+		if outcome.ToolErr != nil {
+			logger.FromContext(ctx).Error("chat: tool orchestrator failed", zap.Int64("company_id", companyID), zap.Error(outcome.ToolErr))
 		}
-		if toolErr != nil && errors.Is(toolErr, skeleton.ErrNeedsParam) {
-			reply := clarifyReply(req.Locale)
-			if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, missingFields(toolErr), toolResp.Params); ok {
-				reply = modelReply
-			}
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				toolDebug:  selectedToolDebug,
-				transcript: transcript,
-				toolTrace:  toolTrace,
-				resp: dto.ChatResponse{
-					Reply:    reply,
-					Status:   dto.ChatStatusNeedsClarification,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				},
-				decision: decision,
-			}, nil
-		}
-		if toolErr != nil && (toolResp.Kind == "write" || authoritativeIntent(decision.Intent)) {
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				toolDebug:  selectedToolDebug,
-				transcript: transcript,
-				toolTrace:  toolTrace,
-				resp: dto.ChatResponse{
-					Reply:    toolFailedReply(req.Locale),
-					Status:   dto.ChatStatusToolFailed,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				},
-				decision: decision,
-			}, nil
-		}
-		if toolErr == nil && toolResp.Matched {
-			resp := toolChatResponse(req.Locale, toolResp)
-			if summaryComposeMode(toolResp, req) {
-				timedChat(timings, "compose", func() {
-					if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
-						resp.Reply = summary
-					}
-				})
-			}
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				toolDebug:  selectedToolDebug,
-				transcript: transcript,
-				toolTrace:  toolTrace,
-				resp:       resp,
-				tool:       &toolResp,
-				decision:   decision,
-				candidates: candidates,
-			}, nil
-		}
-		if toolErr == nil && !toolResp.Matched && len(toolResp.MissingParams) > 0 {
-			reply := clarifyReply(req.Locale)
-			if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, toolResp.MissingParams, toolResp.Params); ok {
-				reply = modelReply
-			}
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				toolDebug:  selectedToolDebug,
-				transcript: transcript,
-				toolTrace:  toolTrace,
-				resp: dto.ChatResponse{
-					Reply:    reply,
-					Status:   dto.ChatStatusNeedsClarification,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				},
-				decision: decision,
-			}, nil
-		}
-		if authoritativeIntent(decision.Intent) {
-			reply, status := clarifyReply(req.Locale), dto.ChatStatusNeedsClarification
-			if toolResp.PermFiltered {
-				reply, status = permissionDeniedReply(req.Locale), dto.ChatStatusPermissionDenied
-			}
-			return chatPreamble{
-				companyID:  companyID,
-				lastUser:   lastUser,
-				handled:    true,
-				toolDebug:  selectedToolDebug,
-				transcript: transcript,
-				toolTrace:  toolTrace,
-				resp: dto.ChatResponse{
-					Reply:    reply,
-					Status:   status,
-					Activity: activity(req.Locale, "request_checked", "permission_checked"),
-				},
-				decision: decision,
-			}, nil
-		}
-	}
-	if resp, handled := w.shortCircuit(req.Locale, decision); handled {
-		return chatPreamble{companyID: companyID, lastUser: lastUser, handled: true, toolDebug: selectedToolDebug, transcript: transcript, toolTrace: toolTrace, resp: resp, decision: decision}, nil
 	}
 
-	return chatPreamble{companyID: companyID, lastUser: lastUser, toolDebug: selectedToolDebug, transcript: transcript, toolTrace: toolTrace, decision: decision}, nil
+	base := chatPreamble{
+		companyID:  companyID,
+		lastUser:   lastUser,
+		toolDebug:  selectedToolDebug,
+		transcript: transcript,
+		toolTrace:  toolTrace,
+		decision:   decision,
+	}
+
+	switch outcome.Kind {
+	case decide.KindClarify:
+		reply := clarifyReply(req.Locale)
+		var params map[string]string
+		if outcome.Tool != nil {
+			params = outcome.Tool.Params
+		}
+		if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, outcome.Missing, params); ok {
+			reply = modelReply
+		}
+		base.handled = true
+		base.resp = dto.ChatResponse{
+			Reply:    reply,
+			Status:   dto.ChatStatusNeedsClarification,
+			Activity: activity(req.Locale, "request_checked", "permission_checked"),
+		}
+		return base, nil
+	case decide.KindToolFailed:
+		base.handled = true
+		base.resp = dto.ChatResponse{
+			Reply:    toolFailedReply(req.Locale),
+			Status:   dto.ChatStatusToolFailed,
+			Activity: activity(req.Locale, "request_checked", "permission_checked"),
+		}
+		return base, nil
+	case decide.KindPermissionDenied:
+		base.handled = true
+		base.resp = dto.ChatResponse{
+			Reply:    permissionDeniedReply(req.Locale),
+			Status:   dto.ChatStatusPermissionDenied,
+			Activity: activity(req.Locale, "request_checked", "permission_checked"),
+		}
+		return base, nil
+	case decide.KindTool:
+		toolResp := *outcome.Tool
+		resp := toolChatResponse(req.Locale, toolResp)
+		if summaryComposeMode(toolResp, req) {
+			timedChat(timings, "compose", func() {
+				if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
+					resp.Reply = summary
+				}
+			})
+		}
+		base.handled = true
+		base.resp = resp
+		base.tool = outcome.Tool
+		base.candidates = candidates
+		return base, nil
+	case decide.KindHandoff, decide.KindSocial, decide.KindOffTopic:
+		seed := replySeed(companyID, lastUser, len(req.Messages))
+		if resp, handled := w.shortCircuit(req.Locale, decision, outcome.Kind, seed); handled {
+			base.handled = true
+			base.resp = resp
+		}
+		return base, nil
+	default:
+		return base, nil
+	}
 }
 
 // transcribeLastUserAudio finds the first audio attachment on the last user
@@ -329,17 +293,35 @@ func (w *Workflow) persistTurns(ctx context.Context, companyID int64, req dto.Ch
 	}
 }
 
-func (w *Workflow) shortCircuit(locale string, d intent.Decision) (dto.ChatResponse, bool) {
-	switch d.Intent {
-	case intent.Handoff:
+func (w *Workflow) shortCircuit(locale string, d intent.Decision, kind decide.Kind, seed uint64) (dto.ChatResponse, bool) {
+	switch kind {
+	case decide.KindHandoff:
+		reply := handoffReply(locale)
+		if pooled, ok := w.pool.pick("handoff", "", locale, seed); ok {
+			reply = pooled
+		}
 		return dto.ChatResponse{
-			Reply:    handoffReply(locale),
+			Reply:    reply,
 			Status:   dto.ChatStatusHandoff,
 			Activity: activity(locale, "request_checked", "permission_checked"),
 		}, true
-	case intent.Social:
+	case decide.KindSocial:
+		reply := socialReply(locale)
+		if pooled, ok := w.pool.pick("social", d.SubIntent, locale, seed); ok {
+			reply = pooled
+		}
 		return dto.ChatResponse{
-			Reply:    socialReply(locale),
+			Reply:    reply,
+			Status:   dto.ChatStatusAnswered,
+			Activity: activity(locale, "request_checked"),
+		}, true
+	case decide.KindOffTopic:
+		reply := offTopicReply(locale)
+		if pooled, ok := w.pool.pick("offtopic", "", locale, seed); ok {
+			reply = pooled
+		}
+		return dto.ChatResponse{
+			Reply:    reply,
 			Status:   dto.ChatStatusAnswered,
 			Activity: activity(locale, "request_checked"),
 		}, true

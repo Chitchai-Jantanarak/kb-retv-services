@@ -132,13 +132,14 @@ func TestSelectorGate(t *testing.T) {
 		{"รายงานล่าสุด", "f1_find_cases", "verbatim th anchor, 1.0000"},
 		{"หาเคส", "f1_find_cases", "verbatim th anchor, 1.0000"},
 		{"latest cases i should look at", "f1_find_cases", "verbatim en anchor, 1.0000"},
+		{"ขอดราฟล่าสุด", "f1_find_cases", "verbatim th anchor, drafts scope"},
 		{"show me the latest reports excluding drafts", "f1_find_cases", "en, negation, 0.6542"},
 		{"อยากได้รายงานล่าสุด", "f1_find_cases", "pure th, 0.7938"},
 		{"อยากได้รายงานล่าสุด ไม่เอาฉบับร่าง", "f1_find_cases", "pure th + negation, 0.6397"},
 
 		{"สวัสดีครับ", "", "social, top was f7 @ 0.1569"},
 		{"given my data", "", "contentless, top was f12 @ 0.3595"},
-		{"ไม่เอา draft", "", "bare follow-up unscoreable, top was f12 @ 0.2660"},
+		{"ไม่เอา draft", "f1_find_cases", "negated draft resolves to scope=cases since draft anchors landed; was unscoreable"},
 	})
 }
 
@@ -147,5 +148,6 @@ func TestSelectorGateCodeSwitch(t *testing.T) {
 		{"อยากได้ report ล่าสุดไม่เอา draft", "f1_find_cases", "code-switch, was 0.4910 vs accept 0.55"},
 		{"ขอ report ล่าสุด", "f1_find_cases", "code-switch, short"},
 		{"หา case ที่ยังไม่ปิด", "f1_find_cases", "code-switch, was f7_knowledge @ 0.6053"},
+		{"ขอรีพอรตล่าสุด ไม่เอาดราฟ", "f1_find_cases", "thai transliteration, was f12_inbound_read @ 0.619"},
 	})
 }

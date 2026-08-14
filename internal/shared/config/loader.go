@@ -139,6 +139,7 @@ func configFrom(v *viper.Viper) Config {
 			GuardEmbedderProvider: v.GetString("chat.guardEmbedderProvider"),
 			GuardEmbedderAssetDir: v.GetString("chat.guardEmbedderAssetDir"),
 			SelectorRejectMargin:  v.GetFloat64("chat.selectorRejectMargin"),
+			OffTopicMargin:        v.GetFloat64("chat.offTopicMargin"),
 		},
 		Embedding: Embedding{
 			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),
@@ -147,6 +148,10 @@ func configFrom(v *viper.Viper) Config {
 		},
 		Reply: Reply{
 			DefaultMode: v.GetString("reply.defaultMode"),
+		},
+		Intake: Intake{
+			AssessMode:      v.GetString("intake.assess_mode"),
+			AssessTimeoutMs: v.GetInt("intake.assess_timeout_ms"),
 		},
 	}
 }

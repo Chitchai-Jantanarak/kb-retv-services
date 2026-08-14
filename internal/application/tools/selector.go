@@ -7,6 +7,7 @@ import (
 
 	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/perms"
+	"github.com/my/app/internal/shared/textnorm"
 	"github.com/my/app/internal/shared/vec"
 )
 
@@ -17,15 +18,16 @@ type Embedder interface {
 }
 
 type Selection struct {
-	ToolID        string
-	Score         float64
-	RunnerUp      float64
-	Matched       bool
-	Params        map[string]string
-	Specificity   int
-	Entities      int
-	PermFiltered  bool
-	MissingParams []string
+	ToolID         string
+	Score          float64
+	RunnerUp       float64
+	Matched        bool
+	Params         map[string]string
+	Specificity    int
+	Entities       int
+	PermFiltered   bool
+	MissingParams  []string
+	MarginRejected bool
 }
 
 type toolVectors struct {
@@ -39,15 +41,24 @@ type toolVectors struct {
 }
 
 type Selector struct {
-	emb   Embedder
-	names NameSource
-	tools []toolVectors
+	emb          Embedder
+	names        NameSource
+	tools        []toolVectors
+	rejectMargin float64
 }
 
 type SelectorOption func(*Selector)
 
 func WithNameSource(names NameSource) SelectorOption {
 	return func(s *Selector) { s.names = names }
+}
+
+// WithRejectMargin enables P2.10 margin rejection: a winner whose score is
+// within n of the runner-up is ambiguous and falls through to generative.
+// n must be fitted from the recorded runner_up_score distribution (P0);
+// zero disables the check.
+func WithRejectMargin(n float64) SelectorOption {
+	return func(s *Selector) { s.rejectMargin = n }
 }
 
 const defaultAccept = 0.55
@@ -116,7 +127,11 @@ func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorO
 			continue
 		}
 
-		vecs, err := emb.Embed(ctx, t.Anchors)
+		phrases := make([]string, len(t.Anchors))
+		for i, a := range t.Anchors {
+			phrases[i] = normalizeQuery(textnorm.NormalizeLoanwords(a))
+		}
+		vecs, err := emb.Embed(ctx, phrases)
 		if err != nil {
 			return nil, fmt.Errorf("tools: embed anchors for %s: %w", t.ID, err)
 		}
@@ -151,6 +166,7 @@ func NewSelector(ctx context.Context, emb Embedder, ts []Tool, opts ...SelectorO
 }
 
 func (s *Selector) Select(ctx context.Context, text string, granted []string) (Selection, error) {
+	text = textnorm.NormalizeLoanwords(text)
 	embedText := normalizeQuery(text)
 	var query []float32
 	if shared := ctxkey.QueryVector(ctx); len(shared) > 0 && embedText == text {
@@ -269,5 +285,14 @@ func (s *Selector) Select(ctx context.Context, text string, granted []string) (S
 	}
 
 	best.RunnerUp = runnerUp
+	if s.rejectMargin > 0 && permPassed >= 2 && best.Score-runnerUp < s.rejectMargin {
+		return Selection{
+			ToolID:         best.ToolID,
+			Score:          best.Score,
+			RunnerUp:       runnerUp,
+			MarginRejected: true,
+			PermFiltered:   permBlocked > 0,
+		}, nil
+	}
 	return best, nil
 }

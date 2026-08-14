@@ -30,6 +30,91 @@ func (s *stubAssessor) Assess(_ context.Context, companyID, conversationID int64
 	return s.result, s.err
 }
 
+type stubAssessQueue struct {
+	called    bool
+	err       error
+	companyID int64
+	convoID   int64
+	msgID     int64
+	customer  string
+	sig       IntakeSignals
+}
+
+func (s *stubAssessQueue) EnqueueAssess(_ context.Context, companyID, conversationID, messageID int64, customer string, sig IntakeSignals, _ dto.InboundMessageRequest) error {
+	s.called = true
+	s.companyID = companyID
+	s.convoID = conversationID
+	s.msgID = messageID
+	s.customer = customer
+	s.sig = sig
+	return s.err
+}
+
+func TestRunAsyncModeEnqueuesAssessAndSkipsInline(t *testing.T) {
+	assessor := &stubAssessor{result: Completeness{Status: "ready", Classification: "new_issue"}}
+	tickets := &captureTickets{}
+	queue := &stubAssessQueue{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Completeness:  assessor,
+		Tickets:       tickets,
+		AssessQueue:   queue,
+		AssessMode:    "async",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !queue.called {
+		t.Fatal("async mode must enqueue assess")
+	}
+	if assessor.called {
+		t.Fatal("async mode must not assess inline")
+	}
+	if tickets.called || res.TicketEnqueued {
+		t.Fatal("async mode must not enqueue ticket inline; the worker promotes after assess")
+	}
+	if queue.companyID != 7 || queue.convoID != 100 || queue.msgID != 200 || queue.customer != "cust@x.com" {
+		t.Fatalf("enqueue args = company=%d convo=%d msg=%d cust=%q", queue.companyID, queue.convoID, queue.msgID, queue.customer)
+	}
+}
+
+func TestRunAsyncEnqueueFailureFallsBackToInline(t *testing.T) {
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Classification: "new_issue"}}
+	tickets := &captureTickets{}
+	queue := &stubAssessQueue{err: errors.New("queue down")}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Completeness:  assessor,
+		Tickets:       tickets,
+		AssessQueue:   queue,
+		AssessMode:    "async",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res, err := wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !queue.called {
+		t.Fatal("expected an enqueue attempt")
+	}
+	if !assessor.called {
+		t.Fatal("enqueue failure must fall back to inline assess")
+	}
+	if !tickets.called || !res.TicketEnqueued {
+		t.Fatal("inline fallback must promote the new_issue ticket")
+	}
+}
+
 func emailNorm() Normalized {
 	return Normalized{
 		Request: dto.InboundMessageRequest{

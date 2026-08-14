@@ -31,6 +31,8 @@ var envBindings = []envBinding{
 	{key: "embedding.refreshBatchSize", env: "EMBEDDING_REFRESH_BATCHSIZE"},
 	{key: "embedding.largeRunThreshold", env: "EMBEDDING_LARGE_RUN_THRESHOLD"},
 	{key: "reply.defaultMode", env: "REPLY_DEFAULT_MODE"},
+	{key: "intake.assess_mode", env: "INTAKE_ASSESS_MODE"},
+	{key: "intake.assess_timeout_ms", env: "INTAKE_ASSESS_TIMEOUT_MS"},
 	{key: "mysql.enabled", env: "MYSQL_ENABLED"},
 	{key: "mysql.dsn", env: "MYSQL_DSN"},
 	{key: "mysql.maxOpenConns", env: "MYSQL_MAXOPENCONNS"},

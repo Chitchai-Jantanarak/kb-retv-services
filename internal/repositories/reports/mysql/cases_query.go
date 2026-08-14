@@ -12,7 +12,7 @@ import (
 	"github.com/my/app/internal/shared/debugtrace"
 )
 
-func buildLatestCasesQuery(coverage []int64, status string, limit int) (string, []any) {
+func buildLatestCasesQuery(coverage []int64, status string, scope string, limit int) (string, []any) {
 	if len(coverage) == 0 {
 		return "", nil
 	}
@@ -30,24 +30,36 @@ func buildLatestCasesQuery(coverage []int64, status string, limit int) (string, 
 		statusFilter = " AND s.code = ?"
 		args = append(args, status)
 	}
+
+	codeColumn := "r.code"
+	scopeFilter := " AND r.code IS NOT NULL"
+	switch scope {
+	case "draft":
+		codeColumn = "COALESCE(r.code, CONCAT('draft:', r.id))"
+		scopeFilter = " AND r.code IS NULL"
+	case "all":
+		codeColumn = "COALESCE(r.code, CONCAT('draft:', r.id))"
+		scopeFilter = ""
+	}
+
 	args = append(args, limit)
 
 	query := fmt.Sprintf(`
-SELECT r.code, r.title, COALESCE(s.code, '')
+SELECT %s, r.title, COALESCE(s.code, '')
 FROM reports r
 LEFT JOIN report_statuses s ON s.id = r.status_id
-WHERE r.company_id IN (%s) AND r.code IS NOT NULL%s
+WHERE r.company_id IN (%s)%s%s
 ORDER BY r.created_at DESC
-LIMIT ?`, strings.Join(placeholders, ","), statusFilter)
+LIMIT ?`, codeColumn, strings.Join(placeholders, ","), scopeFilter, statusFilter)
 
 	return query, args
 }
 
-func (r *Repository) LatestCases(ctx context.Context, coverage []int64, status string, limit int) ([]CaseRow, error) {
+func (r *Repository) LatestCases(ctx context.Context, coverage []int64, status string, scope string, limit int) ([]CaseRow, error) {
 	if len(coverage) == 0 {
 		return []CaseRow{}, nil
 	}
-	query, args := buildLatestCasesQuery(coverage, status, limit)
+	query, args := buildLatestCasesQuery(coverage, status, scope, limit)
 	return r.queryCaseRows(
 		ctx,
 		query,

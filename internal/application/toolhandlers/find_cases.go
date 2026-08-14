@@ -42,7 +42,8 @@ func (h FindCases) Run(ctx context.Context, q skeleton.Query) ([]skeleton.Row, e
 	if status == "" {
 		status = parseStatus(q.Text)
 	}
-	cases, err := h.repo.LatestCases(ctx, q.Coverage, status, limit)
+	scope := q.Params["scope"]
+	cases, err := h.repo.LatestCases(ctx, q.Coverage, status, scope, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/my/app/internal/shared/textnorm"
 	"github.com/my/app/internal/shared/vec"
 )
 
@@ -53,10 +54,13 @@ type Decision struct {
 	Confidence     float64
 	RetrievalScore float64
 	Vector         []float32
+	SubIntent      string
+	OffMargin      float64
 }
 
 type anchor struct {
 	intent Intent
+	sub    string
 	vec    []float32
 }
 
@@ -111,6 +115,10 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 	if err != nil {
 		return nil, err
 	}
+	socialSub, err := loadSocialSub(socialSubJSON)
+	if err != nil {
+		return nil, err
+	}
 	cfg := config{
 		anchors: defaultAnchors,
 		floor:   defaultFloor,
@@ -142,7 +150,11 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 
 	anchors := make([]anchor, len(phrases))
 	for i := range phrases {
-		anchors[i] = anchor{intent: owners[i], vec: vec.Normalize(vecs[i])}
+		a := anchor{intent: owners[i], vec: vec.Normalize(vecs[i])}
+		if owners[i] == Social {
+			a.sub = socialSub[phrases[i]]
+		}
+		anchors[i] = a
 	}
 	return &Router{
 		emb:     emb,
@@ -155,6 +167,7 @@ func New(ctx context.Context, emb Embedder, scorer RetrievalScorer, opts ...Opti
 }
 
 func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
+	text = textnorm.NormalizeLoanwords(text)
 	vecs, err := r.emb.Embed(ctx, []string{text})
 	if err != nil {
 		return Decision{}, fmt.Errorf("intent: embed query: %w", err)
@@ -164,13 +177,13 @@ func (r *Router) Route(ctx context.Context, text string) (Decision, error) {
 	}
 	query := vec.Normalize(vecs[0])
 
-	pos, neg := r.scoreAnchors(query)
+	pos, neg, socialSub := r.scoreAnchors(query)
 	if neg >= pos.score+r.margin {
-		return Decision{Intent: OffDomain, Reason: ReasonOffDomainAnchor, Confidence: pos.score, Vector: query}, nil
+		return Decision{Intent: OffDomain, Reason: ReasonOffDomainAnchor, Confidence: pos.score, Vector: query, OffMargin: neg - pos.score}, nil
 	}
 
 	if pos.intent == Social && pos.score >= r.accept {
-		return Decision{Intent: Social, Reason: ReasonSocialAnchor, Confidence: pos.score, Vector: query}, nil
+		return Decision{Intent: Social, Reason: ReasonSocialAnchor, Confidence: pos.score, Vector: query, SubIntent: socialSub}, nil
 	}
 
 	if isAction(pos.intent) && pos.score >= r.accept {
@@ -197,12 +210,16 @@ type scored struct {
 	score  float64
 }
 
-func (r *Router) scoreAnchors(query []float32) (scored, float64) {
+func (r *Router) scoreAnchors(query []float32) (scored, float64, string) {
 	best := make(map[Intent]float64, len(r.anchors))
+	socialSub := ""
 	for _, a := range r.anchors {
 		s := vec.Dot(query, a.vec)
 		if cur, ok := best[a.intent]; !ok || s > cur {
 			best[a.intent] = s
+			if a.intent == Social {
+				socialSub = a.sub
+			}
 		}
 	}
 
@@ -217,7 +234,7 @@ func (r *Router) scoreAnchors(query []float32) (scored, float64) {
 			found = true
 		}
 	}
-	return pos, best[OffDomain]
+	return pos, best[OffDomain], socialSub
 }
 
 func isAction(i Intent) bool {
@@ -252,10 +269,27 @@ func flatten(anchors map[Intent][]string) ([]string, []Intent) {
 //go:embed anchors.json
 var anchorsJSON []byte
 
+//go:embed social_sub.json
+var socialSubJSON []byte
+
 func loadAnchors(raw []byte) (map[Intent][]string, error) {
 	var anchors map[Intent][]string
 	if err := json.Unmarshal(raw, &anchors); err != nil {
 		return nil, fmt.Errorf("intent: invalid anchors.json: %w", err)
 	}
 	return anchors, nil
+}
+
+func loadSocialSub(raw []byte) (map[string]string, error) {
+	var subs map[string][]string
+	if err := json.Unmarshal(raw, &subs); err != nil {
+		return nil, fmt.Errorf("intent: invalid social_sub.json: %w", err)
+	}
+	phraseSub := make(map[string]string)
+	for sub, phrases := range subs {
+		for _, phrase := range phrases {
+			phraseSub[phrase] = sub
+		}
+	}
+	return phraseSub, nil
 }

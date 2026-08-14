@@ -91,7 +91,14 @@ func buildChatEndpoints(
 		chatwf.WithTurnRecorder(toolaudit.NewChatTurn(
 			activityaudit.NewAIAction(mysqlai.NewActionRecorder(qdb), activitymysql.New(qdb), log),
 			agentIDLookup(resolver, log))),
+		chatwf.WithOffTopicMargin(cfg.Chat.OffTopicMargin),
 	)
+
+	if poolProvider, err := llm.Resolve(llmboot.LLMSettings(cfg)); err != nil {
+		log.Warn("chat reply pool not configured", zap.Error(err))
+	} else {
+		chatOpts = append(chatOpts, chatwf.WithReplyPool(poolProvider))
+	}
 
 	if geminiKey := llmboot.LLMSettings(cfg).GeminiKey; geminiKey != "" {
 		if strings.TrimSpace(cfg.Laravel.BaseURL) != "" {
@@ -177,7 +184,8 @@ func appendChatIntelligenceOptions(
 	})
 	bound := broker.Bound(catalog)
 	selector, err := tools.NewSelector(context.Background(), guardEmbedder, bound,
-		tools.WithNameSource(gazetteermysql.NewSource(qdb)))
+		tools.WithNameSource(gazetteermysql.NewSource(qdb)),
+		tools.WithRejectMargin(cfg.Chat.SelectorRejectMargin))
 	if err != nil {
 		log.Warn("tool orchestrator not configured", zap.Error(err))
 		return chatOpts, nil
