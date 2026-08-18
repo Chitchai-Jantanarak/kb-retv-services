@@ -35,14 +35,16 @@ SELECT
   COALESCE(a.source_report_id, 0),
   COALESCE(a.title, ''),
   a.created_at,
-  COALESCE(rc.ai_symptom_node_id, 0),
-  COALESCE(sn.name, ''),
+  COALESCE(canon.id, sn.id, 0),
+  COALESCE(canon.name, sn.name, ''),
   COALESCE(rc.ai_symptom_conf, 0)
 FROM kb_articles a
 LEFT JOIN report_classification rc
   ON rc.report_id = a.source_report_id AND rc.company_id = a.company_id
 LEFT JOIN symptom_nodes sn
   ON sn.id = rc.ai_symptom_node_id AND sn.company_id = a.company_id
+LEFT JOIN symptom_nodes canon
+  ON canon.id = sn.canonical_id AND canon.company_id = a.company_id
 WHERE a.company_id = ?`
 	args := []any{companyID}
 	if !since.IsZero() {

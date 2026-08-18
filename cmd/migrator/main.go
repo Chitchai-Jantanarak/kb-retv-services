@@ -8,16 +8,19 @@ import (
 	"log"
 	"time"
 
+	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/application/services/kbbootstrap"
 	"github.com/my/app/internal/application/workflows/classify"
 	"github.com/my/app/internal/application/workflows/graphsync"
+	"github.com/my/app/internal/application/workflows/symptommerge"
 	"github.com/my/app/internal/infra/memgraph"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	classifymysql "github.com/my/app/internal/repositories/classify/mysql"
 	"github.com/my/app/internal/repositories/graph"
 	mysqlkb "github.com/my/app/internal/repositories/kb/mysql"
 	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
+	symptommysql "github.com/my/app/internal/repositories/symptom/mysql"
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/llmboot"
 )
@@ -29,6 +32,7 @@ func main() {
 	chunkRunes := flag.Int("chunk-runes", kbbootstrap.DefaultChunkRunes, "chunk size in runes")
 	sinceText := flag.String("since", "", "graph-sync lower bound, RFC3339 or YYYY-MM-DD")
 	timeout := flag.Duration("timeout", 10*time.Minute, "overall task deadline, e.g. 45m or 2h")
+	threshold := flag.Float64("threshold", 0.85, "symptom-merge cosine threshold")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -65,6 +69,27 @@ func main() {
 			log.Fatalf("kb bootstrap: %v", err)
 		}
 		fmt.Printf("kb bootstrap complete: reports=%d articles=%d chunks=%d skipped=%d\n", result.Reports, result.Articles, result.Chunks, result.Skipped)
+	case "symptom-merge":
+		if *company <= 0 {
+			log.Fatal("symptom merge: -company must be positive")
+		}
+		_, _, embedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
+		if err != nil {
+			log.Fatalf("symptom merge: embedder: %v", err)
+		}
+		workflow, err := symptommerge.New(symptommerge.Config{
+			Store:     symptommysql.New(db),
+			Embedder:  embedder,
+			Threshold: *threshold,
+		})
+		if err != nil {
+			log.Fatalf("symptom merge: build workflow: %v", err)
+		}
+		result, err := workflow.Run(ctx, *company)
+		if err != nil {
+			log.Fatalf("symptom merge: %v", err)
+		}
+		fmt.Printf("symptom merge complete: company=%d examined=%d canonical=%d merged=%d\n", *company, result.Examined, result.Canonical, result.Merged)
 	case "graph-sync":
 		if *company <= 0 {
 			log.Fatal("graph sync: -company must be positive")

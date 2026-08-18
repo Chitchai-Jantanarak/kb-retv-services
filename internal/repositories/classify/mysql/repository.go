@@ -118,7 +118,7 @@ func (r *Repository) KnownSymptoms(ctx context.Context, companyID int64, limit i
 	rows, err := r.db.QueryContext(ctx, `
 SELECT name
 FROM symptom_nodes
-WHERE company_id = ? AND status = 'active'
+WHERE company_id = ? AND status = 'active' AND canonical_id IS NULL
 ORDER BY occurrence_count DESC, id ASC
 LIMIT ?`, companyID, limit)
 	if err != nil {
@@ -172,7 +172,7 @@ func (r *Repository) UpsertSymptom(ctx context.Context, companyID int64, name st
 	}
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
-SELECT id FROM symptom_nodes
+SELECT COALESCE(canonical_id, id) FROM symptom_nodes
 WHERE company_id = ? AND name = ? AND status IN ('active','proposed')
 ORDER BY status = 'active' DESC, id ASC
 LIMIT 1`, companyID, name).Scan(&id)

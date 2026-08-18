@@ -38,10 +38,11 @@ SELECT
   COALESCE(r.code, ''),
   COALESCE(r.title, ''),
   COALESCE(s.code, ''),
-  COALESCE(rc.ai_symptom_node_id, 0)
+  COALESCE(sn.canonical_id, rc.ai_symptom_node_id, 0)
 FROM reports r
 LEFT JOIN report_statuses s ON s.id = r.status_id
 LEFT JOIN report_classification rc ON rc.report_id = r.id AND rc.company_id = r.company_id
+LEFT JOIN symptom_nodes sn ON sn.id = rc.ai_symptom_node_id AND sn.company_id = r.company_id
 WHERE r.company_id IN (%s) AND r.id IN (%s)`,
 		strings.Join(coveragePlaceholders, ","), strings.Join(idPlaceholders, ","))
 

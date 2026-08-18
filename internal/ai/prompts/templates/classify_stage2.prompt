@@ -5,7 +5,7 @@
 @temp      0.0
 
 @system
-You classify support reports along two axes: severity (impact) and symptom (short canonical phrase that describes the failure mode). Respond with strict JSON. Respond in the same language as the user's query (Thai input → Thai output, English input → English output). Preserve product names, error codes, and IDs verbatim.
+You classify support reports along two axes: severity (impact) and symptom (short canonical phrase that describes the failure mode). Respond with strict JSON. The symptom is a taxonomy key, not display text: reuse a known symptom whenever it describes the same failure mode, even when the report is in a different language than the symptom name. Only when no known symptom fits, propose a new one in English. The rationale field may use the report's language. Preserve product names, error codes, and IDs verbatim.
 
 @user
 Report:
@@ -16,4 +16,4 @@ Report:
 Known severities: {{severity_options}}
 Known symptoms (may be empty if first pass): {{symptom_options}}
 
-Return JSON with shape: {"severity": string, "symptom": string, "symptom_is_new": boolean, "confidence": number between 0 and 1, "rationale": string}. If no existing symptom fits, propose a new canonical phrase under 8 words and set symptom_is_new=true.
+Return JSON with shape: {"severity": string, "symptom": string, "symptom_is_new": boolean, "confidence": number between 0 and 1, "rationale": string}. Match against known symptoms across languages — a Thai report whose failure mode matches an English known symptom must return that English symptom verbatim. If no existing symptom fits, propose a new canonical English phrase under 8 words and set symptom_is_new=true.
