@@ -15,12 +15,14 @@ import (
 var intakeMailDelimiter = regexp.MustCompile(`(?i)\[\s*(?:begin|end)\s+mail\b[^\]]*\]`)
 
 const (
-	maxMessageChars = 8000
-	maxProductHints = 30
+	maxMessageChars   = 8000
+	maxProductHints   = 30
+	maxReasoningRunes = 600
 )
 
 const FieldClassification = "classification"
 const FieldCatalogRelated = "catalog_related"
+const FieldReasoning = "reasoning"
 
 var skipModelBelowScore = 20
 
@@ -46,9 +48,12 @@ type Result struct {
 	Status         string
 	Score          int
 	Reasons        []string
-	Classification string
-	CatalogRelated *bool
-	ReferencedCase string
+	Classification    string
+	Reasoning         string
+	CatalogRelated    *bool
+	ReferencedCase    string
+	Confidence        int
+	ConfidenceReasons []string
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -163,6 +168,10 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	decoded := decodeJSONObject(completion.Text)
 	fields := parseFields(decoded, spec)
 	classification := parseClassification(decoded)
+	reasoning := parseReasoning(decoded)
+	if classification == "" {
+		reasoning = ""
+	}
 	catalogRelated := parseCatalogRelated(decoded)
 	if !catalogRelated {
 		classification = ClassificationNotActionable
@@ -190,6 +199,7 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		Score:          score,
 		Reasons:        reasons,
 		Classification: classification,
+		Reasoning:      reasoning,
 		CatalogRelated: catalogRelatedPtr,
 		ReferencedCase: sig.ReferencedCase,
 	}, nil
@@ -305,6 +315,26 @@ func parseClassification(decoded map[string]any) string {
 	text = strings.ToLower(strings.TrimSpace(text))
 	if _, valid := validClassifications[text]; !valid {
 		return ""
+	}
+	return text
+}
+
+// parseReasoning reads a short, user-facing evidence summary. It is not a
+// chain-of-thought trace: the prompt asks only for the observable reason behind
+// the classification, and this boundary normalizes and caps what is persisted.
+func parseReasoning(decoded map[string]any) string {
+	value, ok := decoded[FieldReasoning]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if len(runes) > maxReasoningRunes {
+		text = string(runes[:maxReasoningRunes])
 	}
 	return text
 }

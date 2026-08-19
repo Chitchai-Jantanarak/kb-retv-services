@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
+
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	"github.com/my/app/internal/infra/tenant"
@@ -16,6 +18,11 @@ import (
 
 type Repository struct {
 	db tenant.Querier
+}
+
+func isDuplicateKey(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == 1062
 }
 
 func New(db tenant.Querier) *Repository {
@@ -66,9 +73,21 @@ LIMIT 1`, c.CompanyID, c.ChannelAccountID, nullableString(customer)).Scan(&id)
 	}
 
 	res, err := r.db.ExecContext(ctx, `
-INSERT INTO conversations (company_id, channel_account_id, external_customer, subject, status, last_message_at)
-VALUES (?, ?, ?, ?, 'pending', NOW())`, c.CompanyID, c.ChannelAccountID, nullableString(customer), nullableString(strings.TrimSpace(c.Subject)))
+INSERT INTO conversations (company_id, channel_account_id, external_customer, subject, status, thread_scoped, last_message_at)
+VALUES (?, ?, ?, ?, 'pending', ?, NOW())`, c.CompanyID, c.ChannelAccountID, nullableString(customer), nullableString(strings.TrimSpace(c.Subject)), !c.ForceNew)
 	if err != nil {
+		if !c.ForceNew && isDuplicateKey(err) {
+			var id int64
+			selErr := r.db.QueryRowContext(ctx, `
+SELECT id FROM conversations
+WHERE company_id = ? AND channel_account_id = ? AND external_customer <=> ? AND status = 'pending'
+ORDER BY id DESC
+LIMIT 1`, c.CompanyID, c.ChannelAccountID, nullableString(customer)).Scan(&id)
+			if selErr == nil {
+				_, _ = r.db.ExecContext(ctx, `UPDATE conversations SET last_message_at = NOW() WHERE id = ?`, id)
+				return id, false, nil
+			}
+		}
 		return 0, false, fmt.Errorf("conversations: insert: %w", err)
 	}
 	insertID, err := res.LastInsertId()
@@ -128,6 +147,14 @@ INSERT INTO messages (conversation_id, external_id, direction, sender_type, send
 VALUES (?, ?, 'inbound', 'customer', ?, ?, ?, NOW())`,
 		m.ConversationID, nullableString(externalID), nullableString(strings.TrimSpace(m.SenderExternal)), m.Body, m.RawPayload)
 	if err != nil {
+		if externalID != "" && isDuplicateKey(err) {
+			var existing int64
+			if selErr := r.db.QueryRowContext(ctx, `
+SELECT id FROM messages WHERE conversation_id = ? AND external_id = ? LIMIT 1`,
+				m.ConversationID, externalID).Scan(&existing); selErr == nil {
+				return existing, nil
+			}
+		}
 		return 0, fmt.Errorf("messages: insert: %w", err)
 	}
 	id, err := res.LastInsertId()
@@ -160,6 +187,7 @@ func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64
 	}
 
 	classification := sql.NullString{String: res.Classification, Valid: res.Classification != ""}
+	reasoning := sql.NullString{String: res.Reasoning, Valid: res.Reasoning != ""}
 	catalogRelated := sql.NullBool{Valid: res.CatalogRelated != nil}
 	if res.CatalogRelated != nil {
 		catalogRelated.Bool = *res.CatalogRelated
@@ -168,8 +196,8 @@ func (r *Repository) WriteCompleteness(ctx context.Context, conversationID int64
 
 	if _, err := r.db.ExecContext(ctx, `
 UPDATE conversations
-SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?, intake_classification = ?, intake_catalog_related = ?, intake_referenced_case = ?
-WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), classification, catalogRelated, referencedCase, conversationID); err != nil {
+SET intake_status = ?, intake_missing = ?, intake_fields = ?, intake_score = ?, intake_reasons = ?, intake_classification = ?, intake_reasoning = ?, intake_catalog_related = ?, intake_referenced_case = ?, intake_confidence = ?
+WHERE id = ?`, status, string(missing), string(fields), res.Score, string(reasons), classification, reasoning, catalogRelated, referencedCase, res.Confidence, conversationID); err != nil {
 		return fmt.Errorf("conversations: write completeness: %w", err)
 	}
 	return nil

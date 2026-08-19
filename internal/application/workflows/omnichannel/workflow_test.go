@@ -517,7 +517,7 @@ func TestRunWithoutEnqueuerIsStillOK(t *testing.T) {
 
 func TestRunEmailTicketClassificationEnqueuesEvenWhenIncomplete(t *testing.T) {
 	tickets := &captureTickets{}
-	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Missing: []string{"product"}, Classification: "new_issue"}}
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Missing: []string{"product"}, Classification: "new_issue", Confidence: 65}}
 	wf, err := New(Config{
 		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
 		Conversations: &stubConvos{id: 100, created: true},

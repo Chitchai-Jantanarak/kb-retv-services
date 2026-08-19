@@ -29,7 +29,7 @@ func TestWriteCompletenessPersistsStatusMissingAndFields(t *testing.T) {
 		!strings.Contains(q.execSQL, "intake_reasons") {
 		t.Fatalf("SQL = %s", q.execSQL)
 	}
-	if len(q.execArgs) != 9 {
+	if len(q.execArgs) != 11 {
 		t.Fatalf("args = %v", q.execArgs)
 	}
 	if q.execArgs[0] != intake.StatusIncomplete {
@@ -41,8 +41,8 @@ func TestWriteCompletenessPersistsStatusMissingAndFields(t *testing.T) {
 	if q.execArgs[2] != `{"problem_detail":"stuck at dock"}` {
 		t.Fatalf("fields arg = %v", q.execArgs[2])
 	}
-	if q.execArgs[8] != int64(42) {
-		t.Fatalf("conversation arg = %v", q.execArgs[8])
+	if q.execArgs[10] != int64(42) {
+		t.Fatalf("conversation arg = %v", q.execArgs[10])
 	}
 }
 
@@ -65,7 +65,7 @@ func TestWriteCompletenessRejectsZeroConversation(t *testing.T) {
 	}
 }
 
-func TestWriteCompletenessPersistsClassificationAndCatalogRelated(t *testing.T) {
+func TestWriteCompletenessPersistsClassificationReasoningAndCatalogRelated(t *testing.T) {
 	q := &fakeQuerier{}
 	repo := New(q)
 
@@ -73,21 +73,26 @@ func TestWriteCompletenessPersistsClassificationAndCatalogRelated(t *testing.T) 
 	err := repo.WriteCompleteness(context.Background(), 42, intake.Result{
 		Status:         intake.StatusReady,
 		Classification: intake.ClassificationNewIssue,
+		Reasoning:      "The customer reports a new robot fault.",
 		CatalogRelated: &related,
 	})
 	if err != nil {
 		t.Fatalf("WriteCompleteness() error = %v", err)
 	}
-	if !strings.Contains(q.execSQL, "intake_classification") || !strings.Contains(q.execSQL, "intake_catalog_related") {
-		t.Fatalf("SQL must set intake_classification and intake_catalog_related, got: %s", q.execSQL)
+	if !strings.Contains(q.execSQL, "intake_classification") || !strings.Contains(q.execSQL, "intake_reasoning") || !strings.Contains(q.execSQL, "intake_catalog_related") {
+		t.Fatalf("SQL must set classification, reasoning, and catalog_related, got: %s", q.execSQL)
 	}
 	classification, ok := q.execArgs[5].(sql.NullString)
 	if !ok || !classification.Valid || classification.String != intake.ClassificationNewIssue {
 		t.Fatalf("classification arg = %v", q.execArgs[5])
 	}
-	catalogRelated, ok := q.execArgs[6].(sql.NullBool)
+	reasoning, ok := q.execArgs[6].(sql.NullString)
+	if !ok || !reasoning.Valid || reasoning.String != "The customer reports a new robot fault." {
+		t.Fatalf("reasoning arg = %v", q.execArgs[6])
+	}
+	catalogRelated, ok := q.execArgs[7].(sql.NullBool)
 	if !ok || !catalogRelated.Valid || catalogRelated.Bool != false {
-		t.Fatalf("catalog_related arg = %v", q.execArgs[6])
+		t.Fatalf("catalog_related arg = %v", q.execArgs[7])
 	}
 }
 
@@ -103,9 +108,13 @@ func TestWriteCompletenessWritesNullForUnsetClassificationAndCatalogRelated(t *t
 	if !ok || classification.Valid {
 		t.Fatalf("classification arg = %v, want SQL NULL for empty classification", q.execArgs[5])
 	}
-	catalogRelated, ok := q.execArgs[6].(sql.NullBool)
+	reasoning, ok := q.execArgs[6].(sql.NullString)
+	if !ok || reasoning.Valid {
+		t.Fatalf("reasoning arg = %v, want SQL NULL for empty Reasoning", q.execArgs[6])
+	}
+	catalogRelated, ok := q.execArgs[7].(sql.NullBool)
 	if !ok || catalogRelated.Valid {
-		t.Fatalf("catalog_related arg = %v, want SQL NULL for nil CatalogRelated", q.execArgs[6])
+		t.Fatalf("catalog_related arg = %v, want SQL NULL for nil CatalogRelated", q.execArgs[7])
 	}
 }
 
@@ -123,9 +132,9 @@ func TestWriteCompletenessPersistsReferencedCase(t *testing.T) {
 	if !strings.Contains(q.execSQL, "intake_referenced_case") {
 		t.Fatalf("SQL must set intake_referenced_case, got: %s", q.execSQL)
 	}
-	referencedCase, ok := q.execArgs[7].(sql.NullString)
+	referencedCase, ok := q.execArgs[8].(sql.NullString)
 	if !ok || !referencedCase.Valid || referencedCase.String != "REP-4106" {
-		t.Fatalf("referenced_case arg = %v", q.execArgs[7])
+		t.Fatalf("referenced_case arg = %v", q.execArgs[8])
 	}
 }
 
@@ -137,8 +146,8 @@ func TestWriteCompletenessWritesNullForEmptyReferencedCase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteCompleteness() error = %v", err)
 	}
-	referencedCase, ok := q.execArgs[7].(sql.NullString)
+	referencedCase, ok := q.execArgs[8].(sql.NullString)
 	if !ok || referencedCase.Valid {
-		t.Fatalf("referenced_case arg = %v, want SQL NULL for empty ReferencedCase", q.execArgs[7])
+		t.Fatalf("referenced_case arg = %v, want SQL NULL for empty ReferencedCase", q.execArgs[8])
 	}
 }

@@ -88,7 +88,9 @@ type Completeness struct {
 	Score          int
 	Reasons        []string
 	Classification string
+	Reasoning      string
 	CatalogRelated *bool
+	Confidence     int
 }
 
 type IntakeSignals struct {
@@ -118,14 +120,14 @@ type MediaPromoter interface {
 }
 
 type Workflow struct {
-	accounts      AccountResolver
-	conversations ConversationStore
-	messages      MessageStore
-	tickets       TicketEnqueuer
-	completeness  CompletenessAssessor
-	assessQueue   AssessEnqueuer
-	assessMode    string
-	mediaPromoter MediaPromoter
+	accounts       AccountResolver
+	conversations  ConversationStore
+	messages       MessageStore
+	tickets        TicketEnqueuer
+	completeness   CompletenessAssessor
+	assessQueue    AssessEnqueuer
+	assessMode     string
+	mediaPromoter  MediaPromoter
 	caseLookup     CaseLookup
 	customerLookup CustomerLookup
 	appKey         string
@@ -166,14 +168,14 @@ func New(cfg Config) (*Workflow, error) {
 		log = zap.NewNop()
 	}
 	return &Workflow{
-		accounts:      cfg.Accounts,
-		conversations: cfg.Conversations,
-		messages:      cfg.Messages,
-		tickets:       cfg.Tickets,
-		completeness:  cfg.Completeness,
-		assessQueue:   cfg.AssessQueue,
-		assessMode:    cfg.AssessMode,
-		mediaPromoter: cfg.MediaPromoter,
+		accounts:       cfg.Accounts,
+		conversations:  cfg.Conversations,
+		messages:       cfg.Messages,
+		tickets:        cfg.Tickets,
+		completeness:   cfg.Completeness,
+		assessQueue:    cfg.AssessQueue,
+		assessMode:     cfg.AssessMode,
+		mediaPromoter:  cfg.MediaPromoter,
 		caseLookup:     cfg.CaseLookup,
 		customerLookup: cfg.CustomerLookup,
 		appKey:         cfg.AppKey,
@@ -191,6 +193,14 @@ type Result struct {
 	IntakeStatus   string
 	IntakeMissing  []string
 	ReferencedCase string
+}
+
+func (w *Workflow) warn(msg string, companyID, convoID int64, err error, extra ...zap.Field) {
+	fields := append([]zap.Field{
+		zap.Int64("company_id", companyID),
+		zap.Int64("conversation_id", convoID),
+	}, extra...)
+	w.log.Warn(msg, append(fields, zap.Error(err))...)
 }
 
 func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, error) {
@@ -221,33 +231,19 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 
 	ctx = ctxkey.WithCompanyID(ctx, account.CompanyID)
 
-	if extID := strings.TrimSpace(req.ExternalMessageID); extID != "" {
-		convoID, msgID, found, ferr := w.messages.FindByExternalID(ctx, extID)
-		if ferr != nil {
-			return Result{}, fmt.Errorf("omnichannel: dedup message: %w", ferr)
-		}
-		if found {
-			return Result{CompanyID: account.CompanyID, ConversationID: convoID, MessageID: msgID}, nil
-		}
+	mu := conversationLock(account.CompanyID, account.ID, customer)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if dup, found, derr := w.findExisting(ctx, account.CompanyID, req.ExternalMessageID); derr != nil {
+		return Result{}, derr
+	} else if found {
+		return dup, nil
 	}
 
-	var convoID int64
-	var created bool
-	var threadMatched bool
-	if threadConvoID, threadFound := w.resolveThreadConversation(ctx, n); threadFound {
-		convoID = threadConvoID
-		threadMatched = true
-	} else {
-		convoID, created, err = w.conversations.UpsertConversation(ctx, Conversation{
-			CompanyID:        account.CompanyID,
-			ChannelAccountID: account.ID,
-			ExternalCustomer: customer,
-			Subject:          req.Subject,
-			ForceNew:         req.Channel == "email",
-		})
-		if err != nil {
-			return Result{}, fmt.Errorf("omnichannel: upsert conversation: %w", err)
-		}
+	convoID, created, threadMatched, err := w.resolveConversation(ctx, n, account, customer, req)
+	if err != nil {
+		return Result{}, err
 	}
 
 	msgID, err := w.messages.InsertMessage(ctx, StoredMessage{
@@ -262,56 +258,8 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		return Result{}, fmt.Errorf("omnichannel: insert message: %w", err)
 	}
 
-	if w.mediaPromoter != nil && req.Channel == ChannelLine && len(req.Attachments) > 0 {
-		for _, ref := range req.Attachments {
-			if perr := w.mediaPromoter.Promote(ctx, account.CompanyID, convoID, msgID, ref); perr != nil {
-				w.log.Warn("omnichannel: media promotion failed",
-					zap.Int64("company_id", account.CompanyID),
-					zap.Int64("conversation_id", convoID),
-					zap.Int64("message_id", msgID),
-					zap.String("attachment_id", ref.ID),
-					zap.Error(perr))
-			}
-		}
-	}
-
-	if w.mediaPromoter != nil && req.Channel == ChannelEmail && len(n.Attachments) > 0 {
-		for i, att := range n.Attachments {
-			externalID := fmt.Sprintf("%s#%d", req.ExternalMessageID, i)
-			if perr := w.mediaPromoter.PromoteBytes(ctx, account.CompanyID, convoID, msgID, externalID, att.MIMEType, att.Data); perr != nil {
-				w.log.Warn("omnichannel: media promotion failed",
-					zap.Int64("company_id", account.CompanyID),
-					zap.Int64("conversation_id", convoID),
-					zap.Int64("message_id", msgID),
-					zap.String("attachment_id", externalID),
-					zap.Error(perr))
-			}
-		}
-	}
-
-	if w.activity != nil {
-		entry := ports.ActivityEntry{
-			CompanyID:     account.CompanyID,
-			ActorType:     ports.ActorTypeChannel,
-			ActorExternal: customer,
-			SubjectType:   "message",
-			SubjectID:     msgID,
-			SubjectLabel:  req.Subject,
-			Action:        ports.ActivityCreate,
-			Context: map[string]any{
-				"channel":            req.Channel,
-				"channel_account_id": account.ID,
-				"conversation_id":    convoID,
-			},
-		}
-		if aerr := w.activity.RecordActivity(ctx, entry); aerr != nil {
-			w.log.Warn("omnichannel: activity record failed",
-				zap.Int64("company_id", account.CompanyID),
-				zap.Int64("conversation_id", convoID),
-				zap.Int64("message_id", msgID),
-				zap.Error(aerr))
-		}
-	}
+	w.promoteAttachments(ctx, account, convoID, msgID, req, n)
+	w.recordInbound(ctx, account, convoID, msgID, customer, req)
 
 	res := Result{
 		CompanyID:      account.CompanyID,
@@ -319,69 +267,170 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		MessageID:      msgID,
 		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
 	}
-	intakeClassification := ""
 
-	customerFilled := false
-	if res.ReferencedCase != "" && w.caseLookup != nil {
-		customerFilled = w.backfillReferencedCase(ctx, account.CompanyID, convoID, res.ReferencedCase)
+	w.runBackfills(ctx, account.CompanyID, convoID, res.ReferencedCase, customer)
+
+	assessed, asyncHandled := w.assessIntake(ctx, account.CompanyID, convoID, msgID, customer, n, req, res.ReferencedCase, threadMatched, created)
+	if asyncHandled {
+		return res, nil
 	}
-	if !customerFilled && customer != "" && w.customerLookup != nil {
-		w.backfillSenderCustomer(ctx, account.CompanyID, convoID, customer)
-	}
-
-	asyncEmail := w.assessMode == "async" && req.Channel == ChannelEmail && w.assessQueue != nil && created
-
-	if req.Channel == ChannelEmail && (w.completeness != nil || asyncEmail) {
-		sig := IntakeSignals{
-			Sender:          customer,
-			Subject:         req.Subject,
-			Body:            req.Body,
-			ListUnsubscribe: n.ListUnsubscribe,
-			AutoSubmitted:   n.AutoSubmitted,
-			Precedence:      n.Precedence,
-			HasAttachments:  n.AttachmentCount > 0,
-			ReferencedCase:  res.ReferencedCase,
-			ThreadMatched:   threadMatched,
-			Images:          attachmentImages(n.Attachments),
-		}
-		if asyncEmail {
-			if err := w.assessQueue.EnqueueAssess(ctx, account.CompanyID, convoID, msgID, customer, sig, req); err != nil {
-				w.log.Warn("omnichannel: assess enqueue failed, falling back to inline",
-					zap.Int64("company_id", account.CompanyID),
-					zap.Int64("conversation_id", convoID),
-					zap.Error(err))
-			} else {
-				return res, nil
-			}
-		}
-		if w.completeness != nil {
-			if assessed, aerr := w.completeness.Assess(ctx, account.CompanyID, convoID, sig); aerr == nil {
-				res.IntakeStatus = assessed.Status
-				res.IntakeMissing = assessed.Missing
-				intakeClassification = assessed.Classification
-				w.recordIntakeAssessed(ctx, account.CompanyID, convoID, req.Subject, assessed)
-			}
-		}
+	if assessed != nil {
+		res.IntakeStatus = assessed.Status
+		res.IntakeMissing = assessed.Missing
 	}
 
-	if w.tickets != nil && created {
-		promotableTicket := intakeClassification == intake.ClassificationNewIssue || intakeClassification == intake.ClassificationFollowUp
-		shouldEnqueue := req.Channel == ChannelLine || (req.Channel == ChannelEmail && promotableTicket)
-		if shouldEnqueue {
-			if terr := w.tickets.EnqueueTicket(ctx, account.CompanyID, convoID, msgID, customer, req); terr != nil {
-				w.log.Warn("omnichannel: ticket enqueue failed",
-					zap.Int64("company_id", account.CompanyID),
-					zap.Int64("conversation_id", convoID),
-					zap.Int64("message_id", msgID),
-					zap.Error(terr))
-				w.recordTicketEnqueueFailed(ctx, account.CompanyID, convoID, msgID, req.Subject, terr)
-			} else {
-				res.TicketEnqueued = true
-			}
-		}
-	}
+	w.enqueueTicket(ctx, &res, account.CompanyID, convoID, msgID, customer, req, assessed, created)
 
 	return res, nil
+}
+
+func (w *Workflow) findExisting(ctx context.Context, companyID int64, externalID string) (Result, bool, error) {
+	extID := strings.TrimSpace(externalID)
+	if extID == "" {
+		return Result{}, false, nil
+	}
+	convoID, msgID, found, err := w.messages.FindByExternalID(ctx, extID)
+	if err != nil {
+		return Result{}, false, fmt.Errorf("omnichannel: dedup message: %w", err)
+	}
+	if !found {
+		return Result{}, false, nil
+	}
+	return Result{CompanyID: companyID, ConversationID: convoID, MessageID: msgID}, true, nil
+}
+
+func (w *Workflow) resolveConversation(ctx context.Context, n Normalized, account ChannelAccount, customer string, req dto.InboundMessageRequest) (convoID int64, created, threadMatched bool, err error) {
+	if threadConvoID, threadFound := w.resolveThreadConversation(ctx, n); threadFound {
+		return threadConvoID, false, true, nil
+	}
+	convoID, created, err = w.conversations.UpsertConversation(ctx, Conversation{
+		CompanyID:        account.CompanyID,
+		ChannelAccountID: account.ID,
+		ExternalCustomer: customer,
+		Subject:          req.Subject,
+		ForceNew:         req.Channel == "email",
+	})
+	if err != nil {
+		return 0, false, false, fmt.Errorf("omnichannel: upsert conversation: %w", err)
+	}
+	return convoID, created, false, nil
+}
+
+func (w *Workflow) promoteAttachments(ctx context.Context, account ChannelAccount, convoID, msgID int64, req dto.InboundMessageRequest, n Normalized) {
+	if w.mediaPromoter == nil {
+		return
+	}
+	switch {
+	case req.Channel == ChannelLine && len(req.Attachments) > 0:
+		for _, ref := range req.Attachments {
+			if perr := w.mediaPromoter.Promote(ctx, account.CompanyID, convoID, msgID, ref); perr != nil {
+				w.warn("omnichannel: media promotion failed", account.CompanyID, convoID, perr,
+					zap.Int64("message_id", msgID),
+					zap.String("attachment_id", ref.ID))
+			}
+		}
+	case req.Channel == ChannelEmail && len(n.Attachments) > 0:
+		for i, att := range n.Attachments {
+			externalID := fmt.Sprintf("%s#%d", req.ExternalMessageID, i)
+			if perr := w.mediaPromoter.PromoteBytes(ctx, account.CompanyID, convoID, msgID, externalID, att.MIMEType, att.Data); perr != nil {
+				w.warn("omnichannel: media promotion failed", account.CompanyID, convoID, perr,
+					zap.Int64("message_id", msgID),
+					zap.String("attachment_id", externalID))
+			}
+		}
+	}
+}
+
+func (w *Workflow) recordInbound(ctx context.Context, account ChannelAccount, convoID, msgID int64, customer string, req dto.InboundMessageRequest) {
+	if w.activity == nil {
+		return
+	}
+	entry := ports.ActivityEntry{
+		CompanyID:     account.CompanyID,
+		ActorType:     ports.ActorTypeChannel,
+		ActorExternal: customer,
+		SubjectType:   "message",
+		SubjectID:     msgID,
+		SubjectLabel:  req.Subject,
+		Action:        ports.ActivityCreate,
+		Context: map[string]any{
+			"channel":            req.Channel,
+			"channel_account_id": account.ID,
+			"conversation_id":    convoID,
+		},
+	}
+	if aerr := w.activity.RecordActivity(ctx, entry); aerr != nil {
+		w.warn("omnichannel: activity record failed", account.CompanyID, convoID, aerr,
+			zap.Int64("message_id", msgID))
+	}
+}
+
+func (w *Workflow) runBackfills(ctx context.Context, companyID, convoID int64, refCase, customer string) {
+	customerFilled := false
+	if refCase != "" && w.caseLookup != nil {
+		customerFilled = w.backfillReferencedCase(ctx, companyID, convoID, refCase)
+	}
+	if !customerFilled && customer != "" && w.customerLookup != nil {
+		w.backfillSenderCustomer(ctx, companyID, convoID, customer)
+	}
+}
+
+func (w *Workflow) assessIntake(ctx context.Context, companyID, convoID, msgID int64, customer string, n Normalized, req dto.InboundMessageRequest, refCase string, threadMatched, created bool) (assessed *Completeness, asyncHandled bool) {
+	asyncEmail := w.assessMode == "async" && req.Channel == ChannelEmail && w.assessQueue != nil && created
+	if req.Channel != ChannelEmail || (w.completeness == nil && !asyncEmail) {
+		return nil, false
+	}
+
+	sig := IntakeSignals{
+		Sender:          customer,
+		Subject:         req.Subject,
+		Body:            req.Body,
+		ListUnsubscribe: n.ListUnsubscribe,
+		AutoSubmitted:   n.AutoSubmitted,
+		Precedence:      n.Precedence,
+		HasAttachments:  n.AttachmentCount > 0,
+		ReferencedCase:  refCase,
+		ThreadMatched:   threadMatched,
+		Images:          attachmentImages(n.Attachments),
+	}
+
+	if asyncEmail {
+		if err := w.assessQueue.EnqueueAssess(ctx, companyID, convoID, msgID, customer, sig, req); err != nil {
+			w.warn("omnichannel: assess enqueue failed, falling back to inline", companyID, convoID, err)
+		} else {
+			return nil, true
+		}
+	}
+	if w.completeness == nil {
+		return nil, false
+	}
+	result, aerr := w.completeness.Assess(ctx, companyID, convoID, sig)
+	if aerr != nil {
+		return nil, false
+	}
+	w.recordIntakeAssessed(ctx, companyID, convoID, req.Subject, result)
+	return &result, false
+}
+
+func (w *Workflow) enqueueTicket(ctx context.Context, res *Result, companyID, convoID, msgID int64, customer string, req dto.InboundMessageRequest, assessed *Completeness, created bool) {
+	if w.tickets == nil || !created {
+		return
+	}
+	classification, confidence := "", 0
+	if assessed != nil {
+		classification, confidence = assessed.Classification, assessed.Confidence
+	}
+	promotableTicket := intake.ConfidencePromotable(classification, confidence)
+	if req.Channel != ChannelLine && !(req.Channel == ChannelEmail && promotableTicket) {
+		return
+	}
+	if terr := w.tickets.EnqueueTicket(ctx, companyID, convoID, msgID, customer, req); terr != nil {
+		w.warn("omnichannel: ticket enqueue failed", companyID, convoID, terr,
+			zap.Int64("message_id", msgID))
+		w.recordTicketEnqueueFailed(ctx, companyID, convoID, msgID, req.Subject, terr)
+		return
+	}
+	res.TicketEnqueued = true
 }
 
 func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoID int64, code string) bool {
@@ -398,11 +447,8 @@ func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoI
 		return false
 	}
 	if werr := w.backfill.WriteBackfill(ctx, convoID, lookup.CustomerID, lookup.SiteID, BackfillSourceReferencedCase); werr != nil {
-		w.log.Warn("omnichannel: referenced case backfill write failed",
-			zap.Int64("company_id", companyID),
-			zap.Int64("conversation_id", convoID),
-			zap.String("referenced_case", code),
-			zap.Error(werr))
+		w.warn("omnichannel: referenced case backfill write failed", companyID, convoID, werr,
+			zap.String("referenced_case", code))
 		return false
 	}
 	return true
@@ -431,10 +477,7 @@ func (w *Workflow) backfillSenderCustomer(ctx context.Context, companyID, convoI
 		return
 	}
 	if werr := w.backfill.WriteBackfill(ctx, convoID, customerID, sql.NullInt64{}, BackfillSourceSenderEmail); werr != nil {
-		w.log.Warn("omnichannel: sender-email backfill write failed",
-			zap.Int64("company_id", companyID),
-			zap.Int64("conversation_id", convoID),
-			zap.Error(werr))
+		w.warn("omnichannel: sender-email backfill write failed", companyID, convoID, werr)
 	}
 }
 
@@ -451,18 +494,16 @@ func (w *Workflow) recordIntakeAssessed(ctx context.Context, companyID, convoID 
 		SubjectLabel: subject,
 		Action:       ActionIntakeAssessed,
 		Context: map[string]any{
-			"intake_status":  assessed.Status,
-			"intake_missing": assessed.Missing,
-			"intake_score":   assessed.Score,
-			"intake_reasons": assessed.Reasons,
+			"intake_status":    assessed.Status,
+			"intake_missing":   assessed.Missing,
+			"intake_score":     assessed.Score,
+			"intake_reasons":   assessed.Reasons,
+			"intake_reasoning": assessed.Reasoning,
 		},
 	}
 
 	if err := w.activity.RecordActivity(ctx, entry); err != nil {
-		w.log.Warn("omnichannel: intake activity record failed",
-			zap.Int64("company_id", companyID),
-			zap.Int64("conversation_id", convoID),
-			zap.Error(err))
+		w.warn("omnichannel: intake activity record failed", companyID, convoID, err)
 	}
 }
 
@@ -485,10 +526,7 @@ func (w *Workflow) recordTicketEnqueueFailed(ctx context.Context, companyID, con
 	}
 
 	if err := w.activity.RecordActivity(ctx, entry); err != nil {
-		w.log.Warn("omnichannel: ticket enqueue activity record failed",
-			zap.Int64("company_id", companyID),
-			zap.Int64("conversation_id", convoID),
-			zap.Error(err))
+		w.warn("omnichannel: ticket enqueue activity record failed", companyID, convoID, err)
 	}
 }
 

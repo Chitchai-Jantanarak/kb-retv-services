@@ -252,8 +252,8 @@ func TestExtractWithoutProductTaxonomyIsUnverified(t *testing.T) {
 	}
 }
 
-func TestExtractParsesClassificationFromModelOutput(t *testing.T) {
-	provider := &fakeProvider{json: `{"classification":"new_issue","problem_detail":"robot stuck at dock","product":"Bella Bot"}`}
+func TestExtractParsesClassificationAndReasoningFromModelOutput(t *testing.T) {
+	provider := &fakeProvider{json: `{"classification":"new_issue","reasoning":"The message reports that the robot cannot leave the dock.","problem_detail":"robot stuck at dock","product":"Bella Bot"}`}
 	ext := newExtractor(t, provider, intake.WithProducts(fakeProducts{products: []string{"Bella Bot"}}))
 
 	got, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "Robot stuck", Body: "The robot will not leave the dock."})
@@ -262,6 +262,9 @@ func TestExtractParsesClassificationFromModelOutput(t *testing.T) {
 	}
 	if got.Classification != intake.ClassificationNewIssue {
 		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNewIssue)
+	}
+	if got.Reasoning != "The message reports that the robot cannot leave the dock." {
+		t.Fatalf("Reasoning = %q", got.Reasoning)
 	}
 }
 
@@ -301,6 +304,9 @@ func TestExtractSkipsProviderForBulkMail(t *testing.T) {
 	}
 	if got.Status != intake.StatusUnknown {
 		t.Fatalf("Status = %q, want unknown", got.Status)
+	}
+	if got.Reasoning != "" {
+		t.Fatalf("Reasoning = %q, want empty when semantic analysis is skipped", got.Reasoning)
 	}
 }
 

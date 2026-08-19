@@ -128,7 +128,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 			return err
 		}
 
-		if ticketEnq != nil && (res.Classification == intake.ClassificationNewIssue || res.Classification == intake.ClassificationFollowUp) {
+		if ticketEnq != nil && intake.ConfidencePromotable(res.Classification, res.Confidence) {
 			return ticketEnq.EnqueueTicket(ctx, job.CompanyID, p.ConversationID, p.MessageID, p.Customer, p.Request)
 		}
 		return nil

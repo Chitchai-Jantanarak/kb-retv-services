@@ -85,7 +85,7 @@ func TestRunAsyncModeEnqueuesAssessAndSkipsInline(t *testing.T) {
 }
 
 func TestRunAsyncEnqueueFailureFallsBackToInline(t *testing.T) {
-	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Classification: "new_issue"}}
+	assessor := &stubAssessor{result: Completeness{Status: "incomplete", Classification: "new_issue", Confidence: 65}}
 	tickets := &captureTickets{}
 	queue := &stubAssessQueue{err: errors.New("queue down")}
 	wf, err := New(Config{

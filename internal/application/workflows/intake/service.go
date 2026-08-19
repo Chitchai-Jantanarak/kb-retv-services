@@ -37,6 +37,11 @@ func (s *Service) Assess(ctx context.Context, companyID, conversationID int64, s
 		return Result{Status: StatusUnknown}, err
 	}
 
+	result.Confidence, result.ConfidenceReasons = Confidence(
+		result.Score, result.Reasons, result.Classification,
+		result.Missing, result.CatalogRelated, result.ReferencedCase,
+	)
+
 	if s.sink != nil {
 		if err := s.sink.WriteCompleteness(ctx, conversationID, result); err != nil {
 			s.log.Warn("intake completeness persist failed",
