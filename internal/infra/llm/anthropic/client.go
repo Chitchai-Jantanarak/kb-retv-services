@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm/llmerr"
+	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
 const (
@@ -138,56 +138,33 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: http: %w", err)
 	}
-	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, &llmerr.ProviderError{
-			Vendor:     "anthropic",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+	if err := llmhttp.CheckError("anthropic", resp); err != nil {
+		return nil, err
 	}
 
-	out := make(chan ports.Completion)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		currentEvent := ""
-		for scanner.Scan() {
-			trimmed := strings.TrimSpace(scanner.Text())
-			if ev, ok := strings.CutPrefix(trimmed, "event:"); ok {
-				currentEvent = strings.TrimSpace(ev)
-				if currentEvent == "message_stop" {
-					return
-				}
-				continue
-			}
-			data, ok := strings.CutPrefix(trimmed, "data:")
-			if !ok {
-				continue
-			}
-			data = strings.TrimSpace(data)
-			if currentEvent != "content_block_delta" || data == "" {
-				continue
-			}
-			var chunk sseDelta
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				continue
-			}
-			if chunk.Delta.Type != "text_delta" || chunk.Delta.Text == "" {
-				continue
-			}
-			select {
-			case out <- ports.Completion{Text: chunk.Delta.Text, Vendor: "anthropic", Model: c.model}:
-			case <-ctx.Done():
-				return
-			}
+	currentEvent := ""
+	return llmhttp.StreamLines(ctx, resp.Body, "anthropic", c.model, func(trimmed string) (string, bool) {
+		if ev, ok := strings.CutPrefix(trimmed, "event:"); ok {
+			currentEvent = strings.TrimSpace(ev)
+			return "", currentEvent == "message_stop"
 		}
-	}()
-	return out, nil
+		data, ok := strings.CutPrefix(trimmed, "data:")
+		if !ok {
+			return "", false
+		}
+		data = strings.TrimSpace(data)
+		if currentEvent != "content_block_delta" || data == "" {
+			return "", false
+		}
+		var chunk sseDelta
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", false
+		}
+		if chunk.Delta.Type != "text_delta" {
+			return "", false
+		}
+		return chunk.Delta.Text, false
+	}), nil
 }
 
 func (c *Client) buildRequest(p ports.Prompt, forceJSON, stream bool) messagesRequest {

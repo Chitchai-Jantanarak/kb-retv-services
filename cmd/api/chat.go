@@ -8,7 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/my/app/internal/ai/embeddings"
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/ai/rag"
 	"github.com/my/app/internal/application/activityaudit"
@@ -18,6 +17,7 @@ import (
 	"github.com/my/app/internal/application/toolaudit"
 	"github.com/my/app/internal/application/tools"
 	chatwf "github.com/my/app/internal/application/workflows/chat"
+	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/attachments"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/memcache"
@@ -49,6 +49,7 @@ func buildChatEndpoints(
 	qdb tenant.Querier,
 	resolver *llm.CompanyResolver,
 	reportsRepo *reportsmysql.Repository,
+	sharedEmbedder ports.EmbeddingProvider,
 	log *zap.Logger,
 ) chatEndpoints {
 	var endpoints chatEndpoints
@@ -77,7 +78,7 @@ func buildChatEndpoints(
 	}
 	ftsSource := rag.NewMySQLFTSSource(qdb)
 
-	chatOpts, guardErr := appendChatIntelligenceOptions(cfg, qdb, resolver, reportsRepo, ftsSource, chatOpts, log, &endpoints.confirm)
+	chatOpts, guardErr := appendChatIntelligenceOptions(cfg, qdb, resolver, reportsRepo, ftsSource, sharedEmbedder, chatOpts, log, &endpoints.confirm)
 	if guardErr != nil {
 		log.Error("chat endpoints disabled: local routing guard unavailable and no provider substitution is permitted",
 			zap.Error(guardErr))
@@ -94,13 +95,14 @@ func buildChatEndpoints(
 		chatwf.WithOffTopicMargin(cfg.Chat.OffTopicMargin),
 	)
 
-	if poolProvider, err := llm.Resolve(llmboot.LLMSettings(cfg)); err != nil {
+	llmSettings := llmboot.LLMSettings(cfg)
+	if poolProvider, err := llm.Resolve(llmSettings); err != nil {
 		log.Warn("chat reply pool not configured", zap.Error(err))
 	} else {
 		chatOpts = append(chatOpts, chatwf.WithReplyPool(poolProvider))
 	}
 
-	if geminiKey := llmboot.LLMSettings(cfg).GeminiKey; geminiKey != "" {
+	if geminiKey := llmSettings.GeminiKey; geminiKey != "" {
 		if strings.TrimSpace(cfg.Laravel.BaseURL) != "" {
 			transcriber := transcribegemini.New(geminiKey, "", "", 0)
 			fetcher := attachments.New(
@@ -134,13 +136,13 @@ func appendChatIntelligenceOptions(
 	resolver *llm.CompanyResolver,
 	reportsRepo *reportsmysql.Repository,
 	ftsSource *rag.MySQLFTSSource,
+	sharedEmbedder ports.EmbeddingProvider,
 	chatOpts []chatwf.Option,
 	log *zap.Logger,
 	confirm **handlers.ChatConfirmHandler,
 ) ([]chatwf.Option, error) {
-	_, _, sharedEmbedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
-	if err != nil {
-		log.Warn("chat intent router not configured", zap.Error(err))
+	if sharedEmbedder == nil {
+		log.Warn("chat intent router not configured: embedding provider unavailable")
 		return chatOpts, nil
 	}
 

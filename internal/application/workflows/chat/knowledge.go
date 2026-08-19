@@ -43,28 +43,7 @@ func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query 
 		logger.FromContext(ctx).Error("chat: knowledge search failed", zap.Int64("company_id", companyID), zap.Error(err))
 		return nil, ""
 	}
-	chunks = gateChunks(chunks)
-
-	var (
-		sources []dto.ChatSource
-		block   strings.Builder
-	)
-	for _, chunk := range chunks {
-		title, snippet := rag.SnippetFromChunk(chunk, true, knowledgeSnippetMaxChars)
-		if title != "" || snippet != "" {
-			sources = append(sources, dto.ChatSource{
-				ID:      fmt.Sprintf("chunk:%d", chunk.ChunkID),
-				Title:   title,
-				Snippet: snippet,
-				Source:  "fts",
-				Score:   chunk.Relevance,
-			})
-		}
-		if snippet != "" {
-			fmt.Fprintf(&block, "- %s: %s\n", sanitizeUntrusted(title), sanitizeUntrusted(snippet))
-		}
-	}
-	return sources, untrustedBlock("REFERENCE NOTES", block.String())
+	return buildKnowledgeSources(gateChunks(chunks))
 }
 
 func (w *Workflow) rerankedKnowledgeContext(ctx context.Context, companyID int64, query string) (sources []dto.ChatSource, block string, handled bool) {

@@ -226,17 +226,17 @@ const (
 )
 
 type ChatStreamEvent struct {
-	Type          string             `json:"-"`
-	Text          string             `json:"text,omitempty"`
-	Status        string             `json:"status,omitempty"`
-	Model         string             `json:"model,omitempty"`
-	Vendor        string             `json:"vendor,omitempty"`
-	Sources       []ChatSource       `json:"sources,omitempty"`
-	Activity      []ChatActivity     `json:"activity,omitempty"`
-	SearchResults []ChatCaseResult   `json:"search_results,omitempty"`
-	ToolResult    *ChatToolResult    `json:"tool_result,omitempty"`
-	PendingAction *ChatPendingAction `json:"pending_action,omitempty"`
-	Debug         *ChatDebug         `json:"debug,omitempty"`
+	Type           string             `json:"-"`
+	Text           string             `json:"text,omitempty"`
+	Status         string             `json:"status,omitempty"`
+	Model          string             `json:"model,omitempty"`
+	Vendor         string             `json:"vendor,omitempty"`
+	Sources        []ChatSource       `json:"sources,omitempty"`
+	Activity       []ChatActivity     `json:"activity,omitempty"`
+	SearchResults  []ChatCaseResult   `json:"search_results,omitempty"`
+	ToolResult     *ChatToolResult    `json:"tool_result,omitempty"`
+	PendingAction  *ChatPendingAction `json:"pending_action,omitempty"`
+	Debug          *ChatDebug         `json:"debug,omitempty"`
 	Transcript     string             `json:"transcript,omitempty"`
 	Code           string             `json:"code,omitempty"`
 	Message        string             `json:"message,omitempty"`

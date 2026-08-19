@@ -5,11 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
-
-	"github.com/my/app/internal/shared/debugtrace"
 )
 
 func buildLatestCasesQuery(coverage []int64, status string, scope string, limit int) (string, []any) {
@@ -99,41 +95,15 @@ func (r *Repository) CaseByCode(ctx context.Context, coverage []int64, code stri
 
 	var codeVal, title, statusCode sql.NullString
 	var customerID, siteID sql.NullInt64
-	start := time.Now()
-	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode, &customerID, &siteID)
-	state := "completed"
-	errorCode := ""
-	safeError := ""
-	rowCount := "1"
-	if scanErr != nil {
-		state = "failed"
-		errorCode = "query_failed"
-		safeError = "The parameterized case lookup failed."
-		rowCount = "0"
-		if errors.Is(scanErr, sql.ErrNoRows) {
-			state = "not_found"
-			errorCode = "not_found"
-			safeError = "No case matched the supplied code inside the permitted company scope."
-		}
-	}
-	debugtrace.Add(ctx, debugtrace.Event{
-		Stage:      "repository.reports.case_by_code",
-		State:      state,
-		Label:      "query case status from MySQL",
-		DurationMS: debugtrace.Since(start),
-		ErrorCode:  errorCode,
-		Error:      safeError,
-		Context: map[string]string{
-			"repository":      "internal/repositories/reports/mysql",
-			"method":          "CaseByCode",
-			"operation":       "SELECT",
-			"tables":          "reports, report_statuses",
-			"scope":           "company coverage",
-			"parameterized":   "true",
-			"parameter_count": strconv.Itoa(len(args)),
-			"limit":           "1",
-			"rows":            rowCount,
-		},
+	scanErr := traceScalarQuery(ctx, scalarTrace{
+		stage:       "repository.reports.case_by_code",
+		label:       "query case status from MySQL",
+		method:      "CaseByCode",
+		failedMsg:   "The parameterized case lookup failed.",
+		notFoundMsg: "No case matched the supplied code inside the permitted company scope.",
+		argCount:    len(args),
+	}, func() error {
+		return r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode, &customerID, &siteID)
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, sql.ErrNoRows) {
@@ -171,41 +141,15 @@ func (r *Repository) CaseByID(ctx context.Context, coverage []int64, id int64) (
 	query, args := buildCaseByIDQuery(coverage, id)
 
 	var codeVal, title, statusCode sql.NullString
-	start := time.Now()
-	scanErr := r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode)
-	state := "completed"
-	errorCode := ""
-	safeError := ""
-	rowCount := "1"
-	if scanErr != nil {
-		state = "failed"
-		errorCode = "query_failed"
-		safeError = "The parameterized draft lookup failed."
-		rowCount = "0"
-		if errors.Is(scanErr, sql.ErrNoRows) {
-			state = "not_found"
-			errorCode = "not_found"
-			safeError = "No code-less report matched the supplied id inside the permitted company scope."
-		}
-	}
-	debugtrace.Add(ctx, debugtrace.Event{
-		Stage:      "repository.reports.case_by_id",
-		State:      state,
-		Label:      "query draft report from MySQL",
-		DurationMS: debugtrace.Since(start),
-		ErrorCode:  errorCode,
-		Error:      safeError,
-		Context: map[string]string{
-			"repository":      "internal/repositories/reports/mysql",
-			"method":          "CaseByID",
-			"operation":       "SELECT",
-			"tables":          "reports, report_statuses",
-			"scope":           "company coverage",
-			"parameterized":   "true",
-			"parameter_count": strconv.Itoa(len(args)),
-			"limit":           "1",
-			"rows":            rowCount,
-		},
+	scanErr := traceScalarQuery(ctx, scalarTrace{
+		stage:       "repository.reports.case_by_id",
+		label:       "query draft report from MySQL",
+		method:      "CaseByID",
+		failedMsg:   "The parameterized draft lookup failed.",
+		notFoundMsg: "No code-less report matched the supplied id inside the permitted company scope.",
+		argCount:    len(args),
+	}, func() error {
+		return r.db.QueryRowContext(ctx, query, args...).Scan(&codeVal, &title, &statusCode)
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, sql.ErrNoRows) {

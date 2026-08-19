@@ -106,62 +106,64 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 
 	switch outcome.Kind {
 	case decide.KindClarify:
-		reply := clarifyReply(req.Locale)
-		var params map[string]string
-		if outcome.Tool != nil {
-			params = outcome.Tool.Params
-		}
-		if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, outcome.Missing, params); ok {
-			reply = modelReply
-		}
-		base.handled = true
-		base.resp = dto.ChatResponse{
-			Reply:    reply,
-			Status:   dto.ChatStatusNeedsClarification,
-			Activity: activity(req.Locale, "request_checked", "permission_checked"),
-		}
-		return base, nil
+		return w.prepareClarify(ctx, req, base, outcome, lastUser, companyID), nil
 	case decide.KindToolFailed:
-		base.handled = true
-		base.resp = dto.ChatResponse{
-			Reply:    toolFailedReply(req.Locale),
-			Status:   dto.ChatStatusToolFailed,
-			Activity: activity(req.Locale, "request_checked", "permission_checked"),
-		}
-		return base, nil
+		return handledPreamble(base, statusResponse(req.Locale, toolFailedReply(req.Locale), dto.ChatStatusToolFailed)), nil
 	case decide.KindPermissionDenied:
-		base.handled = true
-		base.resp = dto.ChatResponse{
-			Reply:    permissionDeniedReply(req.Locale),
-			Status:   dto.ChatStatusPermissionDenied,
-			Activity: activity(req.Locale, "request_checked", "permission_checked"),
-		}
-		return base, nil
+		return handledPreamble(base, statusResponse(req.Locale, permissionDeniedReply(req.Locale), dto.ChatStatusPermissionDenied)), nil
 	case decide.KindTool:
-		toolResp := *outcome.Tool
-		resp := toolChatResponse(req.Locale, toolResp)
-		if summaryComposeMode(toolResp, req) {
-			timedChat(timings, "compose", func() {
-				if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
-					resp.Reply = summary
-				}
-			})
-		}
-		base.handled = true
-		base.resp = resp
-		base.tool = outcome.Tool
-		base.candidates = candidates
-		return base, nil
+		return w.prepareTool(ctx, req, base, outcome, candidates, lastUser, companyID, timings), nil
 	case decide.KindHandoff, decide.KindSocial, decide.KindOffTopic:
 		seed := replySeed(companyID, lastUser, len(req.Messages))
 		if resp, handled := w.shortCircuit(req.Locale, decision, outcome.Kind, seed); handled {
-			base.handled = true
-			base.resp = resp
+			return handledPreamble(base, resp), nil
 		}
 		return base, nil
 	default:
 		return base, nil
 	}
+}
+
+func handledPreamble(base chatPreamble, resp dto.ChatResponse) chatPreamble {
+	base.handled = true
+	base.resp = resp
+	return base
+}
+
+func statusResponse(locale, reply string, status string) dto.ChatResponse {
+	return dto.ChatResponse{
+		Reply:    reply,
+		Status:   status,
+		Activity: activity(locale, "request_checked", "permission_checked"),
+	}
+}
+
+func (w *Workflow) prepareClarify(ctx context.Context, req dto.ChatRequest, base chatPreamble, outcome decide.Outcome, lastUser string, companyID int64) chatPreamble {
+	reply := clarifyReply(req.Locale)
+	var params map[string]string
+	if outcome.Tool != nil {
+		params = outcome.Tool.Params
+	}
+	if modelReply, ok := w.clarifyViaModel(ctx, req.Locale, lastUser, companyID, outcome.Missing, params); ok {
+		reply = modelReply
+	}
+	return handledPreamble(base, statusResponse(req.Locale, reply, dto.ChatStatusNeedsClarification))
+}
+
+func (w *Workflow) prepareTool(ctx context.Context, req dto.ChatRequest, base chatPreamble, outcome decide.Outcome, candidates []string, lastUser string, companyID int64, timings map[string]int64) chatPreamble {
+	toolResp := *outcome.Tool
+	resp := toolChatResponse(req.Locale, toolResp)
+	if summaryComposeMode(toolResp, req) {
+		timedChat(timings, "compose", func() {
+			if summary, ok := w.composeToolReply(ctx, req.Locale, lastUser, companyID, toolResp); ok {
+				resp.Reply = summary
+			}
+		})
+	}
+	base = handledPreamble(base, resp)
+	base.tool = outcome.Tool
+	base.candidates = candidates
+	return base
 }
 
 // transcribeLastUserAudio finds the first audio attachment on the last user

@@ -161,10 +161,34 @@ func (o *Orchestrator) Selector() ToolSelector {
 }
 
 func (o *Orchestrator) ExecuteSelection(ctx context.Context, actor Actor, msg string, sel tools.Selection) (Response, error) {
-	var err error
+	tool, resp, err := o.resolveTool(ctx, sel)
+	if err != nil {
+		return resp, err
+	}
+
+	handler, ok := o.handlers[tool.Handler]
+	if !ok {
+		return resp, fmt.Errorf("skeleton: no handler %q for tool %q", tool.Handler, tool.ID)
+	}
+
+	if tool.IsWrite() {
+		pending, auditErr := o.auditWrite(ctx, tool, actor, sel)
+		if auditErr != nil {
+			return resp, auditErr
+		}
+		if pending != nil {
+			resp.Pending = pending
+			return resp, nil
+		}
+	}
+
+	return o.runHandler(ctx, tool, handler, actor, msg, sel, resp)
+}
+
+func (o *Orchestrator) resolveTool(ctx context.Context, sel tools.Selection) (tools.Tool, Response, error) {
 	tool, ok := o.catalog[sel.ToolID]
 	if !ok {
-		return Response{
+		return tools.Tool{}, Response{
 			Matched:        true,
 			ToolID:         sel.ToolID,
 			Params:         cloneParams(sel.Params),
@@ -198,39 +222,35 @@ func (o *Orchestrator) ExecuteSelection(ctx context.Context, actor Actor, msg st
 			"audit_action":        tool.Audit,
 		},
 	})
+	return tool, resp, nil
+}
 
-	handler, ok := o.handlers[tool.Handler]
-	if !ok {
-		return resp, fmt.Errorf("skeleton: no handler %q for tool %q", tool.Handler, tool.ID)
+func (o *Orchestrator) auditWrite(ctx context.Context, tool tools.Tool, actor Actor, sel tools.Selection) (*PendingRef, error) {
+	action := tool.Audit
+	if o.pending != nil {
+		action += ".proposed"
 	}
-
-	if tool.IsWrite() && o.pending != nil {
-		auditStart := time.Now()
-		auditErr := o.auditor.Log(ctx, tool.Audit+".proposed", actor, tool.ID)
-		recordAuditTrace(ctx, tool.Audit+".proposed", auditStart, auditErr)
-		if auditErr != nil {
-			return resp, fmt.Errorf("skeleton: audit: %w", auditErr)
-		}
-		id := o.pending.Put(actor, tool.ID, sel.Params)
-		if id == "" {
-			return resp, fmt.Errorf("skeleton: pending: id generation failed")
-		}
-		resp.Pending = &PendingRef{ID: id, Summary: proposalSummary(tool, sel.Params)}
-		return resp, nil
+	auditStart := time.Now()
+	auditErr := o.auditor.Log(ctx, action, actor, tool.ID)
+	recordAuditTrace(ctx, action, auditStart, auditErr)
+	if auditErr != nil {
+		return nil, fmt.Errorf("skeleton: audit: %w", auditErr)
 	}
-
-	if tool.IsWrite() {
-		auditStart := time.Now()
-		auditErr := o.auditor.Log(ctx, tool.Audit, actor, tool.ID)
-		recordAuditTrace(ctx, tool.Audit, auditStart, auditErr)
-		if auditErr != nil {
-			return resp, fmt.Errorf("skeleton: audit: %w", auditErr)
-		}
+	if o.pending == nil {
+		return nil, nil
 	}
+	id := o.pending.Put(actor, tool.ID, sel.Params)
+	if id == "" {
+		return nil, fmt.Errorf("skeleton: pending: id generation failed")
+	}
+	return &PendingRef{ID: id, Summary: proposalSummary(tool, sel.Params)}, nil
+}
 
+func (o *Orchestrator) runHandler(ctx context.Context, tool tools.Tool, handler Handler, actor Actor, msg string, sel tools.Selection, resp Response) (Response, error) {
 	resp.Called = true
 	handlerStart := time.Now()
 	var rows []Row
+	var err error
 	if coverageRequiredHandlers[tool.Handler] && len(actor.Coverage) == 0 {
 		rows = []Row{}
 	} else {

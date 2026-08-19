@@ -5,14 +5,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/my/app/internal/ai/embeddings"
 	searchwf "github.com/my/app/internal/application/workflows/search"
+	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/memgraph"
 	"github.com/my/app/internal/infra/qdrant"
 	graphrepo "github.com/my/app/internal/repositories/graph"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
-	"github.com/my/app/internal/shared/llmboot"
 	"github.com/my/app/internal/transport/http/handlers"
 )
 
@@ -41,6 +40,8 @@ func (s searchCaseSource) CasesByIDs(ctx context.Context, coverage []int64, ids 
 func buildSearchHandler(
 	cfg config.Config,
 	reportsRepo *reportsmysql.Repository,
+	provider, model string,
+	embedder ports.EmbeddingProvider,
 	log *zap.Logger,
 ) *handlers.SearchHandler {
 	if !cfg.Qdrant.Enabled {
@@ -48,9 +49,8 @@ func buildSearchHandler(
 		return nil
 	}
 
-	provider, model, embedder, err := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
-	if err != nil {
-		log.Warn("search endpoint not configured: build embedder", zap.Error(err))
+	if embedder == nil {
+		log.Warn("search endpoint not configured: embedding provider unavailable")
 		return nil
 	}
 

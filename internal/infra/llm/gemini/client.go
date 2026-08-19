@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm/llmerr"
+	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
 var maxPromptImages = 3
@@ -146,55 +146,32 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	if err != nil {
 		return nil, fmt.Errorf("gemini: http: %w", err)
 	}
-	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, &llmerr.ProviderError{
-			Vendor:     "gemini",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+	if err := llmhttp.CheckError("gemini", resp); err != nil {
+		return nil, err
 	}
 
-	out := make(chan ports.Completion)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for scanner.Scan() {
-			trimmed := strings.TrimSpace(scanner.Text())
-			data, ok := strings.CutPrefix(trimmed, "data:")
-			if !ok {
-				continue
-			}
-			data = strings.TrimSpace(data)
-			if data == "" {
-				continue
-			}
-			var chunk generateResponse
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				continue
-			}
-			if len(chunk.Candidates) == 0 {
-				continue
-			}
-			var text strings.Builder
-			for _, prt := range chunk.Candidates[0].Content.Parts {
-				text.WriteString(prt.Text)
-			}
-			if text.Len() == 0 {
-				continue
-			}
-			select {
-			case out <- ports.Completion{Text: text.String(), Vendor: "gemini", Model: c.model}:
-			case <-ctx.Done():
-				return
-			}
+	return llmhttp.StreamLines(ctx, resp.Body, "gemini", c.model, func(trimmed string) (string, bool) {
+		data, ok := strings.CutPrefix(trimmed, "data:")
+		if !ok {
+			return "", false
 		}
-	}()
-	return out, nil
+		data = strings.TrimSpace(data)
+		if data == "" {
+			return "", false
+		}
+		var chunk generateResponse
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", false
+		}
+		if len(chunk.Candidates) == 0 {
+			return "", false
+		}
+		var text strings.Builder
+		for _, prt := range chunk.Candidates[0].Content.Parts {
+			text.WriteString(prt.Text)
+		}
+		return text.String(), false
+	}), nil
 }
 
 func imageParts(images []ports.PromptImage) []part {

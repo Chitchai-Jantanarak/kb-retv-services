@@ -3,8 +3,62 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/my/app/internal/shared/debugtrace"
 )
+
+type scalarTrace struct {
+	stage       string
+	label       string
+	method      string
+	failedMsg   string
+	notFoundMsg string
+	argCount    int
+}
+
+func traceScalarQuery(ctx context.Context, t scalarTrace, scan func() error) error {
+	start := time.Now()
+	scanErr := scan()
+	state := "completed"
+	errorCode := ""
+	safeError := ""
+	rowCount := "1"
+	if scanErr != nil {
+		state = "failed"
+		errorCode = "query_failed"
+		safeError = t.failedMsg
+		rowCount = "0"
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			state = "not_found"
+			errorCode = "not_found"
+			safeError = t.notFoundMsg
+		}
+	}
+	debugtrace.Add(ctx, debugtrace.Event{
+		Stage:      t.stage,
+		State:      state,
+		Label:      t.label,
+		DurationMS: debugtrace.Since(start),
+		ErrorCode:  errorCode,
+		Error:      safeError,
+		Context: map[string]string{
+			"repository":      "internal/repositories/reports/mysql",
+			"method":          t.method,
+			"operation":       "SELECT",
+			"tables":          "reports, report_statuses",
+			"scope":           "company coverage",
+			"parameterized":   "true",
+			"parameter_count": strconv.Itoa(t.argCount),
+			"limit":           "1",
+			"rows":            rowCount,
+		},
+	})
+	return scanErr
+}
 
 func (r *Repository) queryCaseRows(
 	ctx context.Context,

@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,11 +13,12 @@ import (
 
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/llm/llmerr"
+	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
 const (
-	DefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-	DefaultModel   = "gemini-2.5-flash"
+	DefaultBaseURL = "https://api.openai.com/v1"
+	DefaultModel   = "gpt-4o-mini"
 )
 
 type Config struct {
@@ -142,51 +142,31 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 	if err != nil {
 		return nil, fmt.Errorf("openai: http: %w", err)
 	}
-	if resp.StatusCode >= 400 {
-		raw, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, &llmerr.ProviderError{
-			Vendor:     "openai",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+	if err := llmhttp.CheckError("openai", resp); err != nil {
+		return nil, err
 	}
 
-	out := make(chan ports.Completion)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for scanner.Scan() {
-			trimmed := strings.TrimSpace(scanner.Text())
-			data, ok := strings.CutPrefix(trimmed, "data:")
-			if !ok {
-				continue
-			}
-			data = strings.TrimSpace(data)
-			if data == "" {
-				continue
-			}
-			if data == "[DONE]" {
-				return
-			}
-			var chunk chatStreamChunk
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				continue
-			}
-			if len(chunk.Choices) == 0 || chunk.Choices[0].Delta.Content == "" {
-				continue
-			}
-			select {
-			case out <- ports.Completion{Text: chunk.Choices[0].Delta.Content, Vendor: "openai", Model: c.model}:
-			case <-ctx.Done():
-				return
-			}
+	return llmhttp.StreamLines(ctx, resp.Body, "openai", c.model, func(trimmed string) (string, bool) {
+		data, ok := strings.CutPrefix(trimmed, "data:")
+		if !ok {
+			return "", false
 		}
-	}()
-	return out, nil
+		data = strings.TrimSpace(data)
+		if data == "" {
+			return "", false
+		}
+		if data == "[DONE]" {
+			return "", true
+		}
+		var chunk chatStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return "", false
+		}
+		if len(chunk.Choices) == 0 {
+			return "", false
+		}
+		return chunk.Choices[0].Delta.Content, false
+	}), nil
 }
 
 func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseFormat) (ports.Completion, error) {

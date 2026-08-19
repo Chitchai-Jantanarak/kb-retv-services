@@ -5,9 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/my/app/internal/repositories/graph"
 )
+
+type GraphSink interface {
+	UpsertReport(ctx context.Context, companyID int64, reportID int64, props map[string]any) error
+	UpsertArticle(ctx context.Context, companyID int64, articleID int64, props map[string]any) error
+	UpsertSymptom(ctx context.Context, companyID int64, symptomID int64, props map[string]any) error
+	LinkArticleSolvesSymptom(ctx context.Context, companyID int64, articleID, symptomID int64, props map[string]any) error
+	LinkReportProducedArticle(ctx context.Context, companyID int64, reportID, articleID int64) error
+}
 
 type ArticleRecord struct {
 	ID             int64
@@ -38,12 +44,12 @@ type Result struct {
 
 type Workflow struct {
 	source ArticleSource
-	graph  *graph.KBGraph
+	graph  GraphSink
 }
 
 type Config struct {
 	Source ArticleSource
-	Graph  *graph.KBGraph
+	Graph  GraphSink
 }
 
 func New(cfg Config) (*Workflow, error) {

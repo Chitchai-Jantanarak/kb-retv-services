@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/my/app/internal/ai/embeddings"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/tenant"
@@ -12,6 +13,7 @@ import (
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
 	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/shared/llmboot"
 	"github.com/my/app/internal/transport/http/handlers"
 )
 
@@ -39,7 +41,11 @@ func buildAPIHandlers(
 	}
 
 	reportsRepo := reportsmysql.New(qdb)
-	chat := buildChatEndpoints(cfg, qdb, resolver, reportsRepo, log)
+	embProvider, embModel, embedder, embErr := embeddings.NewProvider(llmboot.EmbeddingSettings(cfg))
+	if embErr != nil {
+		log.Warn("embedding provider not configured", zap.Error(embErr))
+	}
+	chat := buildChatEndpoints(cfg, qdb, resolver, reportsRepo, embedder, log)
 	endpoints.chat = chat.chat
 	endpoints.chatStream = chat.stream
 	endpoints.chatConfirm = chat.confirm
@@ -47,7 +53,7 @@ func buildAPIHandlers(
 	endpoints.reports = handlers.NewReportsHandler(reportsRepo)
 	log.Info("reports endpoints configured")
 
-	endpoints.search = buildSearchHandler(cfg, reportsRepo, log)
+	endpoints.search = buildSearchHandler(cfg, reportsRepo, embProvider, embModel, embedder, log)
 
 	inbound, err := buildInboundHandler(cfg, central, qdb, resolver, log)
 	if err != nil {
