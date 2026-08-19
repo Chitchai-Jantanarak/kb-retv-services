@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,6 +33,36 @@ type config struct {
 	interval                  time.Duration
 	max                       int
 	once                      bool
+	statePath                 string
+}
+
+type uidState struct {
+	UIDValidity uint32 `json:"uidvalidity"`
+	LastUID     uint32 `json:"last_uid"`
+}
+
+func loadState(path string) uidState {
+	var st uidState
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return st
+	}
+	_ = json.Unmarshal(b, &st)
+	return st
+}
+
+func saveState(path string, st uidState) {
+	b, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		log.Printf("mailpoll: state dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		log.Printf("mailpoll: state write: %v", err)
+	}
 }
 
 func main() {
@@ -74,23 +107,53 @@ func pollOnce(ctx context.Context, cfg config, fwd *mailpoll.Forwarder) error {
 		return fmt.Errorf("login: %w", err)
 	}
 
-	if _, err := c.Select(cfg.mailbox, false); err != nil {
+	mbox, err := c.Select(cfg.mailbox, false)
+	if err != nil {
 		return fmt.Errorf("select %q: %w", cfg.mailbox, err)
 	}
 
+	st := loadState(cfg.statePath)
+	if st.UIDValidity != mbox.UidValidity {
+		st = uidState{UIDValidity: mbox.UidValidity}
+	}
+
+	bootstrap := st.LastUID == 0
 	criteria := imap.NewSearchCriteria()
-	criteria.WithoutFlags = []string{imap.SeenFlag}
+	if bootstrap {
+		criteria.WithoutFlags = []string{imap.SeenFlag}
+	} else {
+		set := new(imap.SeqSet)
+		set.AddRange(st.LastUID+1, 0)
+		criteria.Uid = set
+	}
 	uids, err := c.UidSearch(criteria)
 	if err != nil {
-		return fmt.Errorf("search unseen: %w", err)
+		return fmt.Errorf("search: %w", err)
+	}
+	slices.Sort(uids)
+	if !bootstrap {
+		filtered := uids[:0]
+		for _, u := range uids {
+			if u > st.LastUID {
+				filtered = append(filtered, u)
+			}
+		}
+		uids = filtered
 	}
 	if len(uids) == 0 {
+		if bootstrap && mbox.UidNext > 0 {
+			st.LastUID = mbox.UidNext - 1
+			saveState(cfg.statePath, st)
+		}
 		return nil
 	}
 	if cfg.max > 0 && len(uids) > cfg.max {
 		uids = uids[:cfg.max]
+		if bootstrap {
+			log.Printf("mailpoll: bootstrap capped at %d, remainder next tick", cfg.max)
+		}
 	}
-	log.Printf("mailpoll: %d new message(s) to ingest", len(uids))
+	log.Printf("mailpoll: %d new message(s) to ingest (bootstrap=%v last_uid=%d)", len(uids), bootstrap, st.LastUID)
 
 	section := &imap.BodySectionName{}
 	for _, uid := range uids {
@@ -99,15 +162,23 @@ func pollOnce(ctx context.Context, cfg config, fwd *mailpoll.Forwarder) error {
 		}
 		p, err := fetchPayload(c, uid, section, cfg.user)
 		if err != nil {
-			log.Printf("mailpoll: uid %d fetch: %v", uid, err)
-			continue
+			log.Printf("mailpoll: uid %d fetch failed, retry next tick: %v", uid, err)
+			return nil
 		}
 		if err := fwd.Forward(ctx, p); err != nil {
-			log.Printf("mailpoll: uid %d forward: %v", uid, err)
-			continue
+			log.Printf("mailpoll: uid %d forward failed, retry next tick: %v", uid, err)
+			return nil
 		}
 		markSeen(c, uid)
+		if !bootstrap {
+			st.LastUID = uid
+			saveState(cfg.statePath, st)
+		}
 		log.Printf("mailpoll: ingested uid=%d from=%s subject=%q", uid, p.From, p.Subject)
+	}
+	if bootstrap && cfg.max == 0 && mbox.UidNext > 0 {
+		st.LastUID = mbox.UidNext - 1
+		saveState(cfg.statePath, st)
 	}
 	return nil
 }
@@ -233,7 +304,7 @@ func markSeen(c *client.Client, uid uint32) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(uid)
 	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	_ = c.UidStore(seqset, item, []interface{}{imap.SeenFlag}, nil)
+	_ = c.UidStore(seqset, item, []any{imap.SeenFlag}, nil)
 }
 
 func recipients(env *imap.Envelope, fallbackTo string) []string {
@@ -285,6 +356,7 @@ func loadConfig() config {
 		interval:   envDuration("MAILPOLL_INTERVAL", 30*time.Second),
 		max:        envInt("MAILPOLL_MAX", 0),
 		once:       os.Getenv("MAILPOLL_ONCE") == "1",
+		statePath:  env("MAILPOLL_STATE", "tmp/mailpoll-state.json"),
 	}
 	if c.user == "" || c.pass == "" {
 		log.Fatal("mailpoll: IMAP_USER and IMAP_PASSWORD are required")
