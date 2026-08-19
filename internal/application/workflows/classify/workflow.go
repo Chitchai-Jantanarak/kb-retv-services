@@ -230,7 +230,7 @@ func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, 
 	}
 
 	if w.review != nil && stage2.SymptomIsNew && symptomName != "" {
-		_ = w.review.Enqueue(ctx, ports.ReviewItem{
+		if err := w.review.Enqueue(ctx, ports.ReviewItem{
 			CompanyID: r.CompanyID,
 			Kind:      ports.ReviewKindSymptomPropose,
 			Payload: map[string]any{
@@ -239,7 +239,9 @@ func (w *Workflow) classifyOne(ctx context.Context, provider ports.LLMProvider, 
 				"source_report":   r.ID,
 				"confidence":      stage2.Confidence,
 			},
-		})
+		}); err != nil {
+			log.Printf("classify: report %d company %d symptom review enqueue failed: %v", r.ID, r.CompanyID, err)
+		}
 	}
 
 	return Classification{

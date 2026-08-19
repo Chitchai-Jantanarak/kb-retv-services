@@ -27,6 +27,8 @@ var envBindings = []envBinding{
 	{key: "chat.cacheMaxEntries", env: "CHAT_CACHE_MAX_ENTRIES"},
 	{key: "chat.guardEmbedderProvider", env: "CHAT_GUARDEMBEDDERPROVIDER"},
 	{key: "chat.guardEmbedderAssetDir", env: "CHAT_GUARDEMBEDDERASSETDIR"},
+	{key: "chat.selectorRejectMargin", env: "CHAT_SELECTORREJECTMARGIN"},
+	{key: "chat.offTopicMargin", env: "CHAT_OFFTOPICMARGIN"},
 	{key: "embedding.refreshMaxChunks", env: "EMBEDDING_REFRESH_MAXCHUNKS"},
 	{key: "embedding.refreshBatchSize", env: "EMBEDDING_REFRESH_BATCHSIZE"},
 	{key: "embedding.largeRunThreshold", env: "EMBEDDING_LARGE_RUN_THRESHOLD"},

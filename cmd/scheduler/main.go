@@ -50,7 +50,6 @@ func main() {
 	}
 
 	registerCompanyTasks(scheduler, companyIDs, "@every 1m", "outbox:flush", 55*time.Second)
-	registerCompanyTasks(scheduler, companyIDs, "0 2 * * 0", "cluster:weekly", 6*24*time.Hour)
 	registerCompanyTasks(scheduler, companyIDs, "0 */6 * * *", "embedding:refresh", 5*time.Hour+55*time.Minute)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

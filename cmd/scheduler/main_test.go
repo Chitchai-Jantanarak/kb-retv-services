@@ -29,7 +29,7 @@ func TestScheduledCompanyTaskIsWorkerDecodable(t *testing.T) {
 }
 
 func TestScheduledCompanyTaskRejectsMissingCompany(t *testing.T) {
-	if _, _, err := scheduledCompanyTask("cluster:weekly", 0, time.Hour); err == nil {
+	if _, _, err := scheduledCompanyTask("embedding:refresh", 0, time.Hour); err == nil {
 		t.Fatal("scheduledCompanyTask err = nil, want missing company error")
 	}
 }

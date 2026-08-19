@@ -62,4 +62,4 @@ migrator
 scripts/*.sh
 internal/**/probe_*_test.go
 internal/**/*_live_test.go
-
+.gocache

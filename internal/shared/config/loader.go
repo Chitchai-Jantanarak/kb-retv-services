@@ -60,7 +60,7 @@ func configFrom(v *viper.Viper) Config {
 		Qdrant: Qdrant{
 			Enabled:          v.GetBool("qdrant.enabled"),
 			URL:              v.GetString("qdrant.url"),
-			APIKey:           firstNonEmpty(v.GetString("qdrant.api_key"), v.GetString("qdrant.apiKey")),
+			APIKey:           v.GetString("qdrant.apiKey"),
 			CollectionPrefix: v.GetString("qdrant.collectionPrefix"),
 		},
 		Memgraph: Memgraph{

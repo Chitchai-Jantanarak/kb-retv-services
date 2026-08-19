@@ -3,6 +3,7 @@ package tenant
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,11 +160,25 @@ func (r *Router) QueryContext(ctx context.Context, query string, args ...any) (*
 func (r *Router) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	db, err := r.pool.connFor(ctx)
 	if err != nil {
-		panic(err)
+		recordSQLTrace(ctx, "mysql.query_row", query, len(args), sqlTraceStart(ctx), err)
+		return errRow(fmt.Errorf("tenant: route query row: %w", err))
 	}
 	start := sqlTraceStart(ctx)
 	row := db.QueryRowContext(ctx, query, args...)
 	recordSQLTrace(ctx, "mysql.query_row", query, len(args), start, nil)
+	return row
+}
+
+type errConnector struct{ err error }
+
+func (e errConnector) Connect(context.Context) (driver.Conn, error) { return nil, e.err }
+
+func (e errConnector) Driver() driver.Driver { return nil }
+
+func errRow(err error) *sql.Row {
+	db := sql.OpenDB(errConnector{err: err})
+	row := db.QueryRowContext(context.Background(), "")
+	_ = db.Close()
 	return row
 }
 
