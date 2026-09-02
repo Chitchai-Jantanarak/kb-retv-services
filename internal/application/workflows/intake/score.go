@@ -18,6 +18,7 @@ const (
 	ReasonSenderKnown     = "sender_known"
 	ReasonBodyThin        = "body_thin"
 	ReasonLinkHeavy       = "link_heavy"
+	ReasonIntentKeyword   = "intent_keyword_match"
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 	weightSenderKnown     = 12
 	weightBodyThin        = -8
 	weightLinkHeavy       = -8
+	weightIntentKeyword   = 30
 
 	thinBodyChars  = 120
 	linkHeavyPerKB = 4.0
@@ -60,6 +62,7 @@ type Signals struct {
 	ThreadMatched   bool
 	SenderKnown     bool
 	Images          []ports.PromptImage
+	IntentKeywords  []string
 }
 
 // Score grades an intake on deterministic evidence only, computable before
@@ -121,7 +124,29 @@ func Score(sig Signals) (int, []string) {
 		reasons = append(reasons, ReasonLinkHeavy)
 	}
 
+	if matchesIntentKeyword(sig.Subject, sig.Body, sig.IntentKeywords) {
+		score += weightIntentKeyword
+		reasons = append(reasons, ReasonIntentKeyword)
+	}
+
 	return clampScore(score), reasons
+}
+
+func matchesIntentKeyword(subject, body string, keywords []string) bool {
+	if len(keywords) == 0 {
+		return false
+	}
+	haystack := strings.ToLower(subject + " " + body)
+	for _, kw := range keywords {
+		kw = strings.TrimSpace(kw)
+		if kw == "" {
+			continue
+		}
+		if strings.Contains(haystack, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isBulkPrecedence(precedence string) bool {

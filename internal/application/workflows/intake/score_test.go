@@ -141,6 +141,57 @@ func TestScorePrecedenceAloneNeverFlipsTheVerdict(t *testing.T) {
 	}
 }
 
+func TestScoreRewardsIntentKeywordMatch(t *testing.T) {
+	without, reasons := intake.Score(intake.Signals{
+		Sender:        "system@vendor.com",
+		Subject:       "Automated notice",
+		Body:          supportBody(),
+		AutoSubmitted: "auto-generated",
+	})
+	if hasReason(reasons, intake.ReasonIntentKeyword) {
+		t.Fatalf("reasons = %v, want no intent_keyword_match without configured keywords", reasons)
+	}
+
+	with, reasons := intake.Score(intake.Signals{
+		Sender:         "system@vendor.com",
+		Subject:        "Automated notice",
+		Body:           supportBody(),
+		AutoSubmitted:  "auto-generated",
+		IntentKeywords: []string{"stops"},
+	})
+	if !hasReason(reasons, intake.ReasonIntentKeyword) {
+		t.Fatalf("reasons = %v, want intent_keyword_match", reasons)
+	}
+	if with <= without {
+		t.Fatalf("intent keyword match %d must outrank no match %d", with, without)
+	}
+}
+
+func TestScoreIntentKeywordMatchesCaseInsensitiveSubjectOrBody(t *testing.T) {
+	subjectMatch, reasons := intake.Score(intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Subject:        "ROBOT STOPS AT DOCK",
+		Body:           "please help",
+		IntentKeywords: []string{"stops"},
+	})
+	if !hasReason(reasons, intake.ReasonIntentKeyword) {
+		t.Fatalf("reasons = %v, want intent_keyword_match from subject", reasons)
+	}
+
+	noMatch, reasons := intake.Score(intake.Signals{
+		Sender:         "somchai@customer.co.th",
+		Subject:        "hello",
+		Body:           "please help",
+		IntentKeywords: []string{"stops"},
+	})
+	if hasReason(reasons, intake.ReasonIntentKeyword) {
+		t.Fatalf("reasons = %v, want no intent_keyword_match", reasons)
+	}
+	if subjectMatch <= noMatch {
+		t.Fatalf("subject match %d must outrank no match %d", subjectMatch, noMatch)
+	}
+}
+
 func TestScoreRewardsThreadMatchAndSenderKnown(t *testing.T) {
 	unmatched, _ := intake.Score(intake.Signals{Sender: "somchai@customer.co.th", Body: supportBody()})
 

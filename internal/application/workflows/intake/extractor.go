@@ -54,6 +54,7 @@ type Result struct {
 	ReferencedCase    string
 	Confidence        int
 	ConfidenceReasons []string
+	PromoteThreshold  int
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -67,6 +68,7 @@ type Extractor struct {
 	resolve  ProviderForCompany
 	specs    SpecResolver
 	products ProductSource
+	keywords KeywordSource
 }
 
 type Option func(*Extractor)
@@ -83,6 +85,14 @@ func WithProducts(products ProductSource) Option {
 	return func(e *Extractor) {
 		if products != nil {
 			e.products = products
+		}
+	}
+}
+
+func WithIntentKeywords(keywords KeywordSource) Option {
+	return func(e *Extractor) {
+		if keywords != nil {
+			e.keywords = keywords
 		}
 	}
 }
@@ -110,14 +120,32 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		return Result{}, fmt.Errorf("intake: company_id must be positive")
 	}
 
+	if e.keywords != nil {
+		keywords, err := e.keywords.IntentKeywords(ctx, companyID)
+		if err != nil {
+			return Result{}, fmt.Errorf("intake: load intent keywords: %w", err)
+		}
+		sig.IntentKeywords = keywords
+	}
+
+	threshold := 0
+	if ts, ok := e.keywords.(ThresholdSource); ok {
+		loaded, err := ts.PromoteThreshold(ctx, companyID)
+		if err != nil {
+			return Result{}, fmt.Errorf("intake: load promote threshold: %w", err)
+		}
+		threshold = loaded
+	}
+
 	score, reasons := Score(sig)
 	if score <= skipModelBelowScore {
 		return Result{
-			Status:         StatusUnknown,
-			Score:          score,
-			Reasons:        reasons,
-			Classification: ClassificationNotActionable,
-			ReferencedCase: sig.ReferencedCase,
+			Status:           StatusUnknown,
+			Score:            score,
+			Reasons:          reasons,
+			Classification:   ClassificationNotActionable,
+			ReferencedCase:   sig.ReferencedCase,
+			PromoteThreshold: threshold,
 		}, nil
 	}
 
@@ -193,15 +221,16 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	}
 
 	return Result{
-		Fields:         fields,
-		Missing:        missing,
-		Status:         status,
-		Score:          score,
-		Reasons:        reasons,
-		Classification: classification,
-		Reasoning:      reasoning,
-		CatalogRelated: catalogRelatedPtr,
-		ReferencedCase: sig.ReferencedCase,
+		Fields:           fields,
+		Missing:          missing,
+		Status:           status,
+		Score:            score,
+		Reasons:          reasons,
+		Classification:   classification,
+		Reasoning:        reasoning,
+		CatalogRelated:   catalogRelatedPtr,
+		ReferencedCase:   sig.ReferencedCase,
+		PromoteThreshold: threshold,
 	}, nil
 }
 

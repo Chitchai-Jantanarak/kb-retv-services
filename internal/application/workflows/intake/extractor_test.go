@@ -52,6 +52,15 @@ func (f fakeProducts) Products(context.Context, int64) ([]string, error) {
 	return f.products, f.err
 }
 
+type fakeKeywords struct {
+	keywords []string
+	err      error
+}
+
+func (f fakeKeywords) IntentKeywords(context.Context, int64) ([]string, error) {
+	return f.keywords, f.err
+}
+
 func newExtractor(t *testing.T, provider ports.LLMProvider, opts ...intake.Option) *intake.Extractor {
 	t.Helper()
 	registry, err := prompts.NewRegistry()
@@ -331,6 +340,57 @@ func TestExtractSkipModelPathStillCarriesReferencedCase(t *testing.T) {
 	}
 	if got.ReferencedCase != "REP-4106" {
 		t.Fatalf("ReferencedCase = %q, want REP-4106", got.ReferencedCase)
+	}
+}
+
+func TestExtractIntentKeywordClearsSkipModelGate(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"robot stops at dock"}`}
+
+	gated := newExtractor(t, provider, intake.WithIntentKeywords(fakeKeywords{keywords: []string{"printer"}}))
+	got, err := gated.Extract(context.Background(), 7, intake.Signals{
+		Sender:        "system@vendor.com",
+		Subject:       "Automated notice",
+		Body:          "The robot stops at the dock and the wheels do not turn since this morning.",
+		AutoSubmitted: "auto-generated",
+	})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 when no configured keyword matches", provider.calls)
+	}
+	if got.Classification != intake.ClassificationNotActionable {
+		t.Fatalf("Classification = %q, want %q", got.Classification, intake.ClassificationNotActionable)
+	}
+
+	provider = &fakeProvider{json: `{"problem_detail":"robot stops at dock"}`}
+	cleared := newExtractor(t, provider, intake.WithIntentKeywords(fakeKeywords{keywords: []string{"stops"}}))
+	got, err = cleared.Extract(context.Background(), 7, intake.Signals{
+		Sender:        "system@vendor.com",
+		Subject:       "Automated notice",
+		Body:          "The robot stops at the dock and the wheels do not turn since this morning.",
+		AutoSubmitted: "auto-generated",
+	})
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 when a configured keyword clears the skip-model gate", provider.calls)
+	}
+	if !containsReason(got.Reasons, intake.ReasonIntentKeyword) {
+		t.Fatalf("Reasons = %v, want intent_keyword_match", got.Reasons)
+	}
+}
+
+func TestExtractIntentKeywordsLoaderErrorPropagates(t *testing.T) {
+	provider := &fakeProvider{json: `{"problem_detail":"x"}`}
+	ext := newExtractor(t, provider, intake.WithIntentKeywords(fakeKeywords{err: errors.New("boom")}))
+
+	if _, err := ext.Extract(context.Background(), 7, intake.Signals{Sender: "cust@x.com", Subject: "s", Body: "b"}); err == nil {
+		t.Fatal("Extract() error = nil, want intent keyword loader error to propagate")
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d, want 0 when the keyword loader fails", provider.calls)
 	}
 }
 

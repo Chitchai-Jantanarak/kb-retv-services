@@ -87,10 +87,11 @@ type Completeness struct {
 	Missing        []string
 	Score          int
 	Reasons        []string
-	Classification string
-	Reasoning      string
-	CatalogRelated *bool
-	Confidence     int
+	Classification   string
+	Reasoning        string
+	CatalogRelated   *bool
+	Confidence       int
+	PromoteThreshold int
 }
 
 type IntakeSignals struct {
@@ -416,11 +417,11 @@ func (w *Workflow) enqueueTicket(ctx context.Context, res *Result, companyID, co
 	if w.tickets == nil || !created {
 		return
 	}
-	classification, confidence := "", 0
+	classification, confidence, threshold := "", 0, 0
 	if assessed != nil {
-		classification, confidence = assessed.Classification, assessed.Confidence
+		classification, confidence, threshold = assessed.Classification, assessed.Confidence, assessed.PromoteThreshold
 	}
-	promotableTicket := intake.ConfidencePromotable(classification, confidence)
+	promotableTicket := intake.ConfidencePromotable(classification, confidence, threshold)
 	if req.Channel != ChannelLine && !(req.Channel == ChannelEmail && promotableTicket) {
 		return
 	}

@@ -167,6 +167,7 @@ func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.
 	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
 		intake.WithProducts(intakeProducts{repo: profilemysql.New(router)}),
+		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),
 	)
 	if err != nil {
 		log.Warn("email intake completeness check not configured", zap.Error(err))

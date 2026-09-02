@@ -72,9 +72,24 @@ func TestConfidence(t *testing.T) {
 			if conf != c.wantConf {
 				t.Errorf("conf = %d, want %d (trail %v)", conf, c.wantConf, trail)
 			}
-			if got := ConfidencePromotable(c.classification, conf); got != c.wantPromote {
+			if got := ConfidencePromotable(c.classification, conf, 0); got != c.wantPromote {
 				t.Errorf("promotable = %v, want %v", got, c.wantPromote)
 			}
 		})
+	}
+}
+
+func TestConfidencePromotableTenantThreshold(t *testing.T) {
+	if ConfidencePromotable(ClassificationNewIssue, 60, 70) {
+		t.Error("confidence 60 must not promote at tenant threshold 70")
+	}
+	if !ConfidencePromotable(ClassificationNewIssue, 40, 35) {
+		t.Error("confidence 40 must promote at tenant threshold 35")
+	}
+	if !ConfidencePromotable(ClassificationNewIssue, 55, 0) {
+		t.Error("threshold 0 must fall back to default 55")
+	}
+	if ConfidencePromotable(ClassificationStatusQuery, 90, 35) {
+		t.Error("status_query never promotes")
 	}
 }

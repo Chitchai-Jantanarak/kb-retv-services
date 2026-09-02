@@ -66,6 +66,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
 		intake.WithProducts(intakeAssessProducts{repo: profilemysql.New(router)}),
+		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),
 	)
 	if err != nil {
 		log.Printf("intake:assess disabled: extractor unavailable: %v", err)
@@ -128,7 +129,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 			return err
 		}
 
-		if ticketEnq != nil && intake.ConfidencePromotable(res.Classification, res.Confidence) {
+		if ticketEnq != nil && intake.ConfidencePromotable(res.Classification, res.Confidence, res.PromoteThreshold) {
 			return ticketEnq.EnqueueTicket(ctx, job.CompanyID, p.ConversationID, p.MessageID, p.Customer, p.Request)
 		}
 		return nil

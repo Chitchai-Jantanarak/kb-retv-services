@@ -103,8 +103,11 @@ func Confidence(score int, reasons []string, classification string, missing []st
 	return conf, trail
 }
 
-func ConfidencePromotable(classification string, confidence int) bool {
-	if confidence < ConfidencePromoteThreshold {
+func ConfidencePromotable(classification string, confidence, threshold int) bool {
+	if threshold <= 0 {
+		threshold = ConfidencePromoteThreshold
+	}
+	if confidence < threshold {
 		return false
 	}
 	return classification == ClassificationNewIssue || classification == ClassificationFollowUp

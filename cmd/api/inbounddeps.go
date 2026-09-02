@@ -48,8 +48,9 @@ func (a intakeAssessor) Assess(ctx context.Context, companyID, conversationID in
 		Reasons:        res.Reasons,
 		Classification: res.Classification,
 		Reasoning:      res.Reasoning,
-		CatalogRelated: res.CatalogRelated,
-		Confidence:     res.Confidence,
+		CatalogRelated:   res.CatalogRelated,
+		Confidence:       res.Confidence,
+		PromoteThreshold: res.PromoteThreshold,
 	}, nil
 }
 
