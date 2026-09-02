@@ -10,6 +10,8 @@ import (
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
+
+	"github.com/my/app/internal/shared/usagemeter"
 )
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -59,13 +61,14 @@ func (c *LLMCRAG) Grade(ctx context.Context, query, content string) (CRAGResult,
 	if err != nil {
 		return CRAGResult{}, fmt.Errorf("rag: llm crag: generate: %w", err)
 	}
+	usagemeter.Add(ctx, "crag", completion.Usage)
 
 	var parsed struct {
 		Verdict    string  `json:"verdict"`
 		Confidence float64 `json:"confidence"`
 		Missing    string  `json:"missing"`
 	}
-	if err := json.Unmarshal([]byte(completion.Text), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
 		return CRAGResult{}, fmt.Errorf("rag: llm crag: parse %q: %w", completion.Text, err)
 	}
 

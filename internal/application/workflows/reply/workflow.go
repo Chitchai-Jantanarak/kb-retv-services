@@ -10,6 +10,7 @@ import (
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/htmltext"
+	"github.com/my/app/internal/shared/usagemeter"
 )
 
 const intentGeneralSupport = "general-support"
@@ -183,6 +184,10 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 		return dto.ReplyResponse{}, err
 	}
 
+	// Install the token meter before the pipeline runs, so that every provider
+	// call it makes is counted against this request.
+	ctx, _ = usagemeter.With(ctx)
+
 	cid := ctxkey.MustCompanyID(ctx)
 
 	start := time.Now()
@@ -272,6 +277,12 @@ func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, dra
 
 	recCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	// Token usage is accumulated across the pipeline stages rather than taken
+	// from a single call, because a reply may involve up to four: rerank, the
+	// corrective check, generation, and critique. Without this the action
+	// record carries latency but no cost, and the two are not interchangeable.
+	tokensIn, tokensOut, _ := usagemeter.From(ctx).Totals()
+
 	id, err := w.actions.Record(recCtx, ports.AIAction{
 		CompanyID:  companyID,
 		AgentID:    agentID,
@@ -280,6 +291,8 @@ func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, dra
 		Output:     output,
 		LatencyMs:  int(elapsed.Milliseconds()),
 		Confidence: result.Confidence,
+		TokensIn:   tokensIn,
+		TokensOut:  tokensOut,
 	})
 	if err != nil {
 		return 0

@@ -64,20 +64,23 @@ func (r *FTSRetriever) Retrieve(ctx context.Context, query Query, _ Meta) ([]Can
 	if err != nil {
 		return nil, err
 	}
+	return FTSCandidates(rows), nil
+}
+
+func FTSCandidates(rows []FTSChunk) []Candidate {
 	out := make([]Candidate, 0, len(rows))
 	for _, row := range rows {
-		title, content := SnippetFromChunk(row, false, 0)
 		out = append(out, Candidate{
 			ID:        fmt.Sprintf("chunk:%d", row.ChunkID),
 			ArticleID: fmt.Sprintf("%d", row.ArticleID),
 			ChunkID:   fmt.Sprintf("%d", row.ChunkID),
-			Title:     title,
-			Content:   content,
+			Title:     row.Title,
+			Content:   row.Content,
 			Source:    "fts",
 			Score:     row.Relevance,
 		})
 	}
-	return out, nil
+	return out
 }
 
 func (r *FTSRetriever) RetrievalCost() RetrievalCost {

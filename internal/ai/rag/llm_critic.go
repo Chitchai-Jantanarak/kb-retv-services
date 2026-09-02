@@ -9,6 +9,8 @@ import (
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/shared/ctxkey"
+
+	"github.com/my/app/internal/shared/usagemeter"
 )
 
 type CritiqueResult struct {
@@ -69,6 +71,7 @@ func (c *LLMCritic) Critique(ctx context.Context, query Query, draft string, can
 	if err != nil {
 		return CritiqueResult{}, fmt.Errorf("rag: llm critic: generate: %w", err)
 	}
+	usagemeter.Add(ctx, "critique", completion.Usage)
 
 	var parsed struct {
 		Supported      bool     `json:"supported"`
@@ -76,7 +79,7 @@ func (c *LLMCritic) Critique(ctx context.Context, query Query, draft string, can
 		RefusalReason  string   `json:"refusal_reason"`
 		Send           bool     `json:"send"`
 	}
-	if err := json.Unmarshal([]byte(completion.Text), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
 		return CritiqueResult{}, fmt.Errorf("rag: llm critic: parse %q: %w", completion.Text, err)
 	}
 

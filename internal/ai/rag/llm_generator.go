@@ -9,6 +9,8 @@ import (
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/shared/ctxkey"
+
+	"github.com/my/app/internal/shared/usagemeter"
 )
 
 type Generator interface {
@@ -92,6 +94,7 @@ func (g *LLMGenerator) Generate(ctx context.Context, query Query, candidates []C
 	if err != nil {
 		return "", fmt.Errorf("rag: llm generator: generate: %w", err)
 	}
+	usagemeter.Add(ctx, "generate", completion.Usage)
 	return strings.TrimSpace(completion.Text), nil
 }
 

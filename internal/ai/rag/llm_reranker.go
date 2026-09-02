@@ -10,6 +10,8 @@ import (
 
 	"github.com/my/app/internal/ai/prompts"
 	"github.com/my/app/internal/shared/ctxkey"
+
+	"github.com/my/app/internal/shared/usagemeter"
 )
 
 type LLMReranker struct {
@@ -61,6 +63,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, query Query, meta Meta, candid
 	if err != nil {
 		return r.fallback.Rerank(ctx, query, meta, candidates)
 	}
+	usagemeter.Add(ctx, "rerank", completion.Usage)
 
 	var parsed struct {
 		Scores []struct {
@@ -69,7 +72,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, query Query, meta Meta, candid
 			Reason string  `json:"reason"`
 		} `json:"scores"`
 	}
-	if err := json.Unmarshal([]byte(completion.Text), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
 		return r.fallback.Rerank(ctx, query, meta, candidates)
 	}
 

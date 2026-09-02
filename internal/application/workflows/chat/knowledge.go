@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -12,18 +11,17 @@ import (
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/logger"
-	"github.com/my/app/internal/shared/vec"
 )
 
-func gateChunks(chunks []rag.FTSChunk) []rag.FTSChunk {
-	if len(chunks) == 0 || chunks[0].Relevance < knowledgeMinRelevance {
+func gateCandidates(cands []rag.Candidate) []rag.Candidate {
+	if len(cands) == 0 || cands[0].Score < knowledgeMinRelevance {
 		return nil
 	}
-	floor := chunks[0].Relevance * knowledgeMinRatio
-	out := make([]rag.FTSChunk, 0, len(chunks))
-	for _, chunk := range chunks {
-		if chunk.Relevance >= floor {
-			out = append(out, chunk)
+	floor := cands[0].Score * knowledgeMinRatio
+	out := make([]rag.Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.Score >= floor {
+			out = append(out, c)
 		}
 	}
 	return out
@@ -43,7 +41,7 @@ func (w *Workflow) knowledgeContext(ctx context.Context, companyID int64, query 
 		logger.FromContext(ctx).Error("chat: knowledge search failed", zap.Int64("company_id", companyID), zap.Error(err))
 		return nil, ""
 	}
-	return buildKnowledgeSources(gateChunks(chunks))
+	return buildKnowledgeSources(gateCandidates(rag.FTSCandidates(chunks)))
 }
 
 func (w *Workflow) rerankedKnowledgeContext(ctx context.Context, companyID int64, query string) (sources []dto.ChatSource, block string, handled bool) {
@@ -53,7 +51,12 @@ func (w *Workflow) rerankedKnowledgeContext(ctx context.Context, companyID int64
 		logger.FromContext(ctx).Error("chat: knowledge search failed", zap.Int64("company_id", companyID), zap.Error(err))
 		return nil, "", true
 	}
-	reranked, err := w.rerankChunks(ctx, query, chunks)
+	reranker := rag.EmbeddingReranker{
+		Embedder:      w.knowledgeReranker,
+		MinSimilarity: knowledgeMinSimilarity,
+		Limit:         knowledgeChunkLimit,
+	}
+	reranked, err := reranker.Rerank(ctx, rag.Query{CompanyID: companyID, Text: query}, rag.Meta{}, rag.FTSCandidates(chunks))
 	if err != nil {
 		logger.FromContext(ctx).Warn("chat: knowledge rerank failed, falling back to relevance gate", zap.Int64("company_id", companyID), zap.Error(err))
 		return nil, "", false
@@ -62,64 +65,24 @@ func (w *Workflow) rerankedKnowledgeContext(ctx context.Context, companyID int64
 	return sources, block, true
 }
 
-func (w *Workflow) rerankChunks(ctx context.Context, query string, chunks []rag.FTSChunk) ([]rag.FTSChunk, error) {
-	if len(chunks) == 0 {
-		return nil, nil
-	}
-	texts := make([]string, 0, len(chunks)+1)
-	texts = append(texts, query)
-	for _, chunk := range chunks {
-		texts = append(texts, chunk.Content)
-	}
-	vectors, err := w.knowledgeReranker.Embed(ctx, texts)
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) != len(texts) {
-		return nil, fmt.Errorf("chat: knowledge rerank: embed returned %d vectors, want %d", len(vectors), len(texts))
-	}
-
-	queryVec := vec.Normalize(vectors[0])
-	type scoredChunk struct {
-		chunk rag.FTSChunk
-		score float64
-	}
-	scored := make([]scoredChunk, 0, len(chunks))
-	for i, chunk := range chunks {
-		candVec := vec.Normalize(vectors[i+1])
-		score := vec.Dot(queryVec, candVec)
-		if score < knowledgeMinSimilarity {
-			continue
-		}
-		chunk.Relevance = score
-		scored = append(scored, scoredChunk{chunk: chunk, score: score})
-	}
-	sort.Slice(scored, func(i, j int) bool { return scored[i].score > scored[j].score })
-	if len(scored) > knowledgeChunkLimit {
-		scored = scored[:knowledgeChunkLimit]
-	}
-
-	out := make([]rag.FTSChunk, len(scored))
-	for i, s := range scored {
-		out[i] = s.chunk
-	}
-	return out, nil
-}
-
-func buildKnowledgeSources(chunks []rag.FTSChunk) ([]dto.ChatSource, string) {
+func buildKnowledgeSources(cands []rag.Candidate) ([]dto.ChatSource, string) {
 	var (
 		sources []dto.ChatSource
 		block   strings.Builder
 	)
-	for _, chunk := range chunks {
-		title, snippet := rag.SnippetFromChunk(chunk, true, knowledgeSnippetMaxChars)
+	for _, c := range cands {
+		title := strings.TrimSpace(c.Title)
+		snippet := strings.TrimSpace(c.Content)
+		if len(snippet) > knowledgeSnippetMaxChars {
+			snippet = snippet[:knowledgeSnippetMaxChars]
+		}
 		if title != "" || snippet != "" {
 			sources = append(sources, dto.ChatSource{
-				ID:      fmt.Sprintf("chunk:%d", chunk.ChunkID),
+				ID:      c.ID,
 				Title:   title,
 				Snippet: snippet,
-				Source:  "fts",
-				Score:   chunk.Relevance,
+				Source:  c.Source,
+				Score:   c.Score,
 			})
 		}
 		if snippet != "" {
