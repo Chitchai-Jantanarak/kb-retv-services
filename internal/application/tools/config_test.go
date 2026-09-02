@@ -10,11 +10,9 @@ func leafVocab() map[string]bool {
 		"console.access",
 		"company.create", "company.update", "company.archive", "company.reparent", "company.admin",
 		"report.view", "report.create", "report.update", "report.delete", "report.assign",
-		"case.status.read", "handoff.invoke",
 		"employee.view", "team.view",
 		"customer.view", "site.view", "node.view",
-		"kb.search",
-		"portal.view", "report.view.own", "site.view.own",
+		"kb.search", "portal.view",
 	}
 	m := make(map[string]bool, len(keys))
 	for _, k := range keys {

@@ -15,7 +15,7 @@ func TestValid(t *testing.T) {
 func TestSetCoversKeys(t *testing.T) {
 	t.Parallel()
 	set := Set()
-	if !set["handoff.invoke"] || !set["kb.search"] {
+	if !set["portal.view"] || !set["kb.search"] {
 		t.Fatalf("set missing known keys: %v", set)
 	}
 	if len(set) != len(Keys()) {

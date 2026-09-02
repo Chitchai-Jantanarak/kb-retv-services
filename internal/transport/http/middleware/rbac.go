@@ -31,18 +31,5 @@ func can(principal ctxkey.Principal, permission string) bool {
 	if permission == "" {
 		return true
 	}
-	if principal.Role == "super_admin" {
-		return true
-	}
-	if perms.Can(principal.Perms, permission) {
-		return true
-	}
-	return perms.Can(defaultRolePerms[principal.Role], permission)
-}
-
-var defaultRolePerms = map[string][]string{
-	"tenant_admin": {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
-	"agent_lead":   {"ai:reply:create", "ai:feedback:create", "ai:reports:read", "ai:review:approve", "ai:review:reject"},
-	"agent":        {"ai:reply:create", "ai:feedback:create", "ai:reports:read"},
-	"customer":     {"ai:feedback:create"},
+	return perms.Can(principal.Perms, permission)
 }

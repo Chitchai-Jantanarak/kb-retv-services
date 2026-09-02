@@ -25,9 +25,23 @@ func TestRequirePermissionAllowsMatchingPerm(t *testing.T) {
 	}
 }
 
-func TestRequirePermissionAllowsSuperAdmin(t *testing.T) {
+func TestRequirePermissionDeniesRoleWithoutClaim(t *testing.T) {
+	for _, role := range []string{"super_admin", "tenant_admin", "agent_lead", "agent", "customer", "unknown_role"} {
+		t.Run(role, func(t *testing.T) {
+			err := runRBAC(ctxkey.Principal{CompanyID: 3, Role: role}, "ai:review:approve", func(c *echo.Context) error {
+				t.Fatal("handler should not be called: role alone must not grant")
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("middleware error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRequirePermissionWildcardClaimGrants(t *testing.T) {
 	called := false
-	err := runRBAC(ctxkey.Principal{CompanyID: 3, Role: "super_admin"}, "ai:review:approve", func(c *echo.Context) error {
+	err := runRBAC(ctxkey.Principal{CompanyID: 3, Role: "super_admin", Perms: []string{"*"}}, "ai:review:approve", func(c *echo.Context) error {
 		called = true
 		return c.NoContent(http.StatusAccepted)
 	})
@@ -76,27 +90,24 @@ func TestRequirePermissionDeniesMissingPrincipal(t *testing.T) {
 	}
 }
 
-func TestRequirePermissionRoleDefaultsGrant(t *testing.T) {
+func TestRequirePermissionGrantsOnlyByClaim(t *testing.T) {
 	cases := []struct {
 		role       string
+		perms      []string
 		permission string
 		allow      bool
 	}{
-		{"agent", "ai:reply:create", true},
-		{"agent", "ai:feedback:create", true},
-		{"agent", "ai:reports:read", true},
-		{"agent", "ai:review:approve", false},
-		{"agent_lead", "ai:review:approve", true},
-		{"tenant_admin", "ai:review:reject", true},
-		{"customer", "ai:feedback:create", true},
-		{"customer", "ai:reply:create", false},
-		{"unknown_role", "ai:reply:create", false},
+		{"agent", []string{"ai:reply:create", "ai:reports:read"}, "ai:reply:create", true},
+		{"agent", []string{"ai:reply:create", "ai:reports:read"}, "ai:review:approve", false},
+		{"agent_lead", []string{"ai:review:approve"}, "ai:review:approve", true},
+		{"customer", []string{"ai:feedback:create"}, "ai:feedback:create", true},
+		{"customer", []string{"ai:feedback:create"}, "ai:reply:create", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.role+"_"+tc.permission, func(t *testing.T) {
 			e := echo.New()
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req = req.WithContext(ctxkey.WithPrincipal(req.Context(), ctxkey.Principal{CompanyID: 3, Role: tc.role}))
+			req = req.WithContext(ctxkey.WithPrincipal(req.Context(), ctxkey.Principal{CompanyID: 3, Role: tc.role, Perms: tc.perms}))
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 

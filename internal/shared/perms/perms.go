@@ -14,8 +14,6 @@ var keys = []string{
 	"report.update",
 	"report.delete",
 	"report.assign",
-	"case.status.read",
-	"handoff.invoke",
 	"employee.view",
 	"team.view",
 	"customer.view",
@@ -23,8 +21,6 @@ var keys = []string{
 	"node.view",
 	"kb.search",
 	"portal.view",
-	"report.view.own",
-	"site.view.own",
 }
 
 func Keys() []string {
