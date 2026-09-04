@@ -25,7 +25,9 @@ type Options struct {
 	ChatStream     *handlers.ChatStreamHandler
 	ChatConfirm    *handlers.ChatConfirmHandler
 	Search         *handlers.SearchHandler
+	Intake         *handlers.IntakeAssessHandler
 	Budget         appmiddleware.BudgetPolicy
+	Features       appmiddleware.FeatureReader
 }
 
 func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
@@ -61,22 +63,25 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 		protectedV1.Use(appmiddleware.Deadline(opts.Budget))
 	}
 	protectedV1.Use(appmiddleware.RequireCompany(opts.JWTSecret, opts.RequireAuth))
-	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"))
+	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
+	if opts.Intake != nil {
+		protectedV1.POST("/intake/assess", opts.Intake.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
+	}
 
 	if opts.Chat != nil {
-		protectedV1.POST("/chat", opts.Chat.Create, appmiddleware.RequirePermission("ai:reply:create"))
+		protectedV1.POST("/chat", opts.Chat.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	}
 
 	if opts.ChatStream != nil {
-		protectedV1.POST("/chat/stream", opts.ChatStream.Create, appmiddleware.RequirePermission("ai:reply:create"))
+		protectedV1.POST("/chat/stream", opts.ChatStream.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	}
 
 	if opts.ChatConfirm != nil {
-		protectedV1.POST("/chat/confirm-action", opts.ChatConfirm.Create, appmiddleware.RequirePermission("ai:reply:create"))
+		protectedV1.POST("/chat/confirm-action", opts.ChatConfirm.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	}
 
 	if opts.Search != nil {
-		protectedV1.POST("/search", opts.Search.Create, appmiddleware.RequirePermission("ai:reply:create"))
+		protectedV1.POST("/search", opts.Search.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.knowledge.semantic_search"))
 	}
 
 	if opts.Feedback != nil {

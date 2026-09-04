@@ -38,8 +38,9 @@ func LoadFrom(path string) (Config, error) {
 func configFrom(v *viper.Viper) Config {
 	return Config{
 		App: App{
-			Env: v.GetString("app.env"),
-			Key: v.GetString("app.key"),
+			Env:           v.GetString("app.env"),
+			Key:           v.GetString("app.key"),
+			DevAuthBypass: v.GetBool("app.dev_auth_bypass"),
 		},
 		Server: Server{
 			Port:               v.GetString("server.port"),
@@ -152,6 +153,9 @@ func configFrom(v *viper.Viper) Config {
 		Intake: Intake{
 			AssessMode:      v.GetString("intake.assess_mode"),
 			AssessTimeoutMs: v.GetInt("intake.assess_timeout_ms"),
+		},
+		Entitlements: Entitlements{
+			CacheTTLSeconds: v.GetInt("entitlements.cache_ttl_seconds"),
 		},
 	}
 }

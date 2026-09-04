@@ -15,6 +15,7 @@ type envBinding struct {
 
 var envBindings = []envBinding{
 	{key: "app.env", env: "APP_ENV"},
+	{key: "app.dev_auth_bypass", env: "APP_DEV_AUTH_BYPASS"},
 	{key: "server.port", env: "SERVER_PORT"},
 	{key: "server.request_budget_ms", env: "SERVER_REQUEST_BUDGET_MS"},
 	{key: "server.deadline_headroom_ms", env: "SERVER_DEADLINE_HEADROOM_MS"},
@@ -35,6 +36,7 @@ var envBindings = []envBinding{
 	{key: "reply.defaultMode", env: "REPLY_DEFAULT_MODE"},
 	{key: "intake.assess_mode", env: "INTAKE_ASSESS_MODE"},
 	{key: "intake.assess_timeout_ms", env: "INTAKE_ASSESS_TIMEOUT_MS"},
+	{key: "entitlements.cache_ttl_seconds", env: "ENTITLEMENTS_CACHE_TTL_SECONDS"},
 	{key: "mysql.enabled", env: "MYSQL_ENABLED"},
 	{key: "mysql.dsn", env: "MYSQL_DSN"},
 	{key: "mysql.maxOpenConns", env: "MYSQL_MAXOPENCONNS"},

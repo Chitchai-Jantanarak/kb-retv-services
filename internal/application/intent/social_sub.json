@@ -1,0 +1,56 @@
+{
+  "greeting": [
+    "hello there",
+    "hi",
+    "good morning",
+    "สวัสดี",
+    "สวัสดีครับ",
+    "สวัสดีค่ะ",
+    "こんにちは",
+    "안녕하세요",
+    "привет",
+    "xin chào",
+    "hola",
+    "你好"
+  ],
+  "test": [
+    "just testing this",
+    "test message",
+    "checking if this works",
+    "ทดสอบ",
+    "ลองดูว่าใช้ได้ไหม",
+    "テスト",
+    "테스트",
+    "тест",
+    "kiểm tra",
+    "prueba",
+    "测试"
+  ],
+  "thanks": [
+    "thanks for the help",
+    "thank you",
+    "ขอบคุณ",
+    "ขอบคุณครับ",
+    "ありがとう",
+    "감사합니다",
+    "спасибо",
+    "cảm ơn",
+    "gracias",
+    "谢谢"
+  ],
+  "who": [
+    "who are you",
+    "what can you do",
+    "what are you able to help with",
+    "are you a bot",
+    "คุณคือใคร",
+    "คุณทำอะไรได้บ้าง",
+    "ช่วยอะไรได้บ้าง",
+    "あなたは誰ですか",
+    "누구세요",
+    "кто ты",
+    "bạn là ai",
+    "quién eres",
+    "你是谁"
+  ]
+}

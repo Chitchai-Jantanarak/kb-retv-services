@@ -6,10 +6,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/ai/embeddings"
+	"github.com/my/app/internal/application/services/intakeassess"
 	promotewf "github.com/my/app/internal/application/workflows/promote"
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/tenant"
 	mysqlai "github.com/my/app/internal/repositories/ai/mysql"
+	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	reviewmysql "github.com/my/app/internal/repositories/review/mysql"
 	"github.com/my/app/internal/shared/config"
@@ -26,6 +28,7 @@ type apiHandlers struct {
 	chatStream  *handlers.ChatStreamHandler
 	chatConfirm *handlers.ChatConfirmHandler
 	search      *handlers.SearchHandler
+	intake      *handlers.IntakeAssessHandler
 }
 
 func buildAPIHandlers(
@@ -53,7 +56,19 @@ func buildAPIHandlers(
 	endpoints.reports = handlers.NewReportsHandler(reportsRepo)
 	log.Info("reports endpoints configured")
 
+	log.Info("ai usage endpoint configured")
+
 	endpoints.search = buildSearchHandler(cfg, reportsRepo, embProvider, embModel, embedder, log)
+
+	if queue := buildAssessEnqueuer(cfg, log); queue != nil {
+		manual, manualErr := intakeassess.NewManual(channelsmysql.New(qdb), queue)
+		if manualErr != nil {
+			log.Warn("manual intake assessment not configured", zap.Error(manualErr))
+		} else {
+			endpoints.intake = handlers.NewIntakeAssessHandler(manual)
+			log.Info("manual intake assessment endpoint configured")
+		}
+	}
 
 	inbound, err := buildInboundHandler(cfg, central, qdb, resolver, log)
 	if err != nil {

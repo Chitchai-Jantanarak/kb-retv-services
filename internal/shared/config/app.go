@@ -3,8 +3,9 @@ package config
 import "strings"
 
 type App struct {
-	Env string
-	Key string
+	Env           string
+	Key           string
+	DevAuthBypass bool
 }
 
 func (a App) IsProduction() bool {
@@ -62,4 +63,8 @@ type Reply struct {
 type Intake struct {
 	AssessMode      string
 	AssessTimeoutMs int
+}
+
+type Entitlements struct {
+	CacheTTLSeconds int
 }

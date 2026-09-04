@@ -44,4 +44,5 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("embedding.refreshBatchSize", 64)
 	v.SetDefault("embedding.largeRunThreshold", 1000)
 	v.SetDefault("reply.defaultMode", "full")
+	v.SetDefault("entitlements.cache_ttl_seconds", 60)
 }
