@@ -3,6 +3,7 @@ package llmhttp
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -23,6 +24,28 @@ func CheckError(vendor string, resp *http.Response) error {
 		RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
 		Message:    string(raw),
 	}
+}
+
+func DoJSON(client *http.Client, req *http.Request, vendor string) ([]byte, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: http: %w", vendor, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%s: read body: %w", vendor, err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, &llmerr.ProviderError{
+			Vendor:     vendor,
+			Status:     resp.StatusCode,
+			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
+			Message:    string(raw),
+		}
+	}
+	return raw, nil
 }
 
 func StreamLines(ctx context.Context, body io.ReadCloser, vendor, model string, handle func(line string) (string, bool)) <-chan ports.Completion {

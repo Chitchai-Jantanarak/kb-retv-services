@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
-	"github.com/my/app/internal/infra/llm/llmerr"
 	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
@@ -220,23 +218,9 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, forceJSON bool) (port
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", c.apiVersion)
 
-	resp, err := c.httpClient.Do(httpReq)
+	raw, err := llmhttp.DoJSON(c.httpClient, httpReq, "anthropic")
 	if err != nil {
-		return ports.Completion{}, fmt.Errorf("anthropic: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ports.Completion{}, fmt.Errorf("anthropic: read body: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return ports.Completion{}, &llmerr.ProviderError{
-			Vendor:     "anthropic",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+		return ports.Completion{}, err
 	}
 
 	var parsed messagesResponse

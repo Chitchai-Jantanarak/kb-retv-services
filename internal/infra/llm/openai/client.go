@@ -6,13 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
-	"github.com/my/app/internal/infra/llm/llmerr"
 	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
@@ -188,24 +186,9 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, format *responseForma
 		req.Header.Set("X-Title", c.title)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	raw, err := llmhttp.DoJSON(c.httpClient, req, "openai")
 	if err != nil {
-		return ports.Completion{}, fmt.Errorf("openai: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ports.Completion{}, fmt.Errorf("openai: read body: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return ports.Completion{}, &llmerr.ProviderError{
-			Vendor:     "openai",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+		return ports.Completion{}, err
 	}
 
 	var parsed chatResponse

@@ -1,21 +1,16 @@
 package reviewoutbox
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/laravelhook"
 )
 
 type DeliveryConfig struct {
@@ -27,39 +22,24 @@ type DeliveryConfig struct {
 }
 
 type Deliverer struct {
-	url    string
-	secret []byte
-	client *http.Client
+	hook *laravelhook.Client
 }
 
 func NewDeliverer(cfg DeliveryConfig) (*Deliverer, error) {
-	base := strings.TrimRight(cfg.BaseURL, "/")
-	if base == "" {
-		return nil, errors.New("review outbox: laravel base_url is required")
+	hook, err := laravelhook.New(laravelhook.Config{
+		ErrPrefix:   "review outbox",
+		DefaultPath: "/internal/review-queue",
+		BaseURL:     cfg.BaseURL,
+		Path:        cfg.Path,
+		Secret:      cfg.Secret,
+		Timeout:     cfg.Timeout,
+		ReadLimit:   1024,
+		Client:      cfg.Client,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if cfg.Secret == "" {
-		return nil, errors.New("review outbox: webhook secret is required")
-	}
-	path := cfg.Path
-	if path == "" {
-		path = "/internal/review-queue"
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = 10 * time.Second
-	}
-	client := cfg.Client
-	if client == nil {
-		client = &http.Client{Timeout: timeout}
-	}
-	return &Deliverer{
-		url:    base + path,
-		secret: []byte(cfg.Secret),
-		client: client,
-	}, nil
+	return &Deliverer{hook: hook}, nil
 }
 
 func (d *Deliverer) PushReviewItem(ctx context.Context, item ports.ReviewOutboxItem) (int64, error) {
@@ -83,34 +63,9 @@ func (d *Deliverer) PushReviewItem(ctx context.Context, item ports.ReviewOutboxI
 		return 0, fmt.Errorf("review outbox: marshal: %w", err)
 	}
 
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	mac := hmac.New(sha256.New, d.secret)
-	mac.Write([]byte(timestamp))
-	mac.Write([]byte("."))
-	mac.Write(body)
-	sig := hex.EncodeToString(mac.Sum(nil))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.url, bytes.NewReader(body))
+	raw, err := d.hook.PostSigned(ctx, body)
 	if err != nil {
-		return 0, fmt.Errorf("review outbox: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-AI-Timestamp", timestamp)
-	req.Header.Set("X-AI-Signature", sig)
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("review outbox: post: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
-	if err != nil {
-		return 0, fmt.Errorf("review outbox: read response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return 0, fmt.Errorf("review outbox: status %d body=%q", resp.StatusCode, string(raw))
+		return 0, err
 	}
 	return decodeLaravelRef(raw), nil
 }

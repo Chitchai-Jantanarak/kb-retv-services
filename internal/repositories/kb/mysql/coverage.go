@@ -1,9 +1,13 @@
 package mysql
 
-import "strings"
+import (
+	"strings"
 
-func companyFilter(column string, companyID int64, coverage []int64) (string, []any) {
-	ids := normalizeCompanyIDs(coverage, companyID)
+	"github.com/my/app/internal/shared/coverage"
+)
+
+func companyFilter(column string, companyID int64, cov []int64) (string, []any) {
+	ids := coverage.Normalize(cov, companyID)
 	if len(ids) <= 1 {
 		id := companyID
 		if len(ids) == 1 {
@@ -18,26 +22,4 @@ func companyFilter(column string, companyID int64, coverage []int64) (string, []
 		args[i] = id
 	}
 	return column + " IN (" + strings.Join(placeholders, ",") + ")", args
-}
-
-func normalizeCompanyIDs(coverage []int64, companyID int64) []int64 {
-	out := make([]int64, 0, len(coverage)+1)
-	seen := make(map[int64]struct{}, len(coverage)+1)
-	add := func(id int64) {
-		if id <= 0 {
-			return
-		}
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	for _, id := range coverage {
-		add(id)
-	}
-	if len(out) == 0 {
-		add(companyID)
-	}
-	return out
 }

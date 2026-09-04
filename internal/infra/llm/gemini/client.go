@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/my/app/internal/domain/ports"
-	"github.com/my/app/internal/infra/llm/llmerr"
 	"github.com/my/app/internal/infra/llm/llmhttp"
 )
 
@@ -248,23 +246,9 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
-	resp, err := c.httpClient.Do(httpReq)
+	raw, err := llmhttp.DoJSON(c.httpClient, httpReq, "gemini")
 	if err != nil {
-		return ports.Completion{}, fmt.Errorf("gemini: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ports.Completion{}, fmt.Errorf("gemini: read body: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return ports.Completion{}, &llmerr.ProviderError{
-			Vendor:     "gemini",
-			Status:     resp.StatusCode,
-			RetryAfter: llmerr.ParseRetryAfter(resp.Header.Get("Retry-After")),
-			Message:    string(raw),
-		}
+		return ports.Completion{}, err
 	}
 
 	var parsed generateResponse

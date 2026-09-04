@@ -16,7 +16,7 @@ def main() -> None:
 
     vectors = np.asarray(model.embedding, dtype=np.float32)
     if vectors.shape[1] > DIM:
-        vectors = PCA(n_components=DIM, whiten=False).fit_transform(vectors).astype(np.float32)
+        vectors = PCA(n_components=DIM, whiten=False, random_state=0).fit_transform(vectors).astype(np.float32)
     vocab, dim = vectors.shape
     if dim != DIM:
         raise SystemExit(f"expected {DIM} dims, got {dim}")

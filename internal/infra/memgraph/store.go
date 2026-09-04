@@ -5,11 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
 	"github.com/my/app/internal/domain/ports"
 )
+
+// cypherIdent matches the only shape a label or relationship type may take.
+// Labels and relationship types cannot be bound as query parameters, so they
+// are interpolated into the Cypher text; this keeps that interpolation safe.
+var cypherIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func checkCypherIdent(kind, value string) error {
+	if !cypherIdent.MatchString(value) {
+		return fmt.Errorf("memgraph: invalid %s %q", kind, value)
+	}
+	return nil
+}
 
 // Store implements ports.GraphStore against a Memgraph (Bolt) endpoint.
 // Memgraph is wire-compatible with neo4j-go-driver v5.
@@ -54,6 +67,9 @@ func (s *Store) UpsertNode(ctx context.Context, n ports.Node) error {
 		return errors.New("memgraph: UpsertNode: node must have at least one label")
 	}
 	label := n.Labels[0]
+	if err := checkCypherIdent("label", label); err != nil {
+		return err
+	}
 
 	props := make(map[string]any, len(n.Props)+2)
 	maps.Copy(props, n.Props)
@@ -78,6 +94,9 @@ func (s *Store) UpsertNode(ctx context.Context, n ports.Node) error {
 func (s *Store) UpsertEdge(ctx context.Context, e ports.Edge) error {
 	if e.CompanyID <= 0 {
 		return errors.New("memgraph: UpsertEdge: company_id must be positive")
+	}
+	if err := checkCypherIdent("relationship type", e.Type); err != nil {
+		return err
 	}
 
 	cypher := fmt.Sprintf(`

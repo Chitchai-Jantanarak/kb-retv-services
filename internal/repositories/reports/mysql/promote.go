@@ -24,13 +24,11 @@ WHERE c.id = ? AND c.company_id IN (%s) AND c.status = 'pending'`, strings.Join(
 	return query, args
 }
 
-func buildDefaultOpenStatusIDQuery() string {
-	return `
+const defaultOpenStatusIDQuery = `
 SELECT id FROM report_statuses
 WHERE code IN ('open', 'new', 'pending')
 ORDER BY sort_order ASC
 LIMIT 1`
-}
 
 func buildInsertReportFromConversationQuery(companyID int64, customerID sql.NullInt64, title, detail string, statusID sql.NullInt64) (string, []any) {
 	query := `
@@ -87,7 +85,7 @@ func (r *Repository) PromoteConversation(ctx context.Context, coverage []int64, 
 	}
 
 	var statusID sql.NullInt64
-	if err := tx.QueryRowContext(ctx, buildDefaultOpenStatusIDQuery()).Scan(&statusID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, defaultOpenStatusIDQuery).Scan(&statusID); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("reports: promote conversation: resolve open status: %w", err)
 	}
 
