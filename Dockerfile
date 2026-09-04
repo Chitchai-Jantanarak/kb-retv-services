@@ -1,15 +1,13 @@
 # syntax=docker/dockerfile:1
 
 ARG GO_VERSION=1.26.2
-ARG AIR_VERSION=v1.67.4
 ARG TOKENIZERS_VERSION=v1.27.0
 
 FROM golang:${GO_VERSION}-bookworm AS base
 
 WORKDIR /app
 
-ARG AIR_VERSION
-RUN go install github.com/air-verse/air@${AIR_VERSION}
+RUN go install github.com/air-verse/air@v1.67.4
 
 COPY go.mod go.sum ./
 RUN go mod download
