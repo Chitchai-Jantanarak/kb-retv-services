@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
 
+	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	"github.com/my/app/internal/infra/tenant"
@@ -97,6 +99,102 @@ LIMIT 1`, c.CompanyID, c.ChannelAccountID, nullableString(customer)).Scan(&id)
 	return insertID, true, nil
 }
 
+func (r *Repository) DeleteConversationIfEmpty(ctx context.Context, companyID, conversationID int64) error {
+	if companyID <= 0 || conversationID <= 0 {
+		return errors.New("conversations: company_id + conversation_id required")
+	}
+	_, err := r.db.ExecContext(ctx, `
+DELETE c
+FROM conversations c
+LEFT JOIN messages m ON m.conversation_id = c.id
+WHERE c.id = ?
+  AND c.company_id = ?
+  AND c.status = 'pending'
+  AND c.report_id IS NULL
+  AND m.id IS NULL`, conversationID, companyID)
+	if err != nil {
+		return fmt.Errorf("conversations: delete empty: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) LoadAssessmentDraft(ctx context.Context, companyID, conversationID int64) (omnichannel.AssessmentDraft, error) {
+	if companyID <= 0 || conversationID <= 0 {
+		return omnichannel.AssessmentDraft{}, errors.New("conversations: company_id + conversation_id required")
+	}
+
+	var (
+		draft          omnichannel.AssessmentDraft
+		externalID     string
+		subject        string
+		body           string
+		rawPayload     []byte
+		referencedCase string
+	)
+	err := r.db.QueryRowContext(ctx, `
+SELECT c.id,
+       c.company_id,
+       COALESCE(c.external_customer, ''),
+       COALESCE(c.subject, ''),
+       m.id,
+       COALESCE(m.external_id, ''),
+       m.body,
+       COALESCE(m.raw_payload, JSON_OBJECT()),
+       COALESCE(c.intake_referenced_case, '')
+FROM conversations c
+JOIN messages m ON m.conversation_id = c.id
+WHERE c.id = ?
+  AND c.company_id = ?
+  AND c.status = 'pending'
+  AND c.report_id IS NULL
+ORDER BY m.received_at DESC, m.id DESC
+LIMIT 1`, conversationID, companyID).Scan(
+		&draft.ConversationID,
+		&draft.CompanyID,
+		&draft.Customer,
+		&subject,
+		&draft.MessageID,
+		&externalID,
+		&body,
+		&rawPayload,
+		&referencedCase,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return omnichannel.AssessmentDraft{}, omnichannel.ErrDraftNotFound
+	}
+	if err != nil {
+		return omnichannel.AssessmentDraft{}, fmt.Errorf("conversations: load assessment draft: %w", err)
+	}
+
+	var headers struct {
+		ListUnsubscribe bool              `json:"list_unsubscribe"`
+		AutoSubmitted   string            `json:"auto_submitted"`
+		Precedence      string            `json:"precedence"`
+		Attachments     []json.RawMessage `json:"attachments"`
+	}
+	_ = json.Unmarshal(rawPayload, &headers)
+
+	draft.Request = dto.InboundMessageRequest{
+		Channel:           omnichannel.ChannelEmail,
+		ExternalMessageID: externalID,
+		CustomerID:        draft.Customer,
+		Subject:           subject,
+		Body:              body,
+	}
+	draft.Signals = omnichannel.IntakeSignals{
+		Sender:          draft.Customer,
+		Subject:         subject,
+		Body:            body,
+		ListUnsubscribe: headers.ListUnsubscribe,
+		AutoSubmitted:   strings.TrimSpace(headers.AutoSubmitted),
+		Precedence:      strings.TrimSpace(headers.Precedence),
+		HasAttachments:  len(headers.Attachments) > 0,
+		ReferencedCase:  referencedCase,
+	}
+
+	return draft, nil
+}
+
 func (r *Repository) FindByExternalID(ctx context.Context, externalID string) (int64, int64, bool, error) {
 	externalID = strings.TrimSpace(externalID)
 	if externalID == "" {
@@ -123,6 +221,25 @@ LIMIT 1`, externalID, companyID).Scan(&convoID, &msgID)
 	return convoID, msgID, true, nil
 }
 
+// maxMessageBodyBytes keeps a stored body inside messages.body (MySQL
+// MEDIUMTEXT, 16777215 bytes). MySQL runs with STRICT_TRANS_TABLES, so an
+// oversized body is hard error 1406 rather than a truncation, and a rejected
+// insert used to stall the mail poller behind it. Sized well above any real
+// email body but far below the column, so no legitimate mail is cut; the
+// untruncated original is kept in raw_payload regardless.
+const maxMessageBodyBytes = 4 << 20
+
+func clampMessageBody(body string) string {
+	if len(body) <= maxMessageBodyBytes {
+		return body
+	}
+	cut := maxMessageBodyBytes
+	for cut > 0 && !utf8.RuneStart(body[cut]) {
+		cut--
+	}
+	return body[:cut] + "\n[truncated]"
+}
+
 func (r *Repository) InsertMessage(ctx context.Context, m omnichannel.StoredMessage) (int64, error) {
 	if m.ConversationID <= 0 {
 		return 0, errors.New("messages: conversation_id required")
@@ -145,7 +262,7 @@ SELECT id FROM messages WHERE conversation_id = ? AND external_id = ? LIMIT 1`,
 	res, err := r.db.ExecContext(ctx, `
 INSERT INTO messages (conversation_id, external_id, direction, sender_type, sender_external, body, raw_payload, received_at)
 VALUES (?, ?, 'inbound', 'customer', ?, ?, ?, NOW())`,
-		m.ConversationID, nullableString(externalID), nullableString(strings.TrimSpace(m.SenderExternal)), m.Body, m.RawPayload)
+		m.ConversationID, nullableString(externalID), nullableString(strings.TrimSpace(m.SenderExternal)), clampMessageBody(m.Body), m.RawPayload)
 	if err != nil {
 		if externalID != "" && isDuplicateKey(err) {
 			var existing int64

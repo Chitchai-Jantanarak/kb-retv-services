@@ -130,3 +130,20 @@ func TestUpsertConversationInsertsPendingDraft(t *testing.T) {
 		t.Fatalf("draft insert must not use legacy status 'open': %s", q.execSQL)
 	}
 }
+
+func TestDeleteConversationIfEmptyIsTenantScopedAndConservative(t *testing.T) {
+	q := &fakeQuerier{}
+	repo := New(q)
+
+	if err := repo.DeleteConversationIfEmpty(context.Background(), 7, 42); err != nil {
+		t.Fatalf("DeleteConversationIfEmpty: %v", err)
+	}
+	for _, fragment := range []string{"c.company_id = ?", "c.status = 'pending'", "c.report_id IS NULL", "m.id IS NULL"} {
+		if !strings.Contains(q.execSQL, fragment) {
+			t.Fatalf("delete must contain %q, got: %s", fragment, q.execSQL)
+		}
+	}
+	if len(q.execArgs) != 2 || q.execArgs[0] != int64(42) || q.execArgs[1] != int64(7) {
+		t.Fatalf("delete args = %v, want [42 7]", q.execArgs)
+	}
+}

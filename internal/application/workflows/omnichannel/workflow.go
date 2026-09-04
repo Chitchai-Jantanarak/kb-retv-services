@@ -38,7 +38,10 @@ type BackfillWriter interface {
 	WriteBackfill(ctx context.Context, conversationID int64, customerID, siteID sql.NullInt64, source string) error
 }
 
-var ErrAccountNotFound = errors.New("omnichannel: channel account not found")
+var (
+	ErrAccountNotFound = errors.New("omnichannel: channel account not found")
+	ErrDraftNotFound   = errors.New("omnichannel: draft not found")
+)
 
 type ChannelAccount struct {
 	ID         int64
@@ -64,6 +67,10 @@ type ConversationStore interface {
 	UpsertConversation(ctx context.Context, c Conversation) (id int64, created bool, err error)
 }
 
+type EmptyConversationCleaner interface {
+	DeleteConversationIfEmpty(ctx context.Context, companyID, conversationID int64) error
+}
+
 type StoredMessage struct {
 	ConversationID    int64
 	ExternalMessageID string
@@ -83,10 +90,10 @@ type TicketEnqueuer interface {
 }
 
 type Completeness struct {
-	Status         string
-	Missing        []string
-	Score          int
-	Reasons        []string
+	Status           string
+	Missing          []string
+	Score            int
+	Reasons          []string
 	Classification   string
 	Reasoning        string
 	CatalogRelated   *bool
@@ -113,6 +120,19 @@ type CompletenessAssessor interface {
 
 type AssessEnqueuer interface {
 	EnqueueAssess(ctx context.Context, companyID, conversationID, messageID int64, customer string, sig IntakeSignals, req dto.InboundMessageRequest) error
+}
+
+type AssessmentDraft struct {
+	CompanyID      int64
+	ConversationID int64
+	MessageID      int64
+	Customer       string
+	Signals        IntakeSignals
+	Request        dto.InboundMessageRequest
+}
+
+type AssessmentDraftLoader interface {
+	LoadAssessmentDraft(ctx context.Context, companyID, conversationID int64) (AssessmentDraft, error)
 }
 
 type MediaPromoter interface {
@@ -256,6 +276,15 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		Attachments:       req.Attachments,
 	})
 	if err != nil {
+		if created {
+			w.deleteEmptyConversation(ctx, account.CompanyID, convoID)
+		}
+		w.log.Error("insert inbound message",
+			zap.Int64("company_id", account.CompanyID),
+			zap.Int64("conversation_id", convoID),
+			zap.String("external_message_id", req.ExternalMessageID),
+			zap.Int("body_bytes", len(req.Body)),
+			zap.Error(err))
 		return Result{}, fmt.Errorf("omnichannel: insert message: %w", err)
 	}
 
@@ -283,6 +312,19 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	w.enqueueTicket(ctx, &res, account.CompanyID, convoID, msgID, customer, req, assessed, created)
 
 	return res, nil
+}
+
+func (w *Workflow) deleteEmptyConversation(ctx context.Context, companyID, conversationID int64) {
+	cleaner, ok := w.conversations.(EmptyConversationCleaner)
+	if !ok {
+		return
+	}
+	if err := cleaner.DeleteConversationIfEmpty(ctx, companyID, conversationID); err != nil {
+		w.log.Warn("remove empty conversation after message failure",
+			zap.Int64("company_id", companyID),
+			zap.Int64("conversation_id", conversationID),
+			zap.Error(err))
+	}
 }
 
 func (w *Workflow) findExisting(ctx context.Context, companyID int64, externalID string) (Result, bool, error) {

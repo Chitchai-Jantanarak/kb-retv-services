@@ -152,6 +152,18 @@ func (s *stubConvos) UpsertConversation(_ context.Context, _ Conversation) (int6
 	return s.id, s.created, s.err
 }
 
+type cleanupConvos struct {
+	stubConvos
+	cleanedCompanyID      int64
+	cleanedConversationID int64
+}
+
+func (s *cleanupConvos) DeleteConversationIfEmpty(_ context.Context, companyID, conversationID int64) error {
+	s.cleanedCompanyID = companyID
+	s.cleanedConversationID = conversationID
+	return nil
+}
+
 type stubMessages struct {
 	id  int64
 	err error
@@ -162,6 +174,26 @@ func (s *stubMessages) InsertMessage(_ context.Context, _ StoredMessage) (int64,
 }
 func (s *stubMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
 	return 0, 0, false, nil
+}
+
+func TestRunRemovesNewEmptyConversationWhenMessageInsertFails(t *testing.T) {
+	conversations := &cleanupConvos{stubConvos: stubConvos{id: 100, created: true}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Conversations: conversations,
+		Messages:      &stubMessages{err: errors.New("body too long")},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	_, err = wf.Run(context.Background(), emailNorm(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("Run error = nil, want message insert failure")
+	}
+	if conversations.cleanedCompanyID != 7 || conversations.cleanedConversationID != 100 {
+		t.Fatalf("cleaned company/conversation = %d/%d, want 7/100", conversations.cleanedCompanyID, conversations.cleanedConversationID)
+	}
 }
 
 type captureTickets struct {
@@ -197,7 +229,7 @@ func validNorm(sender string) Normalized {
 
 type promoterCall struct {
 	companyID, conversationID, messageID int64
-	ref                                   dto.AttachmentRef
+	ref                                  dto.AttachmentRef
 }
 
 type promoteBytesCall struct {

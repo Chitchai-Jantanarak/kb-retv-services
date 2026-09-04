@@ -34,11 +34,14 @@ type config struct {
 	max                       int
 	once                      bool
 	statePath                 string
+	maxAttempts               int
 }
 
 type uidState struct {
 	UIDValidity uint32 `json:"uidvalidity"`
 	LastUID     uint32 `json:"last_uid"`
+	FailUID     uint32 `json:"fail_uid,omitempty"`
+	FailCount   int    `json:"fail_count,omitempty"`
 }
 
 func loadState(path string) uidState {
@@ -162,12 +165,18 @@ func pollOnce(ctx context.Context, cfg config, fwd *mailpoll.Forwarder) error {
 		}
 		p, err := fetchPayload(c, uid, section, cfg.user)
 		if err != nil {
-			log.Printf("mailpoll: uid %d fetch failed, retry next tick: %v", uid, err)
+			err = fmt.Errorf("fetch: %w", err)
+		} else if ferr := fwd.Forward(ctx, p); ferr != nil {
+			err = fmt.Errorf("forward: %w", ferr)
+		}
+		if err != nil {
+			if skipUID(&st, cfg, uid, err) {
+				continue
+			}
 			return nil
 		}
-		if err := fwd.Forward(ctx, p); err != nil {
-			log.Printf("mailpoll: uid %d forward failed, retry next tick: %v", uid, err)
-			return nil
+		if st.FailUID == uid {
+			st.FailUID, st.FailCount = 0, 0
 		}
 		markSeen(c, uid)
 		if !bootstrap {
@@ -181,6 +190,30 @@ func pollOnce(ctx context.Context, cfg config, fwd *mailpoll.Forwarder) error {
 		saveState(cfg.statePath, st)
 	}
 	return nil
+}
+
+// skipUID counts consecutive failures for a single UID and reports whether the
+// poller should give up on it and move on. Without this a message the inbound
+// API permanently rejects blocks every newer message behind it forever, because
+// a failed forward aborts the whole batch and the cursor never advances.
+// A skipped message is left unread in the mailbox so it stays visible.
+func skipUID(st *uidState, cfg config, uid uint32, cause error) bool {
+	if st.FailUID != uid {
+		st.FailUID, st.FailCount = uid, 0
+	}
+	st.FailCount++
+	if st.FailCount < cfg.maxAttempts {
+		log.Printf("mailpoll: uid %d failed (attempt %d/%d), retry next tick: %v",
+			uid, st.FailCount, cfg.maxAttempts, cause)
+		saveState(cfg.statePath, *st)
+		return false
+	}
+	log.Printf("mailpoll: uid %d SKIPPED after %d failed attempts, left unread in mailbox: %v",
+		uid, st.FailCount, cause)
+	st.LastUID = uid
+	st.FailUID, st.FailCount = 0, 0
+	saveState(cfg.statePath, *st)
+	return true
 }
 
 func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, fallbackTo string) (mailpoll.EmailPayload, error) {
@@ -347,16 +380,20 @@ func cfgHost(user string) string {
 
 func loadConfig() config {
 	c := config{
-		host:       env("IMAP_HOST", "imap.gmail.com:993"),
-		user:       os.Getenv("IMAP_USER"),
-		pass:       os.Getenv("IMAP_PASSWORD"),
-		mailbox:    env("IMAP_MAILBOX", "INBOX"),
-		inboundURL: env("INBOUND_URL", "http://go-api:8080/v1/inbound/email"),
-		secret:     os.Getenv("LARAVEL_WEBHOOK_SECRET"),
-		interval:   envDuration("MAILPOLL_INTERVAL", 30*time.Second),
-		max:        envInt("MAILPOLL_MAX", 0),
-		once:       os.Getenv("MAILPOLL_ONCE") == "1",
-		statePath:  env("MAILPOLL_STATE", "tmp/mailpoll-state.json"),
+		host:        env("IMAP_HOST", "imap.gmail.com:993"),
+		user:        os.Getenv("IMAP_USER"),
+		pass:        os.Getenv("IMAP_PASSWORD"),
+		mailbox:     env("IMAP_MAILBOX", "INBOX"),
+		inboundURL:  env("INBOUND_URL", "http://go-api:8080/v1/inbound/email"),
+		secret:      os.Getenv("LARAVEL_WEBHOOK_SECRET"),
+		interval:    envDuration("MAILPOLL_INTERVAL", 30*time.Second),
+		max:         envInt("MAILPOLL_MAX", 0),
+		once:        os.Getenv("MAILPOLL_ONCE") == "1",
+		statePath:   env("MAILPOLL_STATE", "tmp/mailpoll-state.json"),
+		maxAttempts: envInt("MAILPOLL_MAX_ATTEMPTS", 10),
+	}
+	if c.maxAttempts < 1 {
+		c.maxAttempts = 1
 	}
 	if c.user == "" || c.pass == "" {
 		log.Fatal("mailpoll: IMAP_USER and IMAP_PASSWORD are required")
