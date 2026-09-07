@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"sort"
 )
+
+var proposalPlaceholderRe = regexp.MustCompile(`\{([a-z_]+)\}`)
 
 var validKinds = map[string]bool{"read": true, "retrieval": true, "write": true}
 
@@ -57,6 +60,22 @@ func validate(t Tool, name string, validPerms map[string]bool) error {
 	}
 	if len(validPerms) > 0 && !validPerms[t.RBAC.RequiresPermission] {
 		return fmt.Errorf("tools: %s: unknown permission %q", name, t.RBAC.RequiresPermission)
+	}
+
+	if t.IsWrite() {
+		tmpl := t.Compose.Confirm
+		if tmpl == "" {
+			tmpl = t.Compose.Headline
+		}
+		names := make(map[string]bool, len(t.Params))
+		for _, p := range t.Params {
+			names[p.Name] = true
+		}
+		for _, m := range proposalPlaceholderRe.FindAllStringSubmatch(tmpl, -1) {
+			if !names[m[1]] {
+				return fmt.Errorf("tools: %s: proposal template references %q which is not a param; add compose.confirm", name, m[1])
+			}
+		}
 	}
 
 	return nil

@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -78,6 +80,70 @@ func TestLoadParsesOptionalHeadlineI18n(t *testing.T) {
 	}
 	if got[0].Compose.Headline != "latest is {code}" {
 		t.Fatalf("headline default = %q, unaffected by headline_i18n", got[0].Compose.Headline)
+	}
+}
+
+func TestLoadRejectsWriteToolWithUnresolvableProposalPlaceholder(t *testing.T) {
+	fsys := fstest.MapFS{
+		"bad.json": {Data: []byte(`{
+			"id":"x_promote","intent":"x","kind":"write","handler":"h",
+			"rbac":{"requires_permission":"report.view"},
+			"params":[{"name":"conversation_id","required":true}],
+			"compose":{"headline":"created case {code} from email"}
+		}`)},
+	}
+
+	_, err := Load(fsys, validPermsFixture())
+	if err == nil {
+		t.Fatal("expected error for unresolvable proposal placeholder")
+	}
+	if !strings.Contains(err.Error(), "code") {
+		t.Fatalf("error = %v, want it to mention the placeholder %q", err, "code")
+	}
+}
+
+func TestLoadAcceptsWriteToolWithValidConfirm(t *testing.T) {
+	fsys := fstest.MapFS{
+		"ok.json": {Data: []byte(`{
+			"id":"x_promote","intent":"x","kind":"write","handler":"h",
+			"rbac":{"requires_permission":"report.view"},
+			"params":[{"name":"conversation_id","required":true}],
+			"compose":{"headline":"created case {code} from email","confirm":"promote conversation {conversation_id}"}
+		}`)},
+	}
+
+	got, err := Load(fsys, validPermsFixture())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got[0].Compose.Confirm != "promote conversation {conversation_id}" {
+		t.Fatalf("Compose.Confirm = %q", got[0].Compose.Confirm)
+	}
+}
+
+func TestLoadAllowsReadToolWithUnresolvableHeadlinePlaceholder(t *testing.T) {
+	fsys := fstest.MapFS{
+		"ok.json": {Data: []byte(`{
+			"id":"x_find","intent":"x","kind":"read","handler":"h",
+			"rbac":{"requires_permission":"report.view"},
+			"compose":{"headline":"latest is {code}"}
+		}`)},
+	}
+
+	if _, err := Load(fsys, validPermsFixture()); err != nil {
+		t.Fatalf("Load: %v, want read tools exempt from the invariant", err)
+	}
+}
+
+func TestRealCatalogProposalTemplatesResolve(t *testing.T) {
+	fsys := os.DirFS("../../../config/tools")
+	perms := map[string]bool{}
+	got, err := Load(fsys, perms)
+	if err != nil {
+		t.Fatalf("Load real catalog: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected real catalog to load at least one tool")
 	}
 }
 

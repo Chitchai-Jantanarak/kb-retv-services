@@ -49,6 +49,7 @@ type Compose struct {
 	Mode         string            `json:"mode"`
 	Headline     string            `json:"headline"`
 	HeadlineI18n map[string]string `json:"headline_i18n,omitempty"`
+	Confirm      string            `json:"confirm,omitempty"`
 	Row          string            `json:"row"`
 	Cite         string            `json:"cite"`
 	Columns      []ToolColumn      `json:"columns"`

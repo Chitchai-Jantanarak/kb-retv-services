@@ -116,5 +116,9 @@ func (o *Orchestrator) Confirm(ctx context.Context, actor Actor, id string) (Res
 }
 
 func proposalSummary(tool tools.Tool, params map[string]string) string {
-	return tidyTemplate(fillTemplate(tool.Compose.Headline, Row(params)))
+	tmpl := tool.Compose.Confirm
+	if tmpl == "" {
+		tmpl = tool.Compose.Headline
+	}
+	return tidyTemplate(fillTemplate(tmpl, Row(params)))
 }
