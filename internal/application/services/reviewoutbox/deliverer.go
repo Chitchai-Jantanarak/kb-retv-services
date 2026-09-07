@@ -5,37 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/laravelhook"
 )
 
-type DeliveryConfig struct {
-	BaseURL string
-	Path    string
-	Secret  string
-	Timeout time.Duration
-	Client  *http.Client
-}
+type DeliveryConfig = laravelhook.Config
 
 type Deliverer struct {
 	hook *laravelhook.Client
 }
 
 func NewDeliverer(cfg DeliveryConfig) (*Deliverer, error) {
-	hook, err := laravelhook.New(laravelhook.Config{
-		ErrPrefix:   "review outbox",
-		DefaultPath: "/internal/review-queue",
-		BaseURL:     cfg.BaseURL,
-		Path:        cfg.Path,
-		Secret:      cfg.Secret,
-		Timeout:     cfg.Timeout,
-		ReadLimit:   1024,
-		Client:      cfg.Client,
-	})
+	cfg.ErrPrefix = "review outbox"
+	cfg.DefaultPath = "/internal/review-queue"
+	cfg.ReadLimit = 1024
+	hook, err := laravelhook.New(cfg)
 	if err != nil {
 		return nil, err
 	}

@@ -4,34 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
 
 	"github.com/my/app/internal/infra/laravelhook"
 )
 
-type DeliveryConfig struct {
-	BaseURL string
-	Path    string
-	Secret  string
-	Timeout time.Duration
-	Client  *http.Client
-}
+type DeliveryConfig = laravelhook.Config
 
 type Deliverer struct {
 	hook *laravelhook.Client
 }
 
 func NewDeliverer(cfg DeliveryConfig) (*Deliverer, error) {
-	hook, err := laravelhook.New(laravelhook.Config{
-		ErrPrefix:   "media delivery",
-		DefaultPath: "/api/webhooks/ai/media-store",
-		BaseURL:     cfg.BaseURL,
-		Path:        cfg.Path,
-		Secret:      cfg.Secret,
-		Timeout:     cfg.Timeout,
-		Client:      cfg.Client,
-	})
+	cfg.ErrPrefix = "media delivery"
+	cfg.DefaultPath = "/api/webhooks/ai/media-store"
+	hook, err := laravelhook.New(cfg)
 	if err != nil {
 		return nil, err
 	}
