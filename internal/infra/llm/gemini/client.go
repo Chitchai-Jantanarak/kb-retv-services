@@ -76,7 +76,7 @@ type content struct {
 }
 
 type thinkingConfig struct {
-	ThinkingBudget int `json:"thinkingBudget"`
+	ThinkingBudget *int   `json:"thinkingBudget,omitempty"`
 }
 
 type generationConfig struct {
@@ -96,6 +96,7 @@ type generateRequest struct {
 type generateUsage struct {
 	PromptTokenCount     int `json:"promptTokenCount"`
 	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 	TotalTokenCount      int `json:"totalTokenCount"`
 }
 
@@ -197,6 +198,10 @@ func imageParts(images []ports.PromptImage) []part {
 	return parts
 }
 
+func isGen3(model string) bool {
+	return strings.HasPrefix(model, "gemini-3")
+}
+
 func (c *Client) buildRequest(p ports.Prompt, mime string) generateRequest {
 	parts := append([]part{{Text: p.User}}, imageParts(p.Images)...)
 	req := generateRequest{
@@ -214,7 +219,11 @@ func (c *Client) buildRequest(p ports.Prompt, mime string) generateRequest {
 			ResponseMimeType: mime,
 		}
 		if p.ThinkBudget != nil {
-			cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: *p.ThinkBudget}
+			if !isGen3(c.model) {
+				cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: p.ThinkBudget}
+			} else if *p.ThinkBudget != 0 {
+				cfg.ThinkingConfig = &thinkingConfig{ThinkingBudget: p.ThinkBudget}
+			}
 		}
 		if p.Temp > 0 {
 			t := p.Temp
@@ -274,7 +283,7 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 		Text: text.String(),
 		Usage: ports.TokenUsage{
 			Input:  parsed.UsageMetadata.PromptTokenCount,
-			Output: parsed.UsageMetadata.CandidatesTokenCount,
+			Output: parsed.UsageMetadata.CandidatesTokenCount + parsed.UsageMetadata.ThoughtsTokenCount,
 			Total:  parsed.UsageMetadata.TotalTokenCount,
 		},
 		Vendor: "gemini",

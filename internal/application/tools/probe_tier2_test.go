@@ -53,11 +53,8 @@ func runTier2(ctx context.Context, provider ports.LLMProvider, model, system str
 	out := make([]tier2Result, len(cases))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
-	var think *int
-	if !strings.HasPrefix(model, "gemini-3") {
-		z := 0
-		think = &z
-	}
+	z := 0
+	think := &z
 	for i, c := range cases {
 		wg.Add(1)
 		go func(i int, c acceptBarCase) {
