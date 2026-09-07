@@ -165,7 +165,7 @@ SELECT
   COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0),
-  COALESCE(AVG(latency_ms), 0)
+  CAST(COALESCE(AVG(latency_ms), 0) AS SIGNED)
 FROM ai_request_logs
 WHERE company_id = ? AND created_at >= ?`, companyID, since)
 
@@ -408,7 +408,7 @@ SELECT
   COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0),
-  COALESCE(AVG(latency_ms), 0)
+  CAST(COALESCE(AVG(latency_ms), 0) AS SIGNED)
 FROM ai_request_logs
 WHERE company_id = ? AND created_at >= ?
 GROUP BY vendor, model
