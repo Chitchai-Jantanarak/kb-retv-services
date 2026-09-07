@@ -29,6 +29,8 @@ type apiHandlers struct {
 	chatConfirm *handlers.ChatConfirmHandler
 	search      *handlers.SearchHandler
 	intake      *handlers.IntakeAssessHandler
+	aiUsage     *handlers.AIUsageHandler
+	knowledge   *handlers.KnowledgeStatsHandler
 }
 
 func buildAPIHandlers(
@@ -56,7 +58,11 @@ func buildAPIHandlers(
 	endpoints.reports = handlers.NewReportsHandler(reportsRepo)
 	log.Info("reports endpoints configured")
 
+	endpoints.aiUsage = handlers.NewAIUsageHandler(mysqlai.NewRequestLogRepo(qdb))
 	log.Info("ai usage endpoint configured")
+
+	endpoints.knowledge = buildKnowledgeStatsHandler(cfg, log)
+	log.Info("knowledge stats endpoints configured")
 
 	endpoints.search = buildSearchHandler(cfg, reportsRepo, embProvider, embModel, embedder, log)
 

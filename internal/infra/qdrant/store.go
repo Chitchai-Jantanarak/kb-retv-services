@@ -78,6 +78,33 @@ func (s *Store) CollectionVectorSize(ctx context.Context, name string) (int, boo
 	return resp.Result.Config.Params.Vectors.Size, true, nil
 }
 
+func (s *Store) CollectionInfo(ctx context.Context, name string) (int, int, bool, error) {
+	if err := validateCollectionName(name); err != nil {
+		return 0, 0, false, err
+	}
+	var resp struct {
+		Result struct {
+			PointsCount int `json:"points_count"`
+			Config      struct {
+				Params struct {
+					Vectors struct {
+						Size int `json:"size"`
+					} `json:"vectors"`
+				} `json:"params"`
+			} `json:"config"`
+		} `json:"result"`
+	}
+	err := s.do(ctx, http.MethodGet, "/collections/"+name, nil, &resp)
+	var apiErr qdrantError
+	if errors.As(err, &apiErr) && apiErr.statusCode == http.StatusNotFound {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return resp.Result.PointsCount, resp.Result.Config.Params.Vectors.Size, true, nil
+}
+
 func (s *Store) RecreateCollection(ctx context.Context, name string, dim int) error {
 	if err := validateCollectionName(name); err != nil {
 		return err

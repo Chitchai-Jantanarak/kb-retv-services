@@ -236,6 +236,36 @@ func TestResolveForInjectsPerCompanyKey(t *testing.T) {
 	}
 }
 
+func TestResolveForWithRequestSinkRecordsCall(t *testing.T) {
+	lookup := stubLookup{ok: true, agent: AgentConfig{Vendor: "gemini", Model: "gemini-2.5-flash"}}
+	r, err := NewCompanyResolver(lookup, Settings{
+		Vendor:    "gemini",
+		GeminiKey: "k",
+	})
+	if err != nil {
+		t.Fatalf("NewCompanyResolver err = %v", err)
+	}
+	sink := newFakeSink(1)
+	r.WithRequestSink(sink)
+
+	p, err := r.ResolveFor(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ResolveFor err = %v", err)
+	}
+	if _, err := p.Generate(context.Background(), ports.Prompt{}); err == nil {
+		t.Fatal("Generate err = nil, want an http error from the unreachable stub gemini endpoint")
+	}
+	sink.wait(t, 1)
+
+	got := sink.get()
+	if len(got) != 1 {
+		t.Fatalf("records = %d, want 1", len(got))
+	}
+	if got[0].Vendor != "gemini" || got[0].Op != "generate" {
+		t.Fatalf("record = %+v, want vendor=gemini op=generate", got[0])
+	}
+}
+
 func TestResolveForTreatsEmptyAgentVendorAsDefault(t *testing.T) {
 	lookup := stubLookup{ok: true, agent: AgentConfig{Vendor: "", Model: "claude-haiku-4-5-20251001"}}
 	r, err := NewCompanyResolver(lookup, Settings{

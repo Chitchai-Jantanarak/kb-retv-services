@@ -61,6 +61,9 @@ func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error
 	resolver.
 		WithResilient(resilientOptions(cfg)).
 		WithCacheTTL(time.Duration(cfg.LLM.ResolverCacheTTLSeconds) * time.Second)
+	if db != nil {
+		resolver.WithRequestSink(mysqlai.NewRequestLogRepo(db))
+	}
 	return resolver, nil
 }
 

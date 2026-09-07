@@ -26,6 +26,8 @@ type Options struct {
 	ChatConfirm    *handlers.ChatConfirmHandler
 	Search         *handlers.SearchHandler
 	Intake         *handlers.IntakeAssessHandler
+	AIUsage        *handlers.AIUsageHandler
+	Knowledge      *handlers.KnowledgeStatsHandler
 	Budget         appmiddleware.BudgetPolicy
 	Features       appmiddleware.FeatureReader
 }
@@ -97,6 +99,15 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 		protectedV1.GET("/reports/ai-accuracy", opts.Reports.AIAccuracy, appmiddleware.RequirePermission("ai:reports:read"))
 		protectedV1.GET("/reports/answer-rate", opts.Reports.AnswerRate, appmiddleware.RequirePermission("ai:reports:read"))
 		protectedV1.GET("/reports/knowledge-gaps", opts.Reports.KnowledgeGaps, appmiddleware.RequirePermission("ai:reports:read"))
+	}
+
+	if opts.AIUsage != nil {
+		protectedV1.GET("/ai/usage", opts.AIUsage.Usage, appmiddleware.RequirePermission("ai:reports:read"))
+	}
+
+	if opts.Knowledge != nil {
+		protectedV1.GET("/knowledge/stats", opts.Knowledge.Stats, appmiddleware.RequirePermission("ai:reports:read"))
+		protectedV1.GET("/knowledge/graph", opts.Knowledge.Graph, appmiddleware.RequirePermission("ai:reports:read"))
 	}
 
 	if opts.SwaggerEnabled {

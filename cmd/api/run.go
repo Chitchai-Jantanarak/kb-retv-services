@@ -64,6 +64,8 @@ func run() {
 		ChatConfirm:    endpoints.chatConfirm,
 		Search:         endpoints.search,
 		Intake:         endpoints.intake,
+		AIUsage:        endpoints.aiUsage,
+		Knowledge:      endpoints.knowledge,
 		Features:       features,
 		Budget: appmiddleware.BudgetPolicy{
 			Fallback: time.Duration(cfg.Server.RequestBudgetMs) * time.Millisecond,

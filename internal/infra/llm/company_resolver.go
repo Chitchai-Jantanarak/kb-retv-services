@@ -18,6 +18,15 @@ type AgentConfig struct {
 	APIKey              string
 	BaseURL             string
 	ConfidenceThreshold float64
+	Backup              *BackupConfig
+	Failover            string
+}
+
+type BackupConfig struct {
+	Vendor  string
+	Model   string
+	APIKey  string
+	BaseURL string
 }
 
 type AgentLookup interface {
@@ -39,6 +48,7 @@ type CompanyResolver struct {
 	ttl           time.Duration
 	mu            sync.Mutex
 	cache         map[int64]cacheEntry
+	sink          RequestSink
 }
 
 type cacheEntry struct {
@@ -82,6 +92,11 @@ func (r *CompanyResolver) WithCacheTTL(ttl time.Duration) *CompanyResolver {
 		r.ttl = ttl
 		r.cache = make(map[int64]cacheEntry)
 	}
+	return r
+}
+
+func (r *CompanyResolver) WithRequestSink(sink RequestSink) *CompanyResolver {
+	r.sink = sink
 	return r
 }
 
@@ -190,20 +205,44 @@ func (r *CompanyResolver) ResolveFor(ctx context.Context, companyID int64) (port
 }
 
 func (r *CompanyResolver) build(cfg AgentConfig) (ports.LLMProvider, error) {
-	settings := r.defaults
-	settings.Vendor = cfg.Vendor
-	settings.Model = cfg.Model
-	if cfg.APIKey != "" {
-		applyVendorKey(&settings, cfg.Vendor, cfg.APIKey)
-	}
-	if cfg.BaseURL != "" {
-		settings.OpenAIBaseURL = cfg.BaseURL
-	}
-	provider, err := Resolve(settings)
+	primary, err := r.buildProvider(r.defaults, cfg.Vendor, cfg.Model, cfg.APIKey, cfg.BaseURL)
 	if err != nil {
 		return nil, err
 	}
-	return NewResilient(provider, r.resilientOpts), nil
+	primary = NewResilient(primary, r.resilientOpts)
+
+	var p ports.LLMProvider = primary
+	failover := strings.ToLower(strings.TrimSpace(cfg.Failover))
+	if cfg.Backup != nil && failover != "" && failover != "off" {
+		backup, err := r.buildProvider(r.defaults, cfg.Backup.Vendor, cfg.Backup.Model, cfg.Backup.APIKey, cfg.Backup.BaseURL)
+		if err != nil {
+			return nil, err
+		}
+		backup = NewResilient(backup, r.resilientOpts)
+		p = NewFailover(primary, backup, failover)
+	}
+
+	if r.sink != nil {
+		p = NewRecording(p, cfg.Vendor, cfg.Model, r.sink)
+	}
+	return p, nil
+}
+
+func (r *CompanyResolver) buildProvider(defaults Settings, vendor, model, apiKey, baseURL string) (ports.LLMProvider, error) {
+	settings := defaults
+	if vendor != "" {
+		settings.Vendor = vendor
+	}
+	if model != "" {
+		settings.Model = model
+	}
+	if apiKey != "" {
+		applyVendorKey(&settings, settings.Vendor, apiKey)
+	}
+	if baseURL != "" {
+		settings.OpenAIBaseURL = baseURL
+	}
+	return Resolve(settings)
 }
 
 func applyVendorKey(s *Settings, vendor, key string) {
