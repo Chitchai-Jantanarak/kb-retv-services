@@ -162,7 +162,7 @@ func (r *RequestLogRepo) usageTotals(ctx context.Context, companyID int64, since
 	row := r.db.QueryRowContext(ctx, `
 SELECT
   COUNT(*),
-  SUM(status = 'error'),
+  COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0),
   COALESCE(AVG(latency_ms), 0)
@@ -230,7 +230,7 @@ func (r *RequestLogRepo) usageToday(ctx context.Context, companyID int64) (Usage
 	row := r.db.QueryRowContext(ctx, `
 SELECT
   COUNT(*),
-  SUM(status = 'error'),
+  COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0)
 FROM ai_request_logs
@@ -248,7 +248,7 @@ func (r *RequestLogRepo) usageDaily(ctx context.Context, companyID int64, since 
 SELECT
   DATE(created_at) AS d,
   COUNT(*),
-  SUM(status = 'error'),
+  COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0)
 FROM ai_request_logs
@@ -405,7 +405,7 @@ SELECT
   vendor,
   model,
   COUNT(*),
-  SUM(status = 'error'),
+  COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0),
   COALESCE(AVG(latency_ms), 0)
@@ -439,7 +439,7 @@ SELECT
   vendor,
   model,
   COUNT(*),
-  SUM(status = 'error'),
+  COALESCE(SUM(status = 'error'), 0),
   COALESCE(SUM(input_tokens), 0),
   COALESCE(SUM(output_tokens), 0)
 FROM ai_request_logs

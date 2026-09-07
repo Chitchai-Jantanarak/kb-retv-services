@@ -118,8 +118,9 @@ func (r *recording) record(ctx context.Context, op string, start time.Time, out 
 	if r.sink == nil {
 		return
 	}
+	base := context.WithoutCancel(ctx)
 	go func() {
-		sinkCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		sinkCtx, cancel := context.WithTimeout(base, 3*time.Second)
 		defer cancel()
 		_ = r.sink.Record(sinkCtx, l)
 	}()
