@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/infra/tenant"
@@ -62,8 +63,13 @@ LIMIT 1`, companyID).Scan(&id, &vendor, &model, &confidenceThreshold, &providerC
 
 func (l *AgentLookup) applyProviderConfig(cfg *llm.AgentConfig, raw string) {
 	var pc struct {
-		APIKeyEnc string `json:"api_key_enc"`
-		BaseURL   string `json:"base_url"`
+		APIKeyEnc       string `json:"api_key_enc"`
+		BaseURL         string `json:"base_url"`
+		BackupVendor    string `json:"backup_vendor"`
+		BackupModel     string `json:"backup_model"`
+		BackupAPIKeyEnc string `json:"backup_api_key_enc"`
+		BackupBaseURL   string `json:"backup_base_url"`
+		Failover        string `json:"failover"`
 	}
 	if err := json.Unmarshal([]byte(raw), &pc); err != nil {
 		return
@@ -73,6 +79,29 @@ func (l *AgentLookup) applyProviderConfig(cfg *llm.AgentConfig, raw string) {
 		if key, err := providercrypto.Decrypt(pc.APIKeyEnc, l.providerKey); err == nil {
 			cfg.APIKey = key
 		}
+	}
+
+	if pc.BackupVendor != "" || pc.BackupModel != "" {
+		backup := &llm.BackupConfig{
+			Vendor:  pc.BackupVendor,
+			Model:   pc.BackupModel,
+			BaseURL: pc.BackupBaseURL,
+		}
+		if pc.BackupAPIKeyEnc != "" && len(l.providerKey) > 0 {
+			if key, err := providercrypto.Decrypt(pc.BackupAPIKeyEnc, l.providerKey); err == nil {
+				backup.APIKey = key
+			}
+		}
+		cfg.Backup = backup
+	}
+
+	switch strings.ToLower(strings.TrimSpace(pc.Failover)) {
+	case "error":
+		cfg.Failover = "error"
+	case "quota":
+		cfg.Failover = "quota"
+	default:
+		cfg.Failover = "off"
 	}
 }
 

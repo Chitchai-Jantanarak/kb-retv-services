@@ -14,22 +14,24 @@ import (
 )
 
 type Workflow struct {
-	tmpl        prompts.Template
-	streamTmpl  prompts.Template
-	summaryTmpl prompts.Template
-	clarifyTmpl prompts.Template
-	resolve     rag.ProviderForCompany
-	fts         rag.FTSSource
-	profile     ProfileSource
-	cases       CaseSource
-	router      *intent.Router
-	orch        toolRunner
-	cache       ports.Cache
-	cacheTTL    time.Duration
-	fetcher     ports.AttachmentFetcher
-	transcriber ports.Transcriber
-	sessions    SessionStore
-	turns       TurnRecorder
+	tmpl              prompts.Template
+	streamTmpl        prompts.Template
+	summaryTmpl       prompts.Template
+	clarifyTmpl       prompts.Template
+	contextualizeTmpl prompts.Template
+	resolve           rag.ProviderForCompany
+	fts               rag.FTSSource
+	profile           ProfileSource
+	instructions      InstructionSource
+	cases             CaseSource
+	router            *intent.Router
+	orch              toolRunner
+	cache             ports.Cache
+	cacheTTL          time.Duration
+	fetcher           ports.AttachmentFetcher
+	transcriber       ports.Transcriber
+	sessions          SessionStore
+	turns             TurnRecorder
 
 	knowledgeReranker Embedder
 
@@ -60,7 +62,11 @@ func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts rag.FTS
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
-	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, summaryTmpl: summaryTmpl, clarifyTmpl: clarifyTmpl, resolve: resolve, fts: fts}
+	contextualizeTmpl, err := registry.Get(prompts.NameContextualize)
+	if err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
+	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, summaryTmpl: summaryTmpl, clarifyTmpl: clarifyTmpl, contextualizeTmpl: contextualizeTmpl, resolve: resolve, fts: fts}
 	for _, opt := range opts {
 		opt(w)
 	}
@@ -104,9 +110,9 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 		return attachChatDebug(cachedResp, pre.toolDebug, timings, true), nil
 	}
 
-	sources, knowledge, profileBlock := w.fetchContext(ctx, companyID, lastUser, timings)
+	sources, knowledge, profileBlock, instructionBlock := w.fetchContext(ctx, companyID, lastUser, timings)
 
-	turn, err := w.generateTurn(ctx, req, companyID, knowledge, profileBlock, timings)
+	turn, err := w.generateTurn(ctx, req, companyID, knowledge, profileBlock, instructionBlock, timings)
 	if err != nil {
 		return dto.ChatResponse{}, err
 	}
@@ -122,7 +128,7 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	return attachChatDebug(resp, pre.toolDebug, timings, false), nil
 }
 
-func (w *Workflow) fetchContext(ctx context.Context, companyID int64, lastUser string, timings map[string]int64) ([]dto.ChatSource, string, string) {
+func (w *Workflow) fetchContext(ctx context.Context, companyID int64, lastUser string, timings map[string]int64) ([]dto.ChatSource, string, string, string) {
 	var (
 		sources   []dto.ChatSource
 		knowledge string
@@ -139,7 +145,27 @@ func (w *Workflow) fetchContext(ctx context.Context, companyID int64, lastUser s
 			}
 		})
 	}
-	return sources, knowledge, profileBlock
+
+	var instructionBlock string
+	timedChat(timings, "instructions", func() {
+		instructionBlock = w.instructionsFor(ctx, companyID)
+	})
+	return sources, knowledge, profileBlock, instructionBlock
+}
+
+// instructionsFor fetches the per-company instruction block, treating a
+// missing source or a lookup error as "no instructions" rather than failing
+// the caller. Callers that don't want to time the lookup (clarify,
+// tool_summary) call this directly; fetchContext wraps it in timedChat.
+func (w *Workflow) instructionsFor(ctx context.Context, companyID int64) string {
+	if w.instructions == nil {
+		return ""
+	}
+	block, err := w.instructions.InstructionsFor(ctx, companyID)
+	if err != nil {
+		return ""
+	}
+	return block
 }
 
 func socialReply(locale string) string {

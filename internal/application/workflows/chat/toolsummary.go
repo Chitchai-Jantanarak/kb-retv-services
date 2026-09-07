@@ -44,10 +44,11 @@ func (w *Workflow) composeToolReply(ctx context.Context, locale, question string
 
 	start := time.Now()
 	summary, ok := w.smallModelCall(ctx, w.summaryTmpl, map[string]string{
-		"language": promptLanguage(locale),
-		"question": question,
-		"count":    strconv.Itoa(len(r.Table.Rows)),
-		"rows":     rowsText,
+		"language":     promptLanguage(locale),
+		"question":     question,
+		"count":        strconv.Itoa(len(r.Table.Rows)),
+		"rows":         rowsText,
+		"instructions": instructionSection(w.instructionsFor(ctx, companyID)),
 	}, companyID)
 	state := "ok"
 	if !ok {

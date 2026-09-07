@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -66,9 +67,11 @@ func LoadFS(fsys fs.FS, dir string) ([]Template, error) {
 // are comments. Headers and section markers are case-sensitive.
 func parsePrompt(src string) (Template, error) {
 	var (
-		t       Template
-		section string
-		body    strings.Builder
+		t         Template
+		section   string
+		body      strings.Builder
+		lockedAt  int
+		hasLocked bool
 	)
 
 	flush := func() error {
@@ -102,6 +105,17 @@ func parsePrompt(src string) (Template, error) {
 					return Template{}, err
 				}
 				section = strings.TrimPrefix(trimmed, "@")
+				continue
+			}
+			if trimmed == "@locked" {
+				if section != "system" {
+					return Template{}, errors.New("@locked is only valid inside @system")
+				}
+				if hasLocked {
+					return Template{}, fmt.Errorf("duplicate @locked in %s", section)
+				}
+				hasLocked = true
+				lockedAt = body.Len()
 				continue
 			}
 			body.WriteString(line)
@@ -142,7 +156,52 @@ func parsePrompt(src string) (Template, error) {
 	if t.User == "" {
 		return Template{}, errors.New("missing @user body")
 	}
+	if err := validateZones(t, lockedAt, hasLocked); err != nil {
+		return Template{}, err
+	}
 	return t, nil
+}
+
+var templateVarPattern = regexp.MustCompile(`\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}`)
+
+// validateZones enforces that any @tenant-declared variable is confined to
+// the region of @system before the @locked boundary, so a tenant-fed
+// variable can never land after the invariant "absolute rules" zone.
+// The zone after @locked must be static text: no variable of any kind may
+// appear there, declared or not, so the guarantee does not depend on a
+// template author remembering to list a new variable under @tenant.
+func validateZones(t Template, lockedAt int, hasLocked bool) error {
+	if len(t.TenantVars) == 0 {
+		if hasLocked {
+			return fmt.Errorf("template %q declares @locked without @tenant", t.Name)
+		}
+		return nil
+	}
+	if !hasLocked {
+		return fmt.Errorf("template %q declares @tenant but has no @locked boundary", t.Name)
+	}
+	for _, v := range t.TenantVars {
+		needle := "{{" + v + "}}"
+		if !strings.Contains(t.System, needle) && !strings.Contains(t.User, needle) {
+			return fmt.Errorf("template %q declares @tenant var %q that appears nowhere", t.Name, v)
+		}
+		idx := 0
+		for {
+			i := strings.Index(t.System[idx:], needle)
+			if i == -1 {
+				break
+			}
+			pos := idx + i
+			if pos >= lockedAt {
+				return fmt.Errorf("template %q: tenant var %q appears after the @locked boundary", t.Name, v)
+			}
+			idx = pos + len(needle)
+		}
+	}
+	if v := templateVarPattern.FindString(t.System[min(lockedAt, len(t.System)):]); v != "" {
+		return fmt.Errorf("template %q: the zone after @locked must be static text, found %s", t.Name, v)
+	}
+	return nil
 }
 
 func splitDirective(line string) (string, string, bool) {
@@ -161,6 +220,8 @@ func applyDirective(t *Template, key, value string) error {
 		t.Name = value
 	case "required":
 		t.RequiredVars = splitFields(value)
+	case "tenant":
+		t.TenantVars = splitFields(value)
 	case "max_toks":
 		n, err := strconv.Atoi(value)
 		if err != nil {

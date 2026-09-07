@@ -50,16 +50,17 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	}
 	companyID, lastUser := pre.companyID, pre.lastUser
 
-	sources, knowledge, profileBlock := w.fetchContext(ctx, companyID, lastUser, timings)
+	sources, knowledge, profileBlock, instructionBlock := w.fetchContext(ctx, companyID, lastUser, timings)
 
 	var prompt ports.Prompt
 	err = timedChatErr(timings, "render", func() error {
 		var renderErr error
 		prompt, renderErr = w.streamTmpl.Render(map[string]string{
-			"language":   promptLanguage(req.Locale),
-			"transcript": buildTranscript(req.Messages),
-			"knowledge":  knowledgeSection(knowledge),
-			"profile":    profileSection(profileBlock),
+			"language":     promptLanguage(req.Locale),
+			"transcript":   buildTranscript(req.Messages),
+			"knowledge":    knowledgeSection(knowledge),
+			"profile":      profileSection(profileBlock),
+			"instructions": instructionSection(instructionBlock),
 		})
 		return renderErr
 	})

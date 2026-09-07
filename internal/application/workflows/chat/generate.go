@@ -15,16 +15,18 @@ func (w *Workflow) generateTurn(
 	companyID int64,
 	knowledge string,
 	profileBlock string,
+	instructionBlock string,
 	timings map[string]int64,
 ) (llmTurn, error) {
 	var prompt ports.Prompt
 	err := timedChatErr(timings, "render", func() error {
 		var err error
 		prompt, err = w.tmpl.Render(map[string]string{
-			"language":   promptLanguage(req.Locale),
-			"transcript": buildTranscript(req.Messages),
-			"knowledge":  knowledgeSection(knowledge),
-			"profile":    profileSection(profileBlock),
+			"language":     promptLanguage(req.Locale),
+			"transcript":   buildTranscript(req.Messages),
+			"knowledge":    knowledgeSection(knowledge),
+			"profile":      profileSection(profileBlock),
+			"instructions": instructionSection(instructionBlock),
 		})
 		return err
 	})

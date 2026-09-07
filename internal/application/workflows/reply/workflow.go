@@ -184,8 +184,6 @@ func (w *Workflow) Run(ctx context.Context, req dto.ReplyRequest) (dto.ReplyResp
 		return dto.ReplyResponse{}, err
 	}
 
-	// Install the token meter before the pipeline runs, so that every provider
-	// call it makes is counted against this request.
 	ctx, _ = usagemeter.With(ctx)
 
 	cid := ctxkey.MustCompanyID(ctx)
@@ -277,10 +275,6 @@ func (w *Workflow) recordAction(ctx context.Context, companyID int64, query, dra
 
 	recCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	// Token usage is accumulated across the pipeline stages rather than taken
-	// from a single call, because a reply may involve up to four: rerank, the
-	// corrective check, generation, and critique. Without this the action
-	// record carries latency but no cost, and the two are not interchangeable.
 	tokensIn, tokensOut, _ := usagemeter.From(ctx).Totals()
 
 	id, err := w.actions.Record(recCtx, ports.AIAction{

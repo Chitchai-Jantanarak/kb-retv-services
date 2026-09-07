@@ -25,6 +25,10 @@ type ProfileSource interface {
 	Build(ctx context.Context, companyID int64) (string, error)
 }
 
+type InstructionSource interface {
+	InstructionsFor(ctx context.Context, companyID int64) (string, error)
+}
+
 type CaseSource interface {
 	SearchCases(ctx context.Context, coverage []int64, query, product, status string, limit int) ([]dto.ChatCaseResult, error)
 }
@@ -64,6 +68,14 @@ func WithProfile(profile ProfileSource) Option {
 	return func(w *Workflow) {
 		if profile != nil {
 			w.profile = profile
+		}
+	}
+}
+
+func WithInstructions(src InstructionSource) Option {
+	return func(w *Workflow) {
+		if src != nil {
+			w.instructions = src
 		}
 	}
 }

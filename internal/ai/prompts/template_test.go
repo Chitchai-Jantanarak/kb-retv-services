@@ -85,6 +85,7 @@ func TestDefaultsCoverAllNamedTemplates(t *testing.T) {
 		NameToolSummary,
 		NameClarify,
 		NameIntakeExtract,
+		NameContextualize,
 	}
 	got := make([]string, 0, len(Defaults()))
 	for _, tmpl := range Defaults() {

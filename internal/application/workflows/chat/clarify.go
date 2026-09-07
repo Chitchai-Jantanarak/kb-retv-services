@@ -19,10 +19,11 @@ func (w *Workflow) clarifyViaModel(ctx context.Context, locale, question string,
 	}
 
 	return w.smallModelCall(ctx, w.clarifyTmpl, map[string]string{
-		"language": promptLanguage(locale),
-		"question": question,
-		"missing":  strings.Join(missing, ", "),
-		"have":     strings.Join(havePairs, ", "),
+		"language":     promptLanguage(locale),
+		"question":     question,
+		"missing":      strings.Join(missing, ", "),
+		"have":         strings.Join(havePairs, ", "),
+		"instructions": instructionSection(w.instructionsFor(ctx, companyID)),
 	}, companyID)
 }
 

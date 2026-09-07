@@ -31,6 +31,7 @@ import (
 	employeemysql "github.com/my/app/internal/repositories/employee/mysql"
 	gazetteermysql "github.com/my/app/internal/repositories/gazetteer/mysql"
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
+	promptmysql "github.com/my/app/internal/repositories/prompt/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/llmboot"
@@ -87,6 +88,7 @@ func buildChatEndpoints(
 
 	chatOpts = append(chatOpts,
 		chatwf.WithProfile(profile.NewAssembler(profilemysql.New(qdb))),
+		chatwf.WithInstructions(promptmysql.New(qdb)),
 		chatwf.WithCaseSearch(chatCaseSearch{repo: reportsRepo}),
 		chatwf.WithSessions(chatsessionmysql.New(qdb)),
 		chatwf.WithTurnRecorder(toolaudit.NewChatTurn(

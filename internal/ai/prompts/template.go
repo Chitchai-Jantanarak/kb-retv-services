@@ -17,6 +17,7 @@ type Template struct {
 	System       string
 	User         string
 	RequiredVars []string
+	TenantVars   []string
 	MaxToks      int
 	ThinkBudget  *int
 	Temp         float32

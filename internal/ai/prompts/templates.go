@@ -18,6 +18,7 @@ const (
 	NameToolSummary    = "tool_summary"
 	NameClarify        = "clarify"
 	NameIntakeExtract  = "intake_extract"
+	NameContextualize  = "contextualize"
 )
 
 // MUST be presented along with template coveraging
@@ -38,5 +39,6 @@ func canonicalNames() []string {
 		NameToolSummary,
 		NameClarify,
 		NameIntakeExtract,
+		NameContextualize,
 	}
 }

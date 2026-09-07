@@ -262,7 +262,7 @@ func buildDebugEvents(tool *dto.ChatToolDebug, timings map[string]int64, cacheHi
 		}
 	}
 
-	stageOrder := []string{"router", "tool", "cache", "knowledge", "profile", "render", "resolve", "generate", "parse", "search", "store_cache"}
+	stageOrder := []string{"router", "tool", "cache", "knowledge", "profile", "instructions", "render", "resolve", "generate", "parse", "search", "store_cache"}
 	for _, stage := range stageOrder {
 		duration, ok := timings[stage]
 		if !ok {
