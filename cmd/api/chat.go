@@ -237,5 +237,6 @@ func buildTier2Selector(cfg config.Config, qdb tenant.Querier, bound []tools.Too
 	}
 	var provider ports.LLMProvider = client
 	provider = llm.NewRecording(provider, "gemini", cfg.Chat.SelectorModel, mysqlai.NewRequestLogRepo(qdb))
-	return tools.NewModelSelector(provider, bound), nil
+	return tools.NewModelSelector(provider, bound,
+		tools.WithTranscriptCap(cfg.Chat.SelectorTranscriptRunes)), nil
 }

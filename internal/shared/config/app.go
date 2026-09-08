@@ -42,15 +42,16 @@ type Budget struct {
 }
 
 type Chat struct {
-	CacheTTLSeconds       int
-	CacheMaxEntries       int
-	GuardEmbedderProvider string
-	GuardEmbedderAssetDir string
-	SelectorRejectMargin  float64
-	OffTopicMargin        float64
-	SelectorModel         string
-	SelectorAccept        float64
-	SelectorMargin        float64
+	CacheTTLSeconds         int
+	CacheMaxEntries         int
+	GuardEmbedderProvider   string
+	GuardEmbedderAssetDir   string
+	SelectorRejectMargin    float64
+	OffTopicMargin          float64
+	SelectorModel           string
+	SelectorAccept          float64
+	SelectorMargin          float64
+	SelectorTranscriptRunes int
 }
 
 type Embedding struct {

@@ -43,6 +43,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("chat.selectorModel", "")
 	v.SetDefault("chat.selectorAccept", 0.75)
 	v.SetDefault("chat.selectorMargin", 0.15)
+	v.SetDefault("chat.selectorTranscriptRunes", 2000)
 	v.SetDefault("embedding.refreshMaxChunks", 512)
 	v.SetDefault("embedding.refreshBatchSize", 64)
 	v.SetDefault("embedding.largeRunThreshold", 1000)
