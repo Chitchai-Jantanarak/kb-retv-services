@@ -131,6 +131,68 @@ func TestUpsertConversationInsertsPendingDraft(t *testing.T) {
 	}
 }
 
+func TestMarkVerifiedRequiresChannelAndCode(t *testing.T) {
+	cases := []struct {
+		name    string
+		channel string
+		code    string
+	}{
+		{name: "empty_channel", channel: "", code: "AB23CD45"},
+		{name: "empty_code", channel: "email", code: ""},
+		{name: "both_empty", channel: "", code: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &fakeQuerier{}
+			repo := New(q)
+			if _, err := repo.MarkVerified(context.Background(), tc.channel, tc.code); err == nil {
+				t.Fatal("MarkVerified must reject a missing channel or verification code")
+			}
+			if q.execSQL != "" {
+				t.Fatalf("MarkVerified must not touch the db before validation, got exec: %s", q.execSQL)
+			}
+		})
+	}
+}
+
+func TestTouchInboundRequiresAccountID(t *testing.T) {
+	q := &fakeQuerier{}
+	repo := New(q)
+	if err := repo.TouchInbound(context.Background(), 0); err == nil {
+		t.Fatal("TouchInbound must reject a zero account_id")
+	}
+	if q.execSQL != "" {
+		t.Fatalf("TouchInbound must not touch the db before validation, got exec: %s", q.execSQL)
+	}
+	if err := repo.TouchInbound(context.Background(), -1); err == nil {
+		t.Fatal("TouchInbound must reject a negative account_id")
+	}
+}
+
+// ByRoutingKey/ByAlias must reject an empty key/address before reaching
+// QueryRowContext: fakeQuerier.QueryRowContext returns a nil *sql.Row, so a
+// validation gap here would panic on Scan instead of returning a clean error.
+
+func TestByRoutingKeyRequiresKey(t *testing.T) {
+	repo := New(&fakeQuerier{})
+	if _, err := repo.ByRoutingKey(context.Background(), ""); err == nil {
+		t.Fatal("ByRoutingKey must reject an empty routing_key")
+	}
+	if _, err := repo.ByRoutingKey(context.Background(), "   "); err == nil {
+		t.Fatal("ByRoutingKey must reject a blank routing_key")
+	}
+}
+
+func TestByAliasRequiresAddress(t *testing.T) {
+	repo := New(&fakeQuerier{})
+	if _, err := repo.ByAlias(context.Background(), ""); err == nil {
+		t.Fatal("ByAlias must reject an empty address")
+	}
+	if _, err := repo.ByAlias(context.Background(), "   "); err == nil {
+		t.Fatal("ByAlias must reject a blank address")
+	}
+}
+
 func TestDeleteConversationIfEmptyIsTenantScopedAndConservative(t *testing.T) {
 	q := &fakeQuerier{}
 	repo := New(q)

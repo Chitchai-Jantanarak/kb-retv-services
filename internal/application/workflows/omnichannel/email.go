@@ -5,10 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
 )
+
+// routingKeyRE matches a mail binding's receiver address: either the
+// plus-tag form on the intake mailbox (chitchai5757+sjt-8f31a2@gmail.com)
+// or the alias-domain form (sjt-8f31a2@grubgrob.xyz), whose catch-all lands
+// in the same mailbox. The key alphabet is [a-z0-9], 6-12 chars; matching
+// runs against an already-lowercased bare address.
+var routingKeyRE = regexp.MustCompile(`(?:^|\+)sjt-([a-z0-9]{6,12})@`)
 
 type emailAttachment struct {
 	Filename   string `json:"filename"`
@@ -32,6 +40,7 @@ type emailPayload struct {
 	AutoSubmitted   string            `json:"auto_submitted"`
 	ListUnsubscribe bool              `json:"list_unsubscribe"`
 	Precedence      string            `json:"precedence"`
+	DeliveredTo     []string          `json:"delivered_to"`
 	Attachments     []emailAttachment `json:"attachments"`
 }
 
@@ -66,6 +75,7 @@ func (n EmailNormalizer) Normalize(raw []byte) (Normalized, error) {
 		ExternalSender:      sender,
 		AccountExternalID:   extractEmailAddress(p.To),
 		AccountCandidates:   emailCandidates(p),
+		RoutingKeys:         routingKeysFrom(append(append([]string{p.To}, p.Recipients...), p.DeliveredTo...)...),
 		InReplyTo:           strings.TrimSpace(p.InReplyTo),
 		References:          trimmedNonEmpty(p.References),
 		SenderName:          strings.TrimSpace(p.FromName),
@@ -119,18 +129,45 @@ func trimmedNonEmpty(in []string) []string {
 	return out
 }
 
-// emailCandidates lists every address the mail was addressed to, primary first.
-// The configured mailbox among them is what authorizes intake; From never does.
+// emailCandidates lists every address the mail was addressed to, primary
+// first (To, then Recipients, then Delivered-To/X-Forwarded-To). The
+// configured mailbox, an alias, or a routing key among them is what
+// authorizes intake; From never does.
 func emailCandidates(p emailPayload) []string {
 	seen := map[string]bool{}
-	out := make([]string, 0, len(p.Recipients)+1)
-	for _, raw := range append([]string{p.To}, p.Recipients...) {
+	out := make([]string, 0, len(p.Recipients)+len(p.DeliveredTo)+1)
+	for _, raw := range append(append([]string{p.To}, p.Recipients...), p.DeliveredTo...) {
 		addr := strings.ToLower(extractEmailAddress(raw))
 		if addr == "" || seen[addr] {
 			continue
 		}
 		seen[addr] = true
 		out = append(out, addr)
+	}
+	return out
+}
+
+// routingKeysFrom extracts every +sjt-<key> routing tag found across the
+// given raw address strings (which may carry a display name), in the order
+// found, de-duplicated.
+func routingKeysFrom(addrs ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, raw := range addrs {
+		addr := strings.ToLower(extractEmailAddress(raw))
+		if addr == "" {
+			continue
+		}
+		m := routingKeyRE.FindStringSubmatch(addr)
+		if m == nil {
+			continue
+		}
+		key := m[1]
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
 	}
 	return out
 }

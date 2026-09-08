@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
-	"github.com/emersion/go-message/mail"
 
 	"github.com/my/app/internal/mailpoll"
 )
@@ -170,6 +168,13 @@ func pollOnce(ctx context.Context, cfg config, fwd *mailpoll.Forwarder) error {
 			err = fmt.Errorf("forward: %w", ferr)
 		}
 		if err != nil {
+			if errors.Is(err, mailpoll.ErrRejected) {
+				log.Printf("mailpoll: uid %d rejected by inbound, skipped and left unread: %v", uid, err)
+				st.LastUID = uid
+				st.FailUID, st.FailCount = 0, 0
+				saveState(cfg.statePath, st)
+				continue
+			}
 			if skipUID(&st, cfg, uid, err) {
 				continue
 			}
@@ -264,73 +269,22 @@ func fetchPayload(c *client.Client, uid uint32, section *imap.BodySectionName, f
 		p.AutoSubmitted = parsed.AutoSubmitted
 		p.ListUnsubscribe = parsed.ListUnsubscribe
 		p.Precedence = parsed.Precedence
+		p.DeliveredTo = parsed.DeliveredTo
 	}
 	return p, nil
 }
 
-type parsedMessage struct {
-	Text            string
-	HTML            string
-	Attachments     []mailpoll.Attachment
-	AutoSubmitted   string
-	ListUnsubscribe bool
-	Precedence      string
-}
+// parsedMessage and parseMessage are a thin, signature-preserving wrapper
+// around mailpoll.ParseMIME (which now holds the actual parsing logic, shared
+// with the Gmail API reader in internal/gmailconn). Kept as a package-level
+// func/type alias rather than calling mailpoll.ParseMIME directly at the call
+// site so the existing tests in main_test.go, which mutate the
+// maxAttachmentBytes package var and call parseMessage(raw) with the old
+// arity, keep working unchanged.
+type parsedMessage = mailpoll.ParsedMessage
 
 func parseMessage(raw []byte) parsedMessage {
-	mr, err := mail.CreateReader(bytes.NewReader(raw))
-	if err != nil {
-		return parsedMessage{Text: strings.TrimSpace(string(raw))}
-	}
-
-	result := parsedMessage{
-		AutoSubmitted:   strings.TrimSpace(mr.Header.Get("Auto-Submitted")),
-		ListUnsubscribe: strings.TrimSpace(mr.Header.Get("List-Unsubscribe")) != "",
-		Precedence:      strings.TrimSpace(mr.Header.Get("Precedence")),
-	}
-
-	attachmentBytes := 0
-	attachmentsCapped := false
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			break
-		}
-		switch h := part.Header.(type) {
-		case *mail.InlineHeader:
-			b, _ := io.ReadAll(part.Body)
-			ct, _, _ := h.ContentType()
-			if strings.Contains(ct, "html") {
-				result.HTML = string(b)
-			} else {
-				result.Text = string(b)
-			}
-		case *mail.AttachmentHeader:
-			if attachmentsCapped {
-				continue
-			}
-			b, _ := io.ReadAll(part.Body)
-			if attachmentBytes+len(b) > maxAttachmentBytes {
-				attachmentsCapped = true
-				continue
-			}
-			attachmentBytes += len(b)
-			filename, _ := h.Filename()
-			mimeType, _, _ := h.ContentType()
-			result.Attachments = append(result.Attachments, mailpoll.Attachment{
-				Filename:   filename,
-				MIMEType:   mimeType,
-				SizeBytes:  len(b),
-				ContentB64: base64.StdEncoding.EncodeToString(b),
-			})
-		}
-	}
-	result.Text = strings.TrimSpace(result.Text)
-	result.HTML = strings.TrimSpace(result.HTML)
-	return result
+	return mailpoll.ParseMIME(raw, maxAttachmentBytes)
 }
 
 func markSeen(c *client.Client, uid uint32) {

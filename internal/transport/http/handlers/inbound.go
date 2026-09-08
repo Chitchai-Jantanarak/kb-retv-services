@@ -134,6 +134,9 @@ func (h *InboundHandler) Receive(c *echo.Context) error {
 		"conversation_id": result.ConversationID,
 		"message_id":      result.MessageID,
 		"ticket_enqueued": result.TicketEnqueued,
+		"verified":        result.Verified,
+		"matched_via":     result.MatchedVia,
+		"matched_address": result.MatchedAddress,
 	}))
 }
 

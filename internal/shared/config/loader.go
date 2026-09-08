@@ -100,6 +100,10 @@ func configFrom(v *viper.Viper) Config {
 			RetryMaxBackoffMs:       v.GetInt("llm.retry_max_backoff_ms"),
 			ResolverCacheTTLSeconds: v.GetInt("llm.resolver_cache_ttl_seconds"),
 		},
+		OAuth: OAuth{
+			GoogleClientID:     v.GetString("oauth.google_client_id"),
+			GoogleClientSecret: v.GetString("oauth.google_client_secret"),
+		},
 		APIKeys: APIKeys{
 			OpenAI:     firstNonEmpty(v.GetString("apiKeys.openai"), v.GetString("llm.openai_key")),
 			Gemini:     firstNonEmpty(v.GetString("apiKeys.gemini"), v.GetString("llm.gemini_key")),

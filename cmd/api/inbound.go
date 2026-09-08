@@ -36,6 +36,7 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 	reportsRepo := reportsmysql.New(router)
 	wfCfg := omnichannel.Config{
 		Accounts:       centralRepo,
+		Verifier:       centralRepo,
 		Conversations:  siloRepo,
 		Messages:       siloRepo,
 		CaseLookup:     caseLookupAdapter{repo: reportsRepo},

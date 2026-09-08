@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"reflect"
 	"testing"
 )
 
@@ -101,5 +102,27 @@ func TestParseMessageAttachmentsUnderCap(t *testing.T) {
 	}
 	if result.Precedence != "bulk" {
 		t.Fatalf("unexpected Precedence: %q", result.Precedence)
+	}
+}
+
+func TestParseMessageExtractsDeliveredTo(t *testing.T) {
+	raw := []byte(
+		"From: sender@example.com\r\n" +
+			"To: dest@example.com\r\n" +
+			"Delivered-To: Chitchai+SJT-8f31a2@gmail.com\r\n" +
+			"Delivered-To: second@example.com\r\n" +
+			"X-Forwarded-To: forwarded@example.com\r\n" +
+			"Subject: test\r\n" +
+			"MIME-Version: 1.0\r\n" +
+			"Content-Type: text/plain; charset=utf-8\r\n" +
+			"\r\n" +
+			"hello",
+	)
+
+	result := parseMessage(raw)
+
+	want := []string{"chitchai+sjt-8f31a2@gmail.com", "second@example.com", "forwarded@example.com"}
+	if !reflect.DeepEqual(result.DeliveredTo, want) {
+		t.Fatalf("DeliveredTo = %v, want %v", result.DeliveredTo, want)
 	}
 }

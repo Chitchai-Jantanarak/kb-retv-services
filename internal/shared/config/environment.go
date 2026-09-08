@@ -80,6 +80,8 @@ var envBindings = []envBinding{
 	{key: "llm.breaker_failures", env: "LLM_BREAKER_FAILURES"},
 	{key: "llm.breaker_cooldown_seconds", env: "LLM_BREAKER_COOLDOWN_SECONDS"},
 	{key: "llm.resolver_cache_ttl_seconds", env: "LLM_RESOLVER_CACHE_TTL_SECONDS"},
+	{key: "oauth.google_client_id", env: "GOOGLE_OAUTH_CLIENT_ID"},
+	{key: "oauth.google_client_secret", env: "GOOGLE_OAUTH_CLIENT_SECRET"},
 	{key: "laravel.base_url", env: "LARAVEL_BASE_URL"},
 	{key: "laravel.host_header", env: "LARAVEL_HOST_HEADER"},
 	{key: "laravel.webhook_secret", env: "LARAVEL_WEBHOOK_SECRET"},

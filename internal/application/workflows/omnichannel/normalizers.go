@@ -25,10 +25,15 @@ type InboundAttachment struct {
 }
 
 type Normalized struct {
-	Request             dto.InboundMessageRequest
-	ExternalSender      string
-	AccountExternalID   string
-	AccountCandidates   []string
+	Request           dto.InboundMessageRequest
+	ExternalSender    string
+	AccountExternalID string
+	AccountCandidates []string
+	// RoutingKeys lists every +sjt-<key> mail-binding routing tag found in
+	// the message's To/Recipients/Delivered-To addresses, in the order
+	// found. Email-only; a routing key match takes priority over an alias
+	// or exact-address match in account resolution.
+	RoutingKeys         []string
 	InReplyTo           string
 	References          []string
 	SenderName          string

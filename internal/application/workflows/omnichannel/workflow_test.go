@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/shared/ctxkey"
@@ -140,6 +141,12 @@ type stubAccounts struct {
 
 func (s *stubAccounts) ByChannelAndExternalID(_ context.Context, _, _ string) (ChannelAccount, error) {
 	return s.acc, s.err
+}
+func (s *stubAccounts) ByRoutingKey(_ context.Context, key string) (ChannelAccount, error) {
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for routing_key %s: %w", key, ErrAccountNotFound)
+}
+func (s *stubAccounts) ByAlias(_ context.Context, address string) (ChannelAccount, error) {
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for alias %s: %w", address, ErrAccountNotFound)
 }
 
 type stubConvos struct {
@@ -630,6 +637,8 @@ func TestRunTicketEnqueueFailureDoesNotFailRun(t *testing.T) {
 
 type keyedAccounts struct {
 	byExternalID map[string]ChannelAccount
+	byRoutingKey map[string]ChannelAccount
+	byAlias      map[string]ChannelAccount
 }
 
 func (s *keyedAccounts) ByChannelAndExternalID(_ context.Context, _, externalID string) (ChannelAccount, error) {
@@ -637,6 +646,20 @@ func (s *keyedAccounts) ByChannelAndExternalID(_ context.Context, _, externalID 
 		return acc, nil
 	}
 	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for %s: %w", externalID, ErrAccountNotFound)
+}
+
+func (s *keyedAccounts) ByRoutingKey(_ context.Context, key string) (ChannelAccount, error) {
+	if acc, ok := s.byRoutingKey[key]; ok {
+		return acc, nil
+	}
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for routing_key %s: %w", key, ErrAccountNotFound)
+}
+
+func (s *keyedAccounts) ByAlias(_ context.Context, address string) (ChannelAccount, error) {
+	if acc, ok := s.byAlias[address]; ok {
+		return acc, nil
+	}
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for alias %s: %w", address, ErrAccountNotFound)
 }
 
 func TestRunEmailAccountCandidateFallbackResolves(t *testing.T) {
@@ -683,6 +706,64 @@ func TestRunEmailUnresolvedPrimaryWithNoMatchingCandidateStillFails(t *testing.T
 	_, err = wf.Run(context.Background(), norm, []byte(`{}`))
 	if err == nil || !errors.Is(err, ErrAccountNotFound) {
 		t.Fatalf("err = %v, want ErrAccountNotFound when no candidate resolves", err)
+	}
+}
+
+func TestRunEmailPrefersRoutingKeyOverAliasOverAddress(t *testing.T) {
+	accounts := &keyedAccounts{
+		byExternalID: map[string]ChannelAccount{"desk@acme.com": {ID: 1, CompanyID: 1}},
+		byAlias:      map[string]ChannelAccount{"desk@acme.com": {ID: 2, CompanyID: 2}},
+		byRoutingKey: map[string]ChannelAccount{"8f31a2": {ID: 3, CompanyID: 3}},
+	}
+	wf, err := New(Config{
+		Accounts:      accounts,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.RoutingKeys = []string{"8f31a2"}
+	norm.AccountCandidates = []string{"desk@acme.com"}
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.CompanyID != 3 {
+		t.Fatalf("CompanyID = %d, want 3 (resolved via routing key ahead of alias and address)", res.CompanyID)
+	}
+	if res.MatchedVia != "routing_key" || res.MatchedAddress != "8f31a2" {
+		t.Fatalf("MatchedVia/MatchedAddress = %q/%q, want routing_key/8f31a2", res.MatchedVia, res.MatchedAddress)
+	}
+}
+
+func TestRunEmailAliasMatchedWhenToIsAlias(t *testing.T) {
+	accounts := &keyedAccounts{
+		byAlias: map[string]ChannelAccount{"support-smartjob@idio-tech.com": {ID: 5, CompanyID: 9}},
+	}
+	wf, err := New(Config{
+		Accounts:      accounts,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.AccountExternalID = "support-smartjob@idio-tech.com"
+	norm.AccountCandidates = []string{"support-smartjob@idio-tech.com"}
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.CompanyID != 9 {
+		t.Fatalf("CompanyID = %d, want 9 (resolved via alias)", res.CompanyID)
+	}
+	if res.MatchedVia != "alias" || res.MatchedAddress != "support-smartjob@idio-tech.com" {
+		t.Fatalf("MatchedVia/MatchedAddress = %q/%q, want alias/support-smartjob@idio-tech.com", res.MatchedVia, res.MatchedAddress)
 	}
 }
 
@@ -971,6 +1052,232 @@ func TestRunReferencedCaseNotFoundSkipsBackfill(t *testing.T) {
 	if len(backfill.calls) != 0 {
 		t.Fatalf("WriteBackfill calls = %d, want 0 when the case lookup misses", len(backfill.calls))
 	}
+}
+
+type fakeVerifier struct {
+	byCode       map[string]ChannelAccount
+	byKey        map[string]ChannelAccount
+	confirmKey   string
+	confirmCode  string
+	confirmLink  string
+	markCalled   bool
+	markCode     string
+	touchCalled  bool
+	touchAccount int64
+}
+
+func (v *fakeVerifier) MarkVerified(_ context.Context, _, code string) (ChannelAccount, error) {
+	v.markCalled = true
+	v.markCode = code
+	if acc, ok := v.byCode[code]; ok {
+		return acc, nil
+	}
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no unverified account for %s: %w", code, ErrAccountNotFound)
+}
+
+func (v *fakeVerifier) StoreForwardConfirm(_ context.Context, key, code, link string) (ChannelAccount, error) {
+	v.confirmKey, v.confirmCode, v.confirmLink = key, code, link
+	if acc, ok := v.byKey[key]; ok {
+		return acc, nil
+	}
+	return ChannelAccount{}, fmt.Errorf("channel_accounts: no email account for routing_key %s: %w", key, ErrAccountNotFound)
+}
+
+func (v *fakeVerifier) TouchInbound(_ context.Context, accountID int64) error {
+	v.touchCalled = true
+	v.touchAccount = accountID
+	return nil
+}
+
+func TestRunVerificationSubjectMarksAccountAndSkipsConversation(t *testing.T) {
+	verifier := &fakeVerifier{byCode: map[string]ChannelAccount{
+		"AB23CD45": {ID: 30, CompanyID: 9},
+	}}
+	msgs := &foundMessages{}
+	convos := &ctxCapturingConvos{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "SJT-VERIFY-AB23CD45"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !verifier.markCalled || verifier.markCode != "AB23CD45" {
+		t.Fatalf("MarkVerified called = %v code = %q, want called with AB23CD45", verifier.markCalled, verifier.markCode)
+	}
+	if !res.Verified || res.VerifiedAccountID != 30 || res.CompanyID != 9 {
+		t.Fatalf("result = %+v, want Verified=true VerifiedAccountID=30 CompanyID=9", res)
+	}
+	if msgs.insertCalled {
+		t.Fatal("verification mail must not insert a message")
+	}
+	if convos.gotCtx != nil {
+		t.Fatal("verification mail must not create a conversation")
+	}
+}
+
+func TestRunGoogleForwardingConfirmationStoresCodeOnAccount(t *testing.T) {
+	verifier := &fakeVerifier{byKey: map[string]ChannelAccount{
+		"nzqe86ll": {ID: 19, CompanyID: 4},
+	}}
+	msgs := &foundMessages{}
+	convos := &ctxCapturingConvos{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: convos,
+		Messages:      msgs,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.ExternalSender = "forwarding-noreply@google.com"
+	norm.RoutingKeys = []string{"nzqe86ll"}
+	norm.Request.Subject = "(#123456789) Gmail Forwarding Confirmation - Receive Mail from akalzz1121@gmail.com"
+	norm.Request.Body = "confirm here: https://mail-settings.google.com/mail/vf-abc_DEF-123 thanks"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if verifier.confirmKey != "nzqe86ll" || verifier.confirmCode != "123456789" || verifier.confirmLink != "https://mail-settings.google.com/mail/vf-abc_DEF-123" {
+		t.Fatalf("stored key=%q code=%q link=%q", verifier.confirmKey, verifier.confirmCode, verifier.confirmLink)
+	}
+	if !res.ForwardConfirm || res.CompanyID != 4 || res.VerifiedAccountID != 19 {
+		t.Fatalf("result = %+v, want ForwardConfirm=true CompanyID=4 account 19", res)
+	}
+	if msgs.insertCalled || convos.gotCtx != nil {
+		t.Fatal("forwarding confirmation must not create a conversation or message")
+	}
+}
+
+func TestRunVerificationSubjectMatchesForwardedPrefix(t *testing.T) {
+	verifier := &fakeVerifier{byCode: map[string]ChannelAccount{
+		"AB23CD45": {ID: 30, CompanyID: 9},
+	}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "Fwd: SJT-VERIFY-ab23cd45"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.Verified {
+		t.Fatalf("result = %+v, want Verified=true for a forwarded verification subject", res)
+	}
+	if verifier.markCode != "AB23CD45" {
+		t.Fatalf("markCode = %q, want AB23CD45 (upper-cased)", verifier.markCode)
+	}
+}
+
+func TestRunUnknownVerificationCodeFallsThroughToNormalRouting(t *testing.T) {
+	verifier := &fakeVerifier{byCode: map[string]ChannelAccount{}}
+	tickets := &captureTickets{}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+		Tickets:       tickets,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := emailNorm()
+	norm.Request.Subject = "SJT-VERIFY-ZZ99ZZ99"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !verifier.markCalled {
+		t.Fatal("MarkVerified must still be attempted for a subject that matches the pattern")
+	}
+	if res.Verified {
+		t.Fatalf("result = %+v, want Verified=false when the code matches no pending account", res)
+	}
+	if res.ConversationID != 100 || res.MessageID != 200 {
+		t.Fatalf("result = %+v, want the mail routed like any other inbound message", res)
+	}
+}
+
+func TestRunLineChannelIsNeverTreatedAsVerification(t *testing.T) {
+	verifier := &fakeVerifier{byCode: map[string]ChannelAccount{
+		"AB23CD45": {ID: 30, CompanyID: 9},
+	}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	norm := validNorm("Uabc")
+	norm.Request.Subject = "SJT-VERIFY-AB23CD45"
+
+	res, err := wf.Run(context.Background(), norm, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if verifier.markCalled {
+		t.Fatal("a LINE message must never be checked against the verification pattern")
+	}
+	if res.Verified {
+		t.Fatalf("result = %+v, want Verified=false for a non-email channel", res)
+	}
+}
+
+func TestRunTouchesLastInboundOnNewConversation(t *testing.T) {
+	verifier := &fakeVerifier{byCode: map[string]ChannelAccount{}}
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7}},
+		Verifier:      verifier,
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := wf.Run(context.Background(), validNorm("Uabc"), []byte(`{}`)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	waitFor(t, func() bool { return verifier.touchCalled })
+	if verifier.touchAccount != 11 {
+		t.Fatalf("touchAccount = %d, want 11", verifier.touchAccount)
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition not met before deadline")
 }
 
 func TestRunNoReferencedCaseSkipsLookupAndBackfill(t *testing.T) {

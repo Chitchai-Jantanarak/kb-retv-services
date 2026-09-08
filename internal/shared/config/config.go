@@ -8,6 +8,7 @@ type Config struct {
 	Qdrant       Qdrant
 	Memgraph     Memgraph
 	LLM          LLM
+	OAuth        OAuth
 	APIKeys      APIKeys
 	Logger       Logger
 	Swagger      Swagger

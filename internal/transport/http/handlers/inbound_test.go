@@ -198,6 +198,55 @@ func TestInboundHandlerUnknownReceiverReturns404(t *testing.T) {
 	}
 }
 
+type verifiedInboundWorkflow struct{}
+
+func (w *verifiedInboundWorkflow) Run(context.Context, omnichannel.Normalized, []byte) (omnichannel.Result, error) {
+	return omnichannel.Result{CompanyID: 9, Verified: true, VerifiedAccountID: 30}, nil
+}
+
+func TestInboundHandlerResponseIncludesVerifiedFlag(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.EmailNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	handler := NewInboundHandler(&verifiedInboundWorkflow{}, registry)
+	e := echo.New()
+	e.POST("/v1/inbound/:channel", handler.Receive)
+
+	body := `{"message_id":"<m-1@mail>","from":"desk@acme.com","subject":"SJT-VERIFY-AB23CD45","body":"verify"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/email", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"verified":true`) {
+		t.Fatalf("response body = %s, want a verified:true field", rec.Body.String())
+	}
+}
+
+func TestInboundHandlerResponseIncludesVerifiedFalseByDefault(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.LineNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	handler := NewInboundHandler(&recordingInboundWorkflow{}, registry)
+	e := echo.New()
+	e.POST("/v1/inbound/:channel", handler.Receive)
+
+	body := `{"destination":"bot-1","events":[{"source":{"userId":"u"},"message":{"id":"m","type":"text","text":"hi"}}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `"verified":false`) {
+		t.Fatalf("response body = %s, want a verified:false field", rec.Body.String())
+	}
+}
+
 type recordingInboundWorkflow struct {
 	calls int
 }

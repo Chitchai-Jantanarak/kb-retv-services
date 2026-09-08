@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -52,7 +54,46 @@ type ChannelAccount struct {
 
 type AccountResolver interface {
 	ByChannelAndExternalID(ctx context.Context, channel, externalID string) (ChannelAccount, error)
+	// ByRoutingKey looks up the account bound to a mail-binding +sjt-<key>
+	// routing tag. Email-only; checked before ByAlias and the exact-address
+	// match in resolveAccount.
+	ByRoutingKey(ctx context.Context, key string) (ChannelAccount, error)
+	// ByAlias looks up the account a human alias address (channel_aliases)
+	// maps to. Email-only; checked after ByRoutingKey and before the
+	// exact-address match in resolveAccount.
+	ByAlias(ctx context.Context, address string) (ChannelAccount, error)
 }
+
+// AccountVerifier handles the mail-forwarder verification loop: detecting the
+// SJT-VERIFY-<CODE> confirmation mail and stamping last-inbound activity.
+// Optional on Config; when nil, inbound email is never treated as a
+// verification mail and last_inbound_at is never touched.
+type AccountVerifier interface {
+	MarkVerified(ctx context.Context, channel, code string) (ChannelAccount, error)
+	TouchInbound(ctx context.Context, accountID int64) error
+	// StoreForwardConfirm keeps the provider's own forwarding-confirmation
+	// code/link (Gmail's "(#123456789) Gmail Forwarding Confirmation") on the
+	// account that owns routingKey, so the settings page can show it to the
+	// tenant who has to type it into their mailbox.
+	StoreForwardConfirm(ctx context.Context, routingKey, code, link string) (ChannelAccount, error)
+}
+
+// Gmail sends its forwarding confirmation from this address to the forward
+// target (our +sjt-<key> receiver) before any tenant mail can flow.
+const googleForwardingSender = "forwarding-noreply@google.com"
+
+var (
+	forwardConfirmSubjectRE = regexp.MustCompile(`\(#(\d{6,12})\)`)
+	forwardConfirmLinkRE    = regexp.MustCompile(`https://mail-settings\.google\.com/mail/[^\s"'<>]+`)
+)
+
+// verificationSubjectRE matches a verification-code mail subject, tolerating
+// forwarder prefixes ("Fwd:", "Fw:") a mail client may prepend. The code
+// alphabet is [A-Z2-9] (no 0/1/O/I to avoid look-alike confusion); matching is
+// case-insensitive and the captured code is upper-cased before use.
+var verificationSubjectRE = regexp.MustCompile(`(?i)^\s*(?:fwd?:\s*)*SJT-VERIFY-([A-Z2-9]{8})\b`)
+
+const verifyTouchTimeout = 3 * time.Second
 
 type Conversation struct {
 	ID               int64
@@ -142,6 +183,7 @@ type MediaPromoter interface {
 
 type Workflow struct {
 	accounts       AccountResolver
+	verifier       AccountVerifier
 	conversations  ConversationStore
 	messages       MessageStore
 	tickets        TicketEnqueuer
@@ -159,6 +201,7 @@ type Workflow struct {
 
 type Config struct {
 	Accounts       AccountResolver
+	Verifier       AccountVerifier
 	Conversations  ConversationStore
 	Messages       MessageStore
 	Tickets        TicketEnqueuer
@@ -190,6 +233,7 @@ func New(cfg Config) (*Workflow, error) {
 	}
 	return &Workflow{
 		accounts:       cfg.Accounts,
+		verifier:       cfg.Verifier,
 		conversations:  cfg.Conversations,
 		messages:       cfg.Messages,
 		tickets:        cfg.Tickets,
@@ -207,13 +251,24 @@ func New(cfg Config) (*Workflow, error) {
 }
 
 type Result struct {
-	CompanyID      int64
-	ConversationID int64
-	MessageID      int64
-	TicketEnqueued bool
-	IntakeStatus   string
-	IntakeMissing  []string
-	ReferencedCase string
+	CompanyID         int64
+	ConversationID    int64
+	MessageID         int64
+	TicketEnqueued    bool
+	IntakeStatus      string
+	IntakeMissing     []string
+	ReferencedCase    string
+	Verified          bool
+	VerifiedAccountID int64
+	// ForwardConfirm is true when the mail was Gmail's forwarding
+	// confirmation and its code/link were stored on the pending account.
+	ForwardConfirm bool
+	// MatchedVia names how the channel account was resolved: "routing_key",
+	// "alias", or "address". Empty when account resolution failed.
+	MatchedVia string
+	// MatchedAddress is the routing key, alias address, or exact address
+	// that matched, corresponding to MatchedVia.
+	MatchedAddress string
 }
 
 func (w *Workflow) warn(msg string, companyID, convoID int64, err error, extra ...zap.Field) {
@@ -230,6 +285,16 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	if err := req.Validate(); err != nil {
 		return Result{}, fmt.Errorf("omnichannel: invalid request: %w", err)
 	}
+
+	if req.Channel == ChannelEmail {
+		if res, handled := w.tryVerify(ctx, req.Subject); handled {
+			return res, nil
+		}
+		if res, handled := w.tryForwardConfirm(ctx, n); handled {
+			return res, nil
+		}
+	}
+
 	customer := strings.TrimSpace(n.ExternalSender)
 	if customer == "" {
 		return Result{}, errors.New("omnichannel: external sender is required")
@@ -242,7 +307,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		return Result{}, err
 	}
 
-	account, err := w.resolveAccount(ctx, req.Channel, accountKey, n.AccountCandidates)
+	account, matchedVia, matchedAddress, err := w.resolveAccount(ctx, req.Channel, accountKey, n)
 	if err != nil {
 		return Result{}, fmt.Errorf("omnichannel: resolve channel account: %w", err)
 	}
@@ -256,7 +321,7 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	mu.Lock()
 	defer mu.Unlock()
 
-	if dup, found, derr := w.findExisting(ctx, account.CompanyID, req.ExternalMessageID); derr != nil {
+	if dup, found, derr := w.findExisting(ctx, account.CompanyID, req.ExternalMessageID, matchedVia, matchedAddress); derr != nil {
 		return Result{}, derr
 	} else if found {
 		return dup, nil
@@ -266,6 +331,8 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	if err != nil {
 		return Result{}, err
 	}
+
+	w.touchInboundAsync(account.ID)
 
 	msgID, err := w.messages.InsertMessage(ctx, StoredMessage{
 		ConversationID:    convoID,
@@ -296,6 +363,8 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 		ConversationID: convoID,
 		MessageID:      msgID,
 		ReferencedCase: detectReferencedCase(req.Subject, req.Body),
+		MatchedVia:     matchedVia,
+		MatchedAddress: matchedAddress,
 	}
 
 	w.runBackfills(ctx, account.CompanyID, convoID, res.ReferencedCase, customer)
@@ -327,7 +396,7 @@ func (w *Workflow) deleteEmptyConversation(ctx context.Context, companyID, conve
 	}
 }
 
-func (w *Workflow) findExisting(ctx context.Context, companyID int64, externalID string) (Result, bool, error) {
+func (w *Workflow) findExisting(ctx context.Context, companyID int64, externalID, matchedVia, matchedAddress string) (Result, bool, error) {
 	extID := strings.TrimSpace(externalID)
 	if extID == "" {
 		return Result{}, false, nil
@@ -339,7 +408,7 @@ func (w *Workflow) findExisting(ctx context.Context, companyID int64, externalID
 	if !found {
 		return Result{}, false, nil
 	}
-	return Result{CompanyID: companyID, ConversationID: convoID, MessageID: msgID}, true, nil
+	return Result{CompanyID: companyID, ConversationID: convoID, MessageID: msgID, MatchedVia: matchedVia, MatchedAddress: matchedAddress}, true, nil
 }
 
 func (w *Workflow) resolveConversation(ctx context.Context, n Normalized, account ChannelAccount, customer string, req dto.InboundMessageRequest) (convoID int64, created, threadMatched bool, err error) {
@@ -573,21 +642,134 @@ func (w *Workflow) recordTicketEnqueueFailed(ctx context.Context, companyID, con
 	}
 }
 
-func (w *Workflow) resolveAccount(ctx context.Context, channel, primaryKey string, candidates []string) (ChannelAccount, error) {
-	account, err := w.accounts.ByChannelAndExternalID(ctx, channel, primaryKey)
-	if err == nil || !errors.Is(err, ErrAccountNotFound) {
-		return account, err
+// tryVerify checks whether subject is a verification-code mail and, if so,
+// marks the matching channel account verified. handled is true only when the
+// mail was consumed as a verification (match found and account marked); a
+// subject that doesn't match, or a code that matches no pending account,
+// returns handled=false so the caller routes the mail normally.
+func (w *Workflow) tryVerify(ctx context.Context, subject string) (Result, bool) {
+	if w.verifier == nil {
+		return Result{}, false
 	}
-	for _, candidate := range candidates {
+	m := verificationSubjectRE.FindStringSubmatch(subject)
+	if m == nil {
+		return Result{}, false
+	}
+	code := strings.ToUpper(m[1])
+	acc, err := w.verifier.MarkVerified(ctx, ChannelEmail, code)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			w.log.Info("omnichannel: verification code mail matched no pending account",
+				zap.String("code", code))
+		} else {
+			w.log.Warn("omnichannel: mark account verified failed",
+				zap.String("code", code), zap.Error(err))
+		}
+		return Result{}, false
+	}
+	return Result{CompanyID: acc.CompanyID, Verified: true, VerifiedAccountID: acc.ID}, true
+}
+
+// tryForwardConfirm consumes Gmail's forwarding-confirmation mail: it never
+// belongs to a tenant conversation, and the code inside it is what the
+// tenant needs to finish "Add a forwarding address". The code/link are
+// stored on the first +sjt-<key> account the mail was addressed to. handled
+// is true for any such mail, matched or not, so the poller does not retry it.
+func (w *Workflow) tryForwardConfirm(ctx context.Context, n Normalized) (Result, bool) {
+	if w.verifier == nil {
+		return Result{}, false
+	}
+	subject := n.Request.Subject
+	if !strings.EqualFold(strings.TrimSpace(n.ExternalSender), googleForwardingSender) &&
+		!strings.Contains(strings.ToLower(subject), "forwarding confirmation") {
+		return Result{}, false
+	}
+	code, link := "", ""
+	if m := forwardConfirmSubjectRE.FindStringSubmatch(subject); m != nil {
+		code = m[1]
+	}
+	link = forwardConfirmLinkRE.FindString(n.Request.Body)
+	if code == "" && link == "" {
+		return Result{}, false
+	}
+	for _, key := range n.RoutingKeys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		acc, err := w.verifier.StoreForwardConfirm(ctx, key, code, link)
+		if err != nil {
+			w.log.Info("omnichannel: forwarding confirmation matched no account",
+				zap.String("routing_key", key), zap.Error(err))
+			continue
+		}
+		return Result{CompanyID: acc.CompanyID, ForwardConfirm: true, VerifiedAccountID: acc.ID}, true
+	}
+	w.log.Info("omnichannel: forwarding confirmation mail had no matching routing key",
+		zap.Strings("routing_keys", n.RoutingKeys), zap.String("code", code))
+	return Result{ForwardConfirm: true}, true
+}
+
+func (w *Workflow) touchInboundAsync(accountID int64) {
+	if w.verifier == nil || accountID <= 0 {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), verifyTouchTimeout)
+		defer cancel()
+		if err := w.verifier.TouchInbound(ctx, accountID); err != nil {
+			w.log.Debug("omnichannel: touch last_inbound_at failed",
+				zap.Int64("channel_account_id", accountID), zap.Error(err))
+		}
+	}()
+}
+
+// resolveAccount finds the channel account an inbound message belongs to.
+// For email it tries, in order: a +sjt-<key> routing key (n.RoutingKeys), a
+// human alias address (n.AccountCandidates against channel_aliases), then
+// the existing exact channel+external_id match (primaryKey, then each
+// remaining candidate). Non-email channels only ever use the exact match.
+// The returned via/address describe which of those found the account; both
+// are empty when resolution failed.
+func (w *Workflow) resolveAccount(ctx context.Context, channel, primaryKey string, n Normalized) (account ChannelAccount, via, address string, err error) {
+	if channel == ChannelEmail {
+		for _, key := range n.RoutingKeys {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if acc, rerr := w.accounts.ByRoutingKey(ctx, key); rerr == nil {
+				return acc, "routing_key", key, nil
+			}
+		}
+		for _, candidate := range n.AccountCandidates {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			if acc, aerr := w.accounts.ByAlias(ctx, candidate); aerr == nil {
+				return acc, "alias", candidate, nil
+			}
+		}
+	}
+
+	account, err = w.accounts.ByChannelAndExternalID(ctx, channel, primaryKey)
+	if err == nil {
+		return account, "address", primaryKey, nil
+	}
+	if !errors.Is(err, ErrAccountNotFound) {
+		return account, "", "", err
+	}
+	for _, candidate := range n.AccountCandidates {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "" || candidate == primaryKey {
 			continue
 		}
 		if acc, cerr := w.accounts.ByChannelAndExternalID(ctx, channel, candidate); cerr == nil {
-			return acc, nil
+			return acc, "address", candidate, nil
 		}
 	}
-	return account, err
+	return account, "", "", err
 }
 
 func (w *Workflow) resolveThreadConversation(ctx context.Context, n Normalized) (int64, bool) {

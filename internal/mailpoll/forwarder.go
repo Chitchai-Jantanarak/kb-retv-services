@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -26,6 +27,7 @@ type EmailPayload struct {
 	AutoSubmitted   string       `json:"auto_submitted"`
 	ListUnsubscribe bool         `json:"list_unsubscribe"`
 	Precedence      string       `json:"precedence"`
+	DeliveredTo     []string     `json:"delivered_to"`
 	Attachments     []Attachment `json:"attachments"`
 }
 
@@ -68,11 +70,19 @@ func (f *Forwarder) Forward(ctx context.Context, p EmailPayload) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
+		resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusRequestTimeout {
+		return fmt.Errorf("inbound returned status %d: %w", resp.StatusCode, ErrRejected)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("inbound returned status %d", resp.StatusCode)
 	}
 	return nil
 }
+
+// ErrRejected wraps a 4xx from the inbound API (unknown receiver, bad
+// payload): retrying can never succeed, so the poller skips the message.
+var ErrRejected = errors.New("inbound rejected message")
 
 func Sign(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))

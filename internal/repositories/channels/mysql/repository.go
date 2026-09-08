@@ -14,6 +14,7 @@ import (
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
+	"github.com/my/app/internal/gmailconn"
 	"github.com/my/app/internal/infra/tenant"
 	"github.com/my/app/internal/shared/ctxkey"
 )
@@ -41,15 +42,154 @@ func (r *Repository) ByChannelAndExternalID(ctx context.Context, channel, extern
 	err := r.db.QueryRowContext(ctx, `
 SELECT id, company_id, channel, external_id
 FROM channel_accounts
-WHERE channel = ? AND external_id = ? AND is_active = 1
+WHERE channel = ? AND external_id = ? AND is_active = 1 AND (channel <> 'email' OR verified_at IS NOT NULL)
 LIMIT 1`, channel, externalID).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for %s/%s: %w", channel, externalID, omnichannel.ErrAccountNotFound)
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active verified account for %s/%s: %w", channel, externalID, omnichannel.ErrAccountNotFound)
 	}
 	if err != nil {
 		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: query: %w", err)
 	}
 	return acc, nil
+}
+
+// ByRoutingKey looks up the account bound to a mail-binding's +sjt-<key>
+// routing tag (channel_accounts.routing_key). Email-only accounts must also
+// be verified.
+func (r *Repository) ByRoutingKey(ctx context.Context, key string) (omnichannel.ChannelAccount, error) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return omnichannel.ChannelAccount{}, errors.New("channel_accounts: routing_key required")
+	}
+	var acc omnichannel.ChannelAccount
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, company_id, channel, external_id
+FROM channel_accounts
+WHERE routing_key = ? AND is_active = 1 AND (channel <> 'email' OR verified_at IS NOT NULL)
+LIMIT 1`, key).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active verified account for routing_key %s: %w", key, omnichannel.ErrAccountNotFound)
+	}
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: query by routing_key: %w", err)
+	}
+	return acc, nil
+}
+
+// ByAlias looks up the account a human alias address (channel_aliases) maps
+// to. The alias must be active and the owning account active and verified.
+func (r *Repository) ByAlias(ctx context.Context, address string) (omnichannel.ChannelAccount, error) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return omnichannel.ChannelAccount{}, errors.New("channel_accounts: alias address required")
+	}
+	var acc omnichannel.ChannelAccount
+	err := r.db.QueryRowContext(ctx, `
+SELECT c.id, c.company_id, c.channel, c.external_id
+FROM channel_accounts c
+JOIN channel_aliases a ON a.channel_account_id = c.id
+WHERE a.address = ? AND a.status = 'active' AND c.is_active = 1 AND c.verified_at IS NOT NULL
+LIMIT 1`, address).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no active account for alias %s: %w", address, omnichannel.ErrAccountNotFound)
+	}
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: query by alias: %w", err)
+	}
+	return acc, nil
+}
+
+// MarkVerified confirms the channel account that owns code, the 8-character
+// value from the SJT-VERIFY-<CODE> mail Laravel sent to prove the tenant's
+// forwarder is wired up. verification_code is unique per pending account, so
+// the update targets a single unverified row; a zero-row update means the
+// code is unknown or was already consumed.
+func (r *Repository) MarkVerified(ctx context.Context, channel, code string) (omnichannel.ChannelAccount, error) {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	code = strings.ToUpper(strings.TrimSpace(code))
+	if channel == "" || code == "" {
+		return omnichannel.ChannelAccount{}, errors.New("channel_accounts: channel + verification_code required")
+	}
+	res, err := r.db.ExecContext(ctx, `
+UPDATE channel_accounts
+SET verified_at = NOW()
+WHERE channel = ? AND verification_code = ? AND verified_at IS NULL
+LIMIT 1`, channel, code)
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: mark verified: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: mark verified rows affected: %w", err)
+	}
+	if affected == 0 {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no unverified account for %s/%s: %w", channel, code, omnichannel.ErrAccountNotFound)
+	}
+	var acc omnichannel.ChannelAccount
+	err = r.db.QueryRowContext(ctx, `
+SELECT id, company_id, channel, external_id
+FROM channel_accounts
+WHERE channel = ? AND verification_code = ?
+LIMIT 1`, channel, code).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: read back verified account: %w", err)
+	}
+	return acc, nil
+}
+
+// StoreForwardConfirm records the provider's forwarding-confirmation code and
+// link on the account that owns routingKey (credentials JSON keys
+// forward_confirm_code / forward_confirm_link / forward_confirm_at), whether
+// or not the account is verified yet: the confirmation always arrives first.
+func (r *Repository) StoreForwardConfirm(ctx context.Context, routingKey, code, link string) (omnichannel.ChannelAccount, error) {
+	routingKey = strings.ToLower(strings.TrimSpace(routingKey))
+	code = strings.TrimSpace(code)
+	link = strings.TrimSpace(link)
+	if routingKey == "" || (code == "" && link == "") {
+		return omnichannel.ChannelAccount{}, errors.New("channel_accounts: routing_key and a code or link required")
+	}
+	res, err := r.db.ExecContext(ctx, `
+UPDATE channel_accounts
+SET credentials = JSON_SET(COALESCE(credentials, JSON_OBJECT()),
+    '$.forward_confirm_code', ?,
+    '$.forward_confirm_link', ?,
+    '$.forward_confirm_at', DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ'))
+WHERE channel = 'email' AND routing_key = ?
+LIMIT 1`, code, link, routingKey)
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: store forward confirm: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: store forward confirm rows affected: %w", err)
+	}
+	if affected == 0 {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: no email account for routing_key %s: %w", routingKey, omnichannel.ErrAccountNotFound)
+	}
+	var acc omnichannel.ChannelAccount
+	err = r.db.QueryRowContext(ctx, `
+SELECT id, company_id, channel, external_id
+FROM channel_accounts
+WHERE channel = 'email' AND routing_key = ?
+LIMIT 1`, routingKey).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
+	if err != nil {
+		return omnichannel.ChannelAccount{}, fmt.Errorf("channel_accounts: read back forward-confirm account: %w", err)
+	}
+	return acc, nil
+}
+
+// TouchInbound stamps last_inbound_at for the account that just received
+// mail. Best-effort: callers treat a failure here as non-fatal to the inbound
+// pipeline.
+func (r *Repository) TouchInbound(ctx context.Context, accountID int64) error {
+	if accountID <= 0 {
+		return errors.New("channel_accounts: account_id required")
+	}
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE channel_accounts SET last_inbound_at = NOW() WHERE id = ?`, accountID); err != nil {
+		return fmt.Errorf("channel_accounts: touch inbound: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) UpsertConversation(ctx context.Context, c omnichannel.Conversation) (int64, bool, error) {
@@ -357,10 +497,79 @@ func nullableString(s string) any {
 	return s
 }
 
+// ListOAuthGmail returns every active, OAuth-connected Gmail channel account
+// across all tenants. credentials is a native JSON column; the LIKE filter is
+// a cheap pre-filter ahead of the JSON_EXTRACT so a full table scan of
+// channel_accounts never has to parse JSON for LINE/other non-Gmail rows.
+func (r *Repository) ListOAuthGmail(ctx context.Context) ([]gmailconn.OAuthAccount, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, company_id, external_id,
+       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(credentials, '$.oauth_refresh_enc')), ''),
+       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(credentials, '$.oauth_history_id')), '')
+FROM channel_accounts
+WHERE channel = 'email' AND is_active = 1 AND credentials LIKE '%"oauth_provider":"google"%'`)
+	if err != nil {
+		return nil, fmt.Errorf("channel_accounts: list oauth gmail: %w", err)
+	}
+	defer rows.Close()
+
+	var out []gmailconn.OAuthAccount
+	for rows.Next() {
+		var acc gmailconn.OAuthAccount
+		if err := rows.Scan(&acc.ID, &acc.CompanyID, &acc.ExternalID, &acc.RefreshEnc, &acc.HistoryID); err != nil {
+			return nil, fmt.Errorf("channel_accounts: scan oauth gmail: %w", err)
+		}
+		out = append(out, acc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("channel_accounts: iterate oauth gmail: %w", err)
+	}
+	return out, nil
+}
+
+// SaveHistoryID stores the Gmail historyId processed through in the last
+// poll, so the next poll can resume from it instead of re-scanning.
+func (r *Repository) SaveHistoryID(ctx context.Context, id int64, historyID string) error {
+	if id <= 0 {
+		return errors.New("channel_accounts: id required")
+	}
+	historyID = strings.TrimSpace(historyID)
+	if historyID == "" {
+		return errors.New("channel_accounts: history_id required")
+	}
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE channel_accounts SET credentials = JSON_SET(credentials, '$.oauth_history_id', ?) WHERE id = ?`,
+		historyID, id); err != nil {
+		return fmt.Errorf("channel_accounts: save history id: %w", err)
+	}
+	return nil
+}
+
+// MarkOAuthState records whether an OAuth-connected account's refresh token
+// is currently usable ("ok") or was rejected by Google and needs the tenant
+// to reconnect through the Laravel consent flow ("needs_reconnect").
+func (r *Repository) MarkOAuthState(ctx context.Context, id int64, state string) error {
+	if id <= 0 {
+		return errors.New("channel_accounts: id required")
+	}
+	state = strings.TrimSpace(state)
+	if state != gmailconn.OAuthStateOK && state != gmailconn.OAuthStateNeedsReconnect {
+		return fmt.Errorf("channel_accounts: invalid oauth state %q", state)
+	}
+	if _, err := r.db.ExecContext(ctx, `
+UPDATE channel_accounts SET credentials = JSON_SET(credentials, '$.oauth_state', ?) WHERE id = ?`,
+		state, id); err != nil {
+		return fmt.Errorf("channel_accounts: mark oauth state: %w", err)
+	}
+	return nil
+}
+
 var (
 	_ omnichannel.AccountResolver   = (*Repository)(nil)
+	_ omnichannel.AccountVerifier   = (*Repository)(nil)
 	_ omnichannel.ConversationStore = (*Repository)(nil)
 	_ omnichannel.MessageStore      = (*Repository)(nil)
 	_ omnichannel.BackfillWriter    = (*Repository)(nil)
 	_ intake.Sink                   = (*Repository)(nil)
+	_ gmailconn.AccountStore        = (*Repository)(nil)
 )

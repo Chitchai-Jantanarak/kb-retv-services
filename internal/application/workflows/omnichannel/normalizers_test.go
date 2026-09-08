@@ -198,6 +198,30 @@ func TestEmailNormalizerCarriesAttachmentSignals(t *testing.T) {
 	}
 }
 
+func TestEmailNormalizerExtractsRoutingKeysFromToCcAndDeliveredTo(t *testing.T) {
+	raw := `{"message_id":"<m-3@mail>","from":"alice@example.com","to":"Name <chitchai5757+SJT-8f31a2@gmail.com>","recipients":["chitchai5757+sjt-8f31a2@gmail.com","cc-tag+sjt-b91cde@gmail.com"],"delivered_to":["chitchai5757+sjt-99z9z9@gmail.com","Fwd <SJT-o7lp8lkx@grubgrob.xyz>","notsjt-abcdef@grubgrob.xyz"],"subject":"help","body":"hi"}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	want := []string{"8f31a2", "b91cde", "99z9z9", "o7lp8lkx"}
+	if !reflect.DeepEqual(got.RoutingKeys, want) {
+		t.Fatalf("RoutingKeys = %v, want %v", got.RoutingKeys, want)
+	}
+}
+
+func TestEmailNormalizerCandidatesIncludeDeliveredTo(t *testing.T) {
+	raw := `{"message_id":"<m-4@mail>","from":"alice@example.com","to":"alice@example.com","recipients":["alice@example.com"],"delivered_to":["Support <support-smartjob@idio-tech.com>"],"subject":"help","body":"hi"}`
+	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	want := []string{"alice@example.com", "support-smartjob@idio-tech.com"}
+	if !reflect.DeepEqual(got.AccountCandidates, want) {
+		t.Fatalf("candidates = %v, want %v", got.AccountCandidates, want)
+	}
+}
+
 func TestEmailNormalizerDecodesAttachmentBytes(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"a.jpg","mime_type":"image/jpeg","size_bytes":5,"content_b64":"aGVsbG8="},{"filename":"b.png","mime_type":"image/png","size_bytes":5,"content_b64":"d29ybGQ="}]}`
 	got, err := EmailNormalizer{}.Normalize([]byte(raw))
