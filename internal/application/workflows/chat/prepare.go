@@ -71,6 +71,7 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 	timedChat(timings, "contextualize", func() {
 		routed, _ = w.contextualize(decideCtx, req.Locale, req, lastUser, candidates, companyID)
 	})
+	decideCtx = ctxkey.WithTranscript(decideCtx, contextualizeTranscript(req.Messages))
 
 	outcome, err := decider.Decide(decideCtx, decide.Input{
 		Actor:          toolActor(ctx, companyID),

@@ -13,6 +13,7 @@ const (
 	citeCandidatesKey
 	queryVectorKey
 	routerIntentKey
+	transcriptKey
 )
 
 type Principal struct {
@@ -136,6 +137,18 @@ func WithQueryVector(ctx context.Context, vector []float32) context.Context {
 func QueryVector(ctx context.Context) []float32 {
 	vector, _ := ctx.Value(queryVectorKey).([]float32)
 	return vector
+}
+
+func WithTranscript(ctx context.Context, transcript string) context.Context {
+	if transcript == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, transcriptKey, transcript)
+}
+
+func Transcript(ctx context.Context) string {
+	transcript, _ := ctx.Value(transcriptKey).(string)
+	return transcript
 }
 
 func WithRouterIntent(ctx context.Context, intent string) context.Context {
