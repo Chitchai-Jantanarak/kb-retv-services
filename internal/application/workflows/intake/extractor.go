@@ -15,7 +15,7 @@ import (
 var intakeMailDelimiter = regexp.MustCompile(`(?i)\[\s*(?:begin|end)\s+mail\b[^\]]*\]`)
 
 const (
-	maxMessageChars   = 8000
+	maxMessageRunes   = 8000
 	maxProductHints   = 30
 	maxReasoningRunes = 600
 )
@@ -266,8 +266,9 @@ func composeMessage(subject, body string) string {
 	}
 	b.WriteString(body)
 	message := strings.TrimSpace(b.String())
-	if len(message) > maxMessageChars {
-		message = message[:maxMessageChars]
+	runes := []rune(message)
+	if len(runes) > maxMessageRunes {
+		message = string(runes[:maxMessageRunes])
 	}
 	return message
 }
