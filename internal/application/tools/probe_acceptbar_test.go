@@ -104,9 +104,10 @@ func probeBoundSelector(t *testing.T) (context.Context, config.Config, ports.Emb
 			catalog = append(catalog, tl)
 		}
 	}
-	guard, _, _, _ := llmboot.GuardEmbedder(cfg, nil)
+	guard, _, note, gerr := llmboot.GuardEmbedder(cfg, nil)
 	if guard == nil {
-		t.Fatal("guard embedder unavailable")
+		t.Fatalf("guard embedder unavailable: provider=%q assetDir=%q note=%q err=%v",
+			cfg.Chat.GuardEmbedderProvider, cfg.Chat.GuardEmbedderAssetDir, note, gerr)
 	}
 	ctx := context.Background()
 	sel, err := NewSelector(ctx, guard, catalog, WithNameSource(probeGazetteer()))

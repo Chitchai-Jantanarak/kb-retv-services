@@ -82,7 +82,7 @@ func TestProbeHardCases(t *testing.T) {
 	for _, tl := range catalog {
 		valid[tl.ID] = true
 	}
-	system := fmt.Sprintf(tier2System, tier2ToolList(catalog))
+	system := fmt.Sprintf(modelSelectorSystem, modelToolList(catalog))
 
 	models := []string{"gemini-3.5-flash-lite"}
 	if m := os.Getenv("TIER2_MODELS"); m != "" {
@@ -99,7 +99,7 @@ func TestProbeHardCases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("gemini %s: %v", model, err)
 		}
-		results := runTier2(t.Context(), provider, model, system, plain, valid)
+		results := runTier2(t.Context(), provider, system, plain, valid)
 
 		acceptable, unacceptable, wroteOnRead, invented, invalid := 0, 0, 0, 0, 0
 		var lat []time.Duration

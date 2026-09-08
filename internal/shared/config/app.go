@@ -48,6 +48,9 @@ type Chat struct {
 	GuardEmbedderAssetDir string
 	SelectorRejectMargin  float64
 	OffTopicMargin        float64
+	SelectorModel         string
+	SelectorAccept        float64
+	SelectorMargin        float64
 }
 
 type Embedding struct {

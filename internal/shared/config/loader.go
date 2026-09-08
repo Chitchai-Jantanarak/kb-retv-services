@@ -145,6 +145,9 @@ func configFrom(v *viper.Viper) Config {
 			GuardEmbedderAssetDir: v.GetString("chat.guardEmbedderAssetDir"),
 			SelectorRejectMargin:  v.GetFloat64("chat.selectorRejectMargin"),
 			OffTopicMargin:        v.GetFloat64("chat.offTopicMargin"),
+			SelectorModel:         v.GetString("chat.selectorModel"),
+			SelectorAccept:        v.GetFloat64("chat.selectorAccept"),
+			SelectorMargin:        v.GetFloat64("chat.selectorMargin"),
 		},
 		Embedding: Embedding{
 			RefreshMaxChunks:  v.GetInt("embedding.refreshMaxChunks"),

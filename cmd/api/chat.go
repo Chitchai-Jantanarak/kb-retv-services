@@ -20,6 +20,7 @@ import (
 	"github.com/my/app/internal/domain/ports"
 	"github.com/my/app/internal/infra/attachments"
 	"github.com/my/app/internal/infra/llm"
+	"github.com/my/app/internal/infra/llm/gemini"
 	"github.com/my/app/internal/infra/memcache"
 	"github.com/my/app/internal/infra/tenant"
 	transcribegemini "github.com/my/app/internal/infra/transcribe/gemini"
@@ -195,8 +196,23 @@ func appendChatIntelligenceOptions(
 		return chatOpts, nil
 	}
 
+	var decider skeleton.ToolSelector = selector
+	if cfg.Chat.SelectorModel != "" && cfg.APIKeys.Gemini != "" {
+		if tier2, tier2Err := buildTier2Selector(cfg, qdb, bound); tier2Err != nil {
+			log.Warn("tier 2 tool selector not configured, falling back to tier 0 only", zap.Error(tier2Err))
+			log.Info("tool selector configured", zap.String("decider", "tier0"))
+		} else {
+			decider = tools.NewCascade(selector, tier2, cfg.Chat.SelectorAccept, cfg.Chat.SelectorMargin)
+			log.Info("tool selector configured",
+				zap.String("decider", "cascade"),
+				zap.String("tier2_model", cfg.Chat.SelectorModel))
+		}
+	} else {
+		log.Info("tool selector configured", zap.String("decider", "tier0"))
+	}
+
 	orch := skeleton.New(
-		selector,
+		decider,
 		bound,
 		broker.Handlers(),
 		toolaudit.New(
@@ -212,4 +228,14 @@ func appendChatIntelligenceOptions(
 		zap.Strings("unbound", broker.UnboundIDs(catalog)))
 
 	return chatOpts, nil
+}
+
+func buildTier2Selector(cfg config.Config, qdb tenant.Querier, bound []tools.Tool) (*tools.ModelSelector, error) {
+	client, err := gemini.New(gemini.Config{APIKey: cfg.APIKeys.Gemini, Model: cfg.Chat.SelectorModel})
+	if err != nil {
+		return nil, err
+	}
+	var provider ports.LLMProvider = client
+	provider = llm.NewRecording(provider, "gemini", cfg.Chat.SelectorModel, mysqlai.NewRequestLogRepo(qdb))
+	return tools.NewModelSelector(provider, bound), nil
 }

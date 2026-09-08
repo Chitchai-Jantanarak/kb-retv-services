@@ -24,32 +24,7 @@ type tier2Result struct {
 	err     error
 }
 
-func tier2ToolList(catalog []Tool) string {
-	var b strings.Builder
-	for _, tl := range catalog {
-		names := make([]string, 0, len(tl.Params))
-		for _, p := range tl.Params {
-			names = append(names, p.Name)
-		}
-		fmt.Fprintf(&b, "- %s: %s", tl.ID, tl.Description)
-		if len(names) > 0 {
-			fmt.Fprintf(&b, " (params: %s)", strings.Join(names, ", "))
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString("- no_tool: the request needs none of the tools above, asks for something no tool can do, or is small talk\n")
-	return b.String()
-}
-
-const tier2System = `You route one support-desk chat message to exactly one tool from the list, or to no_tool.
-Pick no_tool when the request asks for an action no tool performs (delete, send, refund, quote, export, booking, HR), when it is small talk, or when you are not confident which tool applies.
-Never invent case codes, names, or ids that are not in the message. Copy them exactly as written.
-Reply with JSON only, no prose: {"tool_id": "<id or no_tool>", "params": {"<name>": "<value>"}}
-
-Tools:
-%s`
-
-func runTier2(ctx context.Context, provider ports.LLMProvider, model, system string, cases []acceptBarCase, valid map[string]bool) []tier2Result {
+func runTier2(ctx context.Context, provider ports.LLMProvider, system string, cases []acceptBarCase, valid map[string]bool) []tier2Result {
 	out := make([]tier2Result, len(cases))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
@@ -107,7 +82,7 @@ func TestProbeTier2(t *testing.T) {
 	for _, tl := range catalog {
 		valid[tl.ID] = true
 	}
-	system := fmt.Sprintf(tier2System, tier2ToolList(catalog))
+	system := fmt.Sprintf(modelSelectorSystem, modelToolList(catalog))
 	t.Logf("declaration set: %d tools + no_tool, system prompt %d bytes", len(catalog), len(system))
 
 	models := []string{"gemini-2.5-flash-lite", "gemini-2.5-flash"}
@@ -120,7 +95,7 @@ func TestProbeTier2(t *testing.T) {
 		if err != nil {
 			t.Fatalf("gemini %s: %v", model, err)
 		}
-		results := runTier2(ctx, provider, model, system, acceptBarCases, valid)
+		results := runTier2(ctx, provider, system, acceptBarCases, valid)
 
 		answered, correct, wrong, falsefire, abstainOK, missed, invalid := 0, 0, 0, 0, 0, 0, 0
 		var lat []time.Duration
