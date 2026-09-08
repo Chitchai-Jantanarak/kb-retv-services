@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"path/filepath"
 	"strings"
 
 	"github.com/my/app/internal/application/dto"
@@ -30,9 +32,10 @@ type lineSource struct {
 }
 
 type lineMessage struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Text string `json:"text"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	FileName string `json:"fileName"`
 }
 
 type LineNormalizer struct{}
@@ -65,6 +68,12 @@ func (n LineNormalizer) Normalize(raw []byte) (Normalized, error) {
 	case "audio":
 		body = ""
 		attachments = []dto.AttachmentRef{{ID: ev.Message.ID, MIMEType: "audio/m4a"}}
+	case "video":
+		body = ""
+		attachments = []dto.AttachmentRef{{ID: ev.Message.ID, MIMEType: "video/mp4"}}
+	case "file":
+		body = ev.Message.FileName
+		attachments = []dto.AttachmentRef{{ID: ev.Message.ID, MIMEType: mimeForFileName(ev.Message.FileName)}}
 	}
 
 	return Normalized{
@@ -87,4 +96,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func mimeForFileName(name string) string {
+	if m := mime.TypeByExtension(strings.ToLower(filepath.Ext(name))); m != "" {
+		if i := strings.IndexByte(m, ';'); i > 0 {
+			m = m[:i]
+		}
+		return m
+	}
+	return "application/octet-stream"
 }

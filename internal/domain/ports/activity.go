@@ -3,13 +3,13 @@ package ports
 import "context"
 
 const (
-	ActorTypeChannel  = "channel"
-	ActorTypeAIAgent  = "ai_agent"
-	ActorTypeService  = "service"
-	ActorTypeSystem   = "system"
-	ActivityCreate    = "create"
-	ActivityUpdate    = "update"
-	ActivityDelete    = "delete"
+	ActorTypeChannel = "channel"
+	ActorTypeAIAgent = "ai_agent"
+	ActorTypeService = "service"
+	ActorTypeSystem  = "system"
+	ActivityCreate   = "create"
+	ActivityUpdate   = "update"
+	ActivityDelete   = "delete"
 )
 
 type ActivityEntry struct {

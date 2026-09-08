@@ -14,7 +14,7 @@ import (
 const (
 	defaultBaseURL  = "https://api-data.line.me"
 	defaultTimeout  = 15 * time.Second
-	maxContentBytes = 10 << 20
+	maxContentBytes = 40 << 20
 )
 
 type ContentClient struct {
