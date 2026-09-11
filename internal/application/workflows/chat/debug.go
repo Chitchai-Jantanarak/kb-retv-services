@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -26,13 +27,18 @@ var sensitiveToolParamParts = []string{
 	"token",
 }
 
+func chatDebugAllowedInEnv() bool {
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("APP_ENV")))
+
+	return env != "prod" && env != "production"
+}
+
 func authorizeChatDebug(ctxPrincipal ctxkey.Principal, requested bool) bool {
 	if !requested {
 		return false
 	}
-	role := strings.ToLower(strings.TrimSpace(ctxPrincipal.Role))
-	if role == "super_admin" || role == "superadmin" || role == "system" {
-		return true
+	if !chatDebugAllowedInEnv() {
+		return false
 	}
 	for _, permission := range ctxPrincipal.Perms {
 		if strings.EqualFold(strings.TrimSpace(permission), chatDebugPermission) {
