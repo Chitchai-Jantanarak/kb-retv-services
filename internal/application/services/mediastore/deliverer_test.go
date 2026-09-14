@@ -176,7 +176,7 @@ func TestPromoteBytesDelivers(t *testing.T) {
 	}
 	p := NewPromoter(&stubFetcher{}, d)
 
-	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", []byte("email-bytes"))
+	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", "photo.png", []byte("email-bytes"))
 	if err != nil {
 		t.Fatalf("PromoteBytes: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestPromoteBytesPropagatesDeliveryFailure(t *testing.T) {
 	}
 	p := NewPromoter(&stubFetcher{}, d)
 
-	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", []byte("email-bytes"))
+	err = p.PromoteBytes(context.Background(), 7, 100, 200, "msg-1#0", "image/png", "photo.png", []byte("email-bytes"))
 	if err == nil || !strings.Contains(err.Error(), "status 500") {
 		t.Fatalf("err = %v, want status 500", err)
 	}

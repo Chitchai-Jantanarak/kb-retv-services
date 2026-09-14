@@ -178,7 +178,7 @@ type AssessmentDraftLoader interface {
 
 type MediaPromoter interface {
 	Promote(ctx context.Context, companyID, conversationID, messageID int64, ref dto.AttachmentRef) error
-	PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error
+	PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType, filename string, data []byte) error
 }
 
 type Workflow struct {
@@ -444,7 +444,7 @@ func (w *Workflow) promoteAttachments(ctx context.Context, account ChannelAccoun
 	case req.Channel == ChannelEmail && len(n.Attachments) > 0:
 		for i, att := range n.Attachments {
 			externalID := fmt.Sprintf("%s#%d", req.ExternalMessageID, i)
-			if perr := w.mediaPromoter.PromoteBytes(ctx, account.CompanyID, convoID, msgID, externalID, att.MIMEType, att.Data); perr != nil {
+			if perr := w.mediaPromoter.PromoteBytes(ctx, account.CompanyID, convoID, msgID, externalID, att.MIMEType, att.Filename, att.Data); perr != nil {
 				w.warn("omnichannel: media promotion failed", account.CompanyID, convoID, perr,
 					zap.Int64("message_id", msgID),
 					zap.String("attachment_id", externalID))

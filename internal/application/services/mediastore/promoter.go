@@ -36,16 +36,17 @@ func (p *Promoter) Promote(ctx context.Context, companyID, conversationID, messa
 	if strings.TrimSpace(mime) == "" {
 		mime = ref.MIMEType
 	}
-	return p.PromoteBytes(ctx, companyID, conversationID, messageID, ref.ID, mime, data)
+	return p.PromoteBytes(ctx, companyID, conversationID, messageID, ref.ID, mime, "", data)
 }
 
-func (p *Promoter) PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error {
+func (p *Promoter) PromoteBytes(ctx context.Context, companyID, conversationID, messageID int64, externalID, mimeType, filename string, data []byte) error {
 	payload := Payload{
 		CompanyID:         companyID,
 		ConversationID:    conversationID,
 		MessageID:         messageID,
 		ExternalMessageID: externalID,
 		MIMEType:          mimeType,
+		Filename:          filename,
 		DataBase64:        base64.StdEncoding.EncodeToString(data),
 	}
 	if err := p.deliverer.Deliver(ctx, payload); err != nil {

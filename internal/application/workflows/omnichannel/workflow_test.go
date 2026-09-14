@@ -256,7 +256,7 @@ func (p *capturingPromoter) Promote(_ context.Context, companyID, conversationID
 	return p.err
 }
 
-func (p *capturingPromoter) PromoteBytes(_ context.Context, companyID, conversationID, messageID int64, externalID, mimeType string, data []byte) error {
+func (p *capturingPromoter) PromoteBytes(_ context.Context, companyID, conversationID, messageID int64, externalID, mimeType, _ string, data []byte) error {
 	p.bytesCalls = append(p.bytesCalls, promoteBytesCall{companyID, conversationID, messageID, externalID, mimeType, data})
 	return p.err
 }
