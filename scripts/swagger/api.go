@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/my/app/internal/application/dto"
+	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/transport/http/response"
 )
 
@@ -14,6 +15,8 @@ var (
 	_ = dto.SearchRequest{}
 	_ = dto.SearchResponse{}
 	_ = response.Envelope{}
+	_ = llm.TaskModels{}
+	_ = llm.CatalogSnapshot{}
 )
 
 type lineInboundWebhookRequest struct {
@@ -347,3 +350,251 @@ func knowledgeGapsReport() {}
 // @Failure 503 {object} response.Envelope
 // @Router /internal/review-queue [post]
 func receiveReviewQueueCallback() {}
+
+type aiUsageTotals struct {
+	Requests     int64 `json:"requests" example:"1200"`
+	Errors       int64 `json:"errors" example:"14"`
+	InputTokens  int64 `json:"input_tokens" example:"450000"`
+	OutputTokens int64 `json:"output_tokens" example:"98000"`
+	LatencyAvgMS int64 `json:"latency_avg_ms" example:"850"`
+	LatencyP50MS int64 `json:"latency_p50_ms" example:"700"`
+	LatencyP95MS int64 `json:"latency_p95_ms" example:"2100"`
+}
+
+type aiUsageToday struct {
+	Requests     int64 `json:"requests" example:"80"`
+	Errors       int64 `json:"errors" example:"1"`
+	InputTokens  int64 `json:"input_tokens" example:"30000"`
+	OutputTokens int64 `json:"output_tokens" example:"6200"`
+}
+
+type aiUsageDay struct {
+	Date         string         `json:"date" example:"2026-09-07"`
+	Requests     int64          `json:"requests" example:"150"`
+	Errors       int64          `json:"errors" example:"2"`
+	InputTokens  int64          `json:"input_tokens" example:"56000"`
+	OutputTokens int64          `json:"output_tokens" example:"12000"`
+	ByVendor     map[string]int `json:"by_vendor"`
+	ByStatus     map[string]int `json:"by_status"`
+}
+
+type aiUsageModel struct {
+	Vendor       string `json:"vendor" example:"google"`
+	Model        string `json:"model" example:"gemini-2.5-flash"`
+	Requests     int64  `json:"requests" example:"600"`
+	Errors       int64  `json:"errors" example:"5"`
+	InputTokens  int64  `json:"input_tokens" example:"220000"`
+	OutputTokens int64  `json:"output_tokens" example:"45000"`
+	LatencyAvgMS int64  `json:"latency_avg_ms" example:"820"`
+}
+
+type aiUsageModelDay struct {
+	Date         string `json:"date" example:"2026-09-07"`
+	Requests     int64  `json:"requests" example:"80"`
+	Errors       int64  `json:"errors" example:"1"`
+	InputTokens  int64  `json:"input_tokens" example:"29000"`
+	OutputTokens int64  `json:"output_tokens" example:"6000"`
+}
+
+type aiUsageModelDaily struct {
+	Vendor string            `json:"vendor" example:"google"`
+	Model  string            `json:"model" example:"gemini-2.5-flash"`
+	Daily  []aiUsageModelDay `json:"daily"`
+}
+
+type aiUsageRecentRow struct {
+	Timestamp    string `json:"ts" example:"2026-09-07T10:15:00Z"`
+	Vendor       string `json:"vendor" example:"google"`
+	Model        string `json:"model" example:"gemini-2.5-flash"`
+	Op           string `json:"op" example:"chat"`
+	Status       string `json:"status" example:"ok"`
+	HTTPStatus   int    `json:"http_status" example:"200"`
+	LatencyMs    int    `json:"latency_ms" example:"780"`
+	InputTokens  int    `json:"input_tokens" example:"512"`
+	OutputTokens int    `json:"output_tokens" example:"128"`
+	Error        string `json:"error,omitempty" example:""`
+}
+
+type aiUsageData struct {
+	Days        int                 `json:"days" example:"7"`
+	Totals      aiUsageTotals       `json:"totals"`
+	Today       aiUsageToday        `json:"today"`
+	Daily       []aiUsageDay        `json:"daily"`
+	ByModel     []aiUsageModel      `json:"by_model"`
+	ModelsDaily []aiUsageModelDaily `json:"models_daily"`
+	Recent      []aiUsageRecentRow  `json:"recent"`
+}
+
+type aiUsageResponse struct {
+	Data aiUsageData `json:"data"`
+}
+
+type intakeAssessRequest struct {
+	ConversationID int64 `json:"conversation_id" example:"501"`
+}
+
+type intakeAssessData struct {
+	ConversationID int64  `json:"conversation_id" example:"501"`
+	MessageID      int64  `json:"message_id" example:"9021"`
+	Status         string `json:"status" example:"queued"`
+}
+
+type intakeAssessResponse struct {
+	Data intakeAssessData `json:"data"`
+}
+
+type knowledgeStatsMemgraphLabel struct {
+	Label string `json:"label" example:"symptom"`
+	Count int    `json:"count" example:"128"`
+}
+
+type knowledgeStatsMemgraphEdgeType struct {
+	Type  string `json:"type" example:"RELATES_TO"`
+	Count int    `json:"count" example:"64"`
+}
+
+type knowledgeStatsMemgraph struct {
+	Available bool                             `json:"available" example:"true"`
+	Nodes     int                              `json:"nodes" example:"512"`
+	Edges     int                              `json:"edges" example:"340"`
+	Labels    []knowledgeStatsMemgraphLabel    `json:"labels"`
+	EdgeTypes []knowledgeStatsMemgraphEdgeType `json:"edge_types"`
+}
+
+type knowledgeStatsQdrant struct {
+	Available  bool   `json:"available" example:"true"`
+	Collection string `json:"collection" example:"tenant_4_kb"`
+	Vectors    int    `json:"vectors" example:"3400"`
+	Dim        int    `json:"dim" example:"1536"`
+}
+
+type knowledgeStatsData struct {
+	Memgraph knowledgeStatsMemgraph `json:"memgraph"`
+	Qdrant   knowledgeStatsQdrant   `json:"qdrant"`
+}
+
+type knowledgeStatsResponse struct {
+	Data knowledgeStatsData `json:"data"`
+}
+
+type knowledgeGraphNode struct {
+	ID     string `json:"id" example:"symptom:123"`
+	Label  string `json:"label" example:"Slow internet"`
+	Type   string `json:"type" example:"Symptom"`
+	Degree int    `json:"degree" example:"6"`
+}
+
+type knowledgeGraphEdge struct {
+	From string `json:"from" example:"symptom:123"`
+	To   string `json:"to" example:"subject:45"`
+	Type string `json:"type" example:"RELATES_TO"`
+}
+
+type knowledgeGraphData struct {
+	Available bool                 `json:"available" example:"true"`
+	Nodes     []knowledgeGraphNode `json:"nodes"`
+	Edges     []knowledgeGraphEdge `json:"edges"`
+}
+
+type knowledgeGraphResponse struct {
+	Data knowledgeGraphData `json:"data"`
+}
+
+// @Summary AI usage report
+// @Description Requires ai:reports:read. Aggregates request counts, token usage, and latency over the trailing window.
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param days query int false "Window size in days, clamped 1-30, default 7"
+// @Success 200 {object} aiUsageResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/ai/usage [get]
+func aiUsageReport() {}
+
+// @Summary List chat task models
+// @Description Requires ai:reply:create and feature.ai.enabled. Returns the models configured for the tenant's "chat" AI route.
+// @Tags chat
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Success 200 {object} response.Envelope{data=llm.TaskModels}
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/chat/models [get]
+func listChatModels() {}
+
+// @Summary List models for an AI connection
+// @Description Requires activity.view. Returns the cached model catalog for the given AI connection.
+// @Tags ai-connections
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param id path int true "AI connection ID"
+// @Success 200 {object} response.Envelope{data=llm.CatalogSnapshot}
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/ai/connections/{id}/models [get]
+func listAIConnectionModels() {}
+
+// @Summary Refresh models for an AI connection
+// @Description Requires activity.view. Re-discovers the provider's available models and replaces the cached catalog.
+// @Tags ai-connections
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param id path int true "AI connection ID"
+// @Success 200 {object} response.Envelope{data=llm.CatalogSnapshot}
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/ai/connections/{id}/models/refresh [post]
+func refreshAIConnectionModels() {}
+
+// @Summary Manually trigger AI draft assessment
+// @Description Requires ai:reply:create and feature.ai.enabled. Enqueues an AI draft for a conversation's pending inbound message.
+// @Tags reply
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param request body intakeAssessRequest true "Manual intake assessment request"
+// @Success 202 {object} intakeAssessResponse
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 404 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/intake/assess [post]
+func createIntakeAssess() {}
+
+// @Summary Knowledge base stats
+// @Description Requires ai:reports:read. Reports Memgraph node/edge counts and Qdrant vector collection size for the tenant.
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Success 200 {object} knowledgeStatsResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/knowledge/stats [get]
+func knowledgeStats() {}
+
+// @Summary Knowledge graph snapshot
+// @Description Requires ai:reports:read. Returns the tenant's top nodes by degree and the edges between them, for graph visualization.
+// @Tags reports
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param limit query int false "Max nodes, clamped 10-200, default 80"
+// @Success 200 {object} knowledgeGraphResponse
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Router /v1/knowledge/graph [get]
+func knowledgeGraph() {}

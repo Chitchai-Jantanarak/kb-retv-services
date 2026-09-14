@@ -260,6 +260,212 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/ai/connections/{id}/models": {
+            "get": {
+                "description": "Requires activity.view. Returns the cached model catalog for the given AI connection.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-connections"
+                ],
+                "summary": "List models for an AI connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "AI connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_infra_llm.CatalogSnapshot"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/ai/connections/{id}/models/refresh": {
+            "post": {
+                "description": "Requires activity.view. Re-discovers the provider's available models and replaces the cached catalog.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-connections"
+                ],
+                "summary": "Refresh models for an AI connection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "AI connection ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_infra_llm.CatalogSnapshot"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/ai/usage": {
+            "get": {
+                "description": "Requires ai:reports:read. Aggregates request counts, token usage, and latency over the trailing window.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "AI usage report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Window size in days, clamped 1-30, default 7",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.aiUsageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/chat": {
             "post": {
                 "description": "Runs the tenant-scoped chat workflow. Set debug=true to include stage_timings_ms for fast_guard, router, cache, knowledge, render, resolve, generate, parse, and store_cache.",
@@ -422,6 +628,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/chat/models": {
+            "get": {
+                "description": "Requires ai:reply:create and feature.ai.enabled. Returns the models configured for the tenant's \"chat\" AI route.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "List chat task models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_my_app_internal_infra_llm.TaskModels"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/chat/stream": {
             "post": {
                 "description": "Server-Sent Events variant of /v1/chat. Each frame is ` + "`" + `event: \u003ctype\u003e\\ndata: \u003cjson\u003e` + "`" + `; types are start, token, tool, pending_action, done, error. Same request body and stage set as /v1/chat.",
@@ -571,6 +843,198 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/intake/assess": {
+            "post": {
+                "description": "Requires ai:reply:create and feature.ai.enabled. Enqueues an AI draft for a conversation's pending inbound message.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reply"
+                ],
+                "summary": "Manually trigger AI draft assessment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Manual intake assessment request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.intakeAssessRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.intakeAssessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/knowledge/graph": {
+            "get": {
+                "description": "Requires ai:reports:read. Returns the tenant's top nodes by degree and the edges between them, for graph visualization.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Knowledge graph snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max nodes, clamped 10-200, default 80",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.knowledgeGraphResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/knowledge/stats": {
+            "get": {
+                "description": "Requires ai:reports:read. Reports Memgraph node/edge counts and Qdrant vector collection size for the tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Knowledge base stats",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.knowledgeStatsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
                         }
@@ -1114,7 +1578,8 @@ const docTemplate = `{
                 "stage_timings_ms": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "tool": {
@@ -1191,6 +1656,9 @@ const docTemplate = `{
         "github_com_my_app_internal_application_dto.ChatRequest": {
             "type": "object",
             "properties": {
+                "connection_id": {
+                    "type": "integer"
+                },
                 "conversation_id": {
                     "type": "integer"
                 },
@@ -1207,6 +1675,9 @@ const docTemplate = `{
                     }
                 },
                 "mode": {
+                    "type": "string"
+                },
+                "model": {
                     "type": "string"
                 }
             }
@@ -1253,7 +1724,8 @@ const docTemplate = `{
                 "stage_timings_ms": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "status": {
@@ -1301,6 +1773,9 @@ const docTemplate = `{
                 },
                 "code": {
                     "type": "string"
+                },
+                "conversation_id": {
+                    "type": "integer"
                 },
                 "debug": {
                     "$ref": "#/definitions/github_com_my_app_internal_application_dto.ChatDebug"
@@ -1541,7 +2016,8 @@ const docTemplate = `{
                 "stage_timings_ms": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "suggestion": {
@@ -1635,6 +2111,86 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_my_app_internal_infra_llm.CatalogSnapshot": {
+            "type": "object",
+            "properties": {
+                "connection_id": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_infra_llm.ProviderModel"
+                    }
+                },
+                "refreshed_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_infra_llm.ProviderModel": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_infra_llm.TaskModel": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "connection_id": {
+                    "type": "integer"
+                },
+                "default": {
+                    "type": "boolean"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_my_app_internal_infra_llm.TaskModels": {
+            "type": "object",
+            "properties": {
+                "allow_model_substitution": {
+                    "type": "boolean"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_my_app_internal_infra_llm.TaskModel"
+                    }
+                },
+                "route_version": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_my_app_internal_transport_http_response.Envelope": {
             "type": "object",
             "properties": {
@@ -1692,6 +2248,266 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/scripts_swagger.aiAccuracyData"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageData": {
+            "type": "object",
+            "properties": {
+                "by_model": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.aiUsageModel"
+                    }
+                },
+                "daily": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.aiUsageDay"
+                    }
+                },
+                "days": {
+                    "type": "integer",
+                    "example": 7
+                },
+                "models_daily": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.aiUsageModelDaily"
+                    }
+                },
+                "recent": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.aiUsageRecentRow"
+                    }
+                },
+                "today": {
+                    "$ref": "#/definitions/scripts_swagger.aiUsageToday"
+                },
+                "totals": {
+                    "$ref": "#/definitions/scripts_swagger.aiUsageTotals"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageDay": {
+            "type": "object",
+            "properties": {
+                "by_status": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "by_vendor": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "date": {
+                    "type": "string",
+                    "example": "2026-09-07"
+                },
+                "errors": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 56000
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 12000
+                },
+                "requests": {
+                    "type": "integer",
+                    "example": 150
+                }
+            }
+        },
+        "scripts_swagger.aiUsageModel": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 220000
+                },
+                "latency_avg_ms": {
+                    "type": "integer",
+                    "example": 820
+                },
+                "model": {
+                    "type": "string",
+                    "example": "gemini-2.5-flash"
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 45000
+                },
+                "requests": {
+                    "type": "integer",
+                    "example": 600
+                },
+                "vendor": {
+                    "type": "string",
+                    "example": "google"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageModelDaily": {
+            "type": "object",
+            "properties": {
+                "daily": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.aiUsageModelDay"
+                    }
+                },
+                "model": {
+                    "type": "string",
+                    "example": "gemini-2.5-flash"
+                },
+                "vendor": {
+                    "type": "string",
+                    "example": "google"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageModelDay": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "example": "2026-09-07"
+                },
+                "errors": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 29000
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 6000
+                },
+                "requests": {
+                    "type": "integer",
+                    "example": 80
+                }
+            }
+        },
+        "scripts_swagger.aiUsageRecentRow": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": ""
+                },
+                "http_status": {
+                    "type": "integer",
+                    "example": 200
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 512
+                },
+                "latency_ms": {
+                    "type": "integer",
+                    "example": 780
+                },
+                "model": {
+                    "type": "string",
+                    "example": "gemini-2.5-flash"
+                },
+                "op": {
+                    "type": "string",
+                    "example": "chat"
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 128
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "ts": {
+                    "type": "string",
+                    "example": "2026-09-07T10:15:00Z"
+                },
+                "vendor": {
+                    "type": "string",
+                    "example": "google"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.aiUsageData"
+                }
+            }
+        },
+        "scripts_swagger.aiUsageToday": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 30000
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 6200
+                },
+                "requests": {
+                    "type": "integer",
+                    "example": 80
+                }
+            }
+        },
+        "scripts_swagger.aiUsageTotals": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "integer",
+                    "example": 14
+                },
+                "input_tokens": {
+                    "type": "integer",
+                    "example": 450000
+                },
+                "latency_avg_ms": {
+                    "type": "integer",
+                    "example": 850
+                },
+                "latency_p50_ms": {
+                    "type": "integer",
+                    "example": 700
+                },
+                "latency_p95_ms": {
+                    "type": "integer",
+                    "example": 2100
+                },
+                "output_tokens": {
+                    "type": "integer",
+                    "example": 98000
+                },
+                "requests": {
+                    "type": "integer",
+                    "example": 1200
                 }
             }
         },
@@ -1776,6 +2592,40 @@ const docTemplate = `{
                 }
             }
         },
+        "scripts_swagger.intakeAssessData": {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "integer",
+                    "example": 501
+                },
+                "message_id": {
+                    "type": "integer",
+                    "example": 9021
+                },
+                "status": {
+                    "type": "string",
+                    "example": "queued"
+                }
+            }
+        },
+        "scripts_swagger.intakeAssessRequest": {
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "integer",
+                    "example": 501
+                }
+            }
+        },
+        "scripts_swagger.intakeAssessResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.intakeAssessData"
+                }
+            }
+        },
         "scripts_swagger.knowledgeGapRow": {
             "type": "object",
             "properties": {
@@ -1821,6 +2671,168 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/scripts_swagger.knowledgeGapsData"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGraphData": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.knowledgeGraphEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.knowledgeGraphNode"
+                    }
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGraphEdge": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "example": "symptom:123"
+                },
+                "to": {
+                    "type": "string",
+                    "example": "subject:45"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "RELATES_TO"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGraphNode": {
+            "type": "object",
+            "properties": {
+                "degree": {
+                    "type": "integer",
+                    "example": 6
+                },
+                "id": {
+                    "type": "string",
+                    "example": "symptom:123"
+                },
+                "label": {
+                    "type": "string",
+                    "example": "Slow internet"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "Symptom"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeGraphResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.knowledgeGraphData"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsData": {
+            "type": "object",
+            "properties": {
+                "memgraph": {
+                    "$ref": "#/definitions/scripts_swagger.knowledgeStatsMemgraph"
+                },
+                "qdrant": {
+                    "$ref": "#/definitions/scripts_swagger.knowledgeStatsQdrant"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsMemgraph": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "edge_types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.knowledgeStatsMemgraphEdgeType"
+                    }
+                },
+                "edges": {
+                    "type": "integer",
+                    "example": 340
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.knowledgeStatsMemgraphLabel"
+                    }
+                },
+                "nodes": {
+                    "type": "integer",
+                    "example": 512
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsMemgraphEdgeType": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 64
+                },
+                "type": {
+                    "type": "string",
+                    "example": "RELATES_TO"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsMemgraphLabel": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 128
+                },
+                "label": {
+                    "type": "string",
+                    "example": "symptom"
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsQdrant": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "collection": {
+                    "type": "string",
+                    "example": "tenant_4_kb"
+                },
+                "dim": {
+                    "type": "integer",
+                    "example": 1536
+                },
+                "vectors": {
+                    "type": "integer",
+                    "example": 3400
+                }
+            }
+        },
+        "scripts_swagger.knowledgeStatsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.knowledgeStatsData"
                 }
             }
         },
