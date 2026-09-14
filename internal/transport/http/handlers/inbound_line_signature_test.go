@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -105,5 +106,58 @@ func TestLineSignatureVerifierEmptySecretRejects(t *testing.T) {
 	req.Header.Set("X-Line-Signature", signLineTestBody("", body))
 	if err := verify(req, body); err == nil {
 		t.Fatal("expected empty-secret verifier to reject, got nil error")
+	}
+}
+
+func identityDecrypt(s string) (string, bool) { return s, true }
+
+func TestLineAccountSignatureVerifierUsesPerAccountSecret(t *testing.T) {
+	body := []byte(`{"destination":"bot-1","events":[]}`)
+	lookup := func(ctx context.Context, destination string) (string, error) {
+		if destination != "bot-1" {
+			t.Fatalf("unexpected destination %q", destination)
+		}
+		return "account-secret", nil
+	}
+	verify := LineAccountSignatureVerifier(lookup, identityDecrypt, "env-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(string(body)))
+	req.Header.Set("X-Line-Signature", signLineTestBody("account-secret", body))
+	if err := verify(req, body); err != nil {
+		t.Fatalf("expected account-secret signature to pass, got %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(string(body)))
+	req2.Header.Set("X-Line-Signature", signLineTestBody("env-secret", body))
+	if err := verify(req2, body); err == nil {
+		t.Fatal("expected env-secret signature to fail when an account secret exists")
+	}
+}
+
+func TestLineAccountSignatureVerifierFallsBackToEnvSecret(t *testing.T) {
+	body := []byte(`{"destination":"bot-2","events":[]}`)
+	lookup := func(ctx context.Context, destination string) (string, error) {
+		return "", nil
+	}
+	verify := LineAccountSignatureVerifier(lookup, identityDecrypt, "env-secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(string(body)))
+	req.Header.Set("X-Line-Signature", signLineTestBody("env-secret", body))
+	if err := verify(req, body); err != nil {
+		t.Fatalf("expected env-secret fallback to pass, got %v", err)
+	}
+}
+
+func TestLineAccountSignatureVerifierRejectsWhenNoSecretAvailable(t *testing.T) {
+	body := []byte(`{"destination":"bot-3","events":[]}`)
+	lookup := func(ctx context.Context, destination string) (string, error) {
+		return "", nil
+	}
+	verify := LineAccountSignatureVerifier(lookup, identityDecrypt, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(string(body)))
+	req.Header.Set("X-Line-Signature", signLineTestBody("anything", body))
+	if err := verify(req, body); err == nil {
+		t.Fatal("expected verifier to reject when neither account nor env secret is configured")
 	}
 }
