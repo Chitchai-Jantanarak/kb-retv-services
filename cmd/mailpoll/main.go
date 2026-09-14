@@ -23,7 +23,7 @@ import (
 	"github.com/my/app/internal/mailpoll"
 )
 
-var maxAttachmentBytes = 8 * 1024 * 1024
+var maxAttachmentBytes = 40 * 1024 * 1024
 
 type config struct {
 	host, user, pass, mailbox string

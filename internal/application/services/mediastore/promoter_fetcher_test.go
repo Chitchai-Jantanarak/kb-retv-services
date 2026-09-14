@@ -32,7 +32,7 @@ func TestPromoteBytesWorksWithoutFetcher(t *testing.T) {
 	}
 	p := NewPromoter(nil, d)
 
-	if err := p.PromoteBytes(context.Background(), 1, 2, 3, "msg-1#0", "image/png", []byte("bytes")); err != nil {
+	if err := p.PromoteBytes(context.Background(), 1, 2, 3, "msg-1#0", "image/png", "", []byte("bytes")); err != nil {
 		t.Fatalf("PromoteBytes() error = %v, want nil", err)
 	}
 	if !delivered {
