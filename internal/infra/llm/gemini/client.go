@@ -76,7 +76,7 @@ type content struct {
 }
 
 type thinkingConfig struct {
-	ThinkingBudget *int   `json:"thinkingBudget,omitempty"`
+	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
 }
 
 type generationConfig struct {
@@ -149,7 +149,8 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 		return nil, err
 	}
 
-	return llmhttp.StreamLines(ctx, resp.Body, "gemini", c.model, func(trimmed string) (string, bool) {
+	var usage ports.TokenUsage
+	return llmhttp.StreamLinesUsage(ctx, resp.Body, "gemini", c.model, func(trimmed string) (string, bool) {
 		data, ok := strings.CutPrefix(trimmed, "data:")
 		if !ok {
 			return "", false
@@ -162,6 +163,9 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return "", false
 		}
+		if chunk.UsageMetadata != (generateUsage{}) {
+			usage = tokenUsage(chunk.UsageMetadata)
+		}
 		if len(chunk.Candidates) == 0 {
 			return "", false
 		}
@@ -170,7 +174,15 @@ func (c *Client) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Compl
 			text.WriteString(prt.Text)
 		}
 		return text.String(), false
-	}), nil
+	}, func() ports.TokenUsage { return usage }), nil
+}
+
+func tokenUsage(u generateUsage) ports.TokenUsage {
+	return ports.TokenUsage{
+		Input:  u.PromptTokenCount,
+		Output: u.CandidatesTokenCount + u.ThoughtsTokenCount,
+		Total:  u.TotalTokenCount,
+	}
 }
 
 func imageParts(images []ports.PromptImage) []part {
@@ -280,12 +292,8 @@ func (c *Client) call(ctx context.Context, p ports.Prompt, mime string) (ports.C
 	}
 
 	return ports.Completion{
-		Text: text.String(),
-		Usage: ports.TokenUsage{
-			Input:  parsed.UsageMetadata.PromptTokenCount,
-			Output: parsed.UsageMetadata.CandidatesTokenCount + parsed.UsageMetadata.ThoughtsTokenCount,
-			Total:  parsed.UsageMetadata.TotalTokenCount,
-		},
+		Text:   text.String(),
+		Usage:  tokenUsage(parsed.UsageMetadata),
 		Vendor: "gemini",
 		Model:  c.model,
 	}, nil

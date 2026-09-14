@@ -444,3 +444,43 @@ func TestGenerateFailureCases(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamEmitsUsageFromFinalChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hel\"}]}}]}\n\n")
+		fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"lo\"}]}}],\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":1,\"totalTokenCount\":6}}\n\n")
+		fmt.Fprint(w, "data: {\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"thoughtsTokenCount\":3,\"totalTokenCount\":10}}\n\n")
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{APIKey: "k", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("New() err = %v", err)
+	}
+	ch, err := c.Stream(context.Background(), ports.Prompt{User: "hi"})
+	if err != nil {
+		t.Fatalf("Stream() err = %v", err)
+	}
+
+	var text strings.Builder
+	var usage ports.TokenUsage
+	usageChunks, lastWasUsage := 0, false
+	for chunk := range ch {
+		text.WriteString(chunk.Text)
+		lastWasUsage = false
+		if chunk.Usage != (ports.TokenUsage{}) {
+			usage = chunk.Usage
+			usageChunks++
+			lastWasUsage = chunk.Text == "" && chunk.Vendor == "gemini"
+		}
+	}
+	if text.String() != "Hello" {
+		t.Fatalf("text = %q, want Hello", text.String())
+	}
+	if usageChunks != 1 || !lastWasUsage {
+		t.Fatalf("usage chunks = %d, last was usage-only = %v; want exactly one trailing text-less usage chunk", usageChunks, lastWasUsage)
+	}
+	if usage != (ports.TokenUsage{Input: 5, Output: 5, Total: 10}) {
+		t.Fatalf("usage = %+v, want the final chunk's counts", usage)
+	}
+}
