@@ -62,6 +62,7 @@ definitions:
         type: array
       stage_timings_ms:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       tool:
@@ -112,6 +113,8 @@ definitions:
     type: object
   github_com_my_app_internal_application_dto.ChatRequest:
     properties:
+      connection_id:
+        type: integer
       conversation_id:
         type: integer
       debug:
@@ -123,6 +126,8 @@ definitions:
           $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatMessage'
         type: array
       mode:
+        type: string
+      model:
         type: string
     type: object
   github_com_my_app_internal_application_dto.ChatResponse:
@@ -153,6 +158,7 @@ definitions:
         type: array
       stage_timings_ms:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       status:
@@ -185,6 +191,8 @@ definitions:
         type: array
       code:
         type: string
+      conversation_id:
+        type: integer
       debug:
         $ref: '#/definitions/github_com_my_app_internal_application_dto.ChatDebug'
       message:
@@ -348,6 +356,7 @@ definitions:
         type: array
       stage_timings_ms:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       suggestion:
@@ -409,6 +418,58 @@ definitions:
       type:
         type: string
     type: object
+  github_com_my_app_internal_infra_llm.CatalogSnapshot:
+    properties:
+      connection_id:
+        type: integer
+      error:
+        type: string
+      models:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_infra_llm.ProviderModel'
+        type: array
+      refreshed_at:
+        type: string
+    type: object
+  github_com_my_app_internal_infra_llm.ProviderModel:
+    properties:
+      capabilities:
+        additionalProperties:
+          type: boolean
+        type: object
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  github_com_my_app_internal_infra_llm.TaskModel:
+    properties:
+      capabilities:
+        additionalProperties:
+          type: boolean
+        type: object
+      connection_id:
+        type: integer
+      default:
+        type: boolean
+      model:
+        type: string
+      name:
+        type: string
+      provider:
+        type: string
+    type: object
+  github_com_my_app_internal_infra_llm.TaskModels:
+    properties:
+      allow_model_substitution:
+        type: boolean
+      models:
+        items:
+          $ref: '#/definitions/github_com_my_app_internal_infra_llm.TaskModel'
+        type: array
+      route_version:
+        type: integer
+    type: object
   github_com_my_app_internal_transport_http_response.Envelope:
     properties:
       data: {}
@@ -449,6 +510,190 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/scripts_swagger.aiAccuracyData'
+    type: object
+  scripts_swagger.aiUsageData:
+    properties:
+      by_model:
+        items:
+          $ref: '#/definitions/scripts_swagger.aiUsageModel'
+        type: array
+      daily:
+        items:
+          $ref: '#/definitions/scripts_swagger.aiUsageDay'
+        type: array
+      days:
+        example: 7
+        type: integer
+      models_daily:
+        items:
+          $ref: '#/definitions/scripts_swagger.aiUsageModelDaily'
+        type: array
+      recent:
+        items:
+          $ref: '#/definitions/scripts_swagger.aiUsageRecentRow'
+        type: array
+      today:
+        $ref: '#/definitions/scripts_swagger.aiUsageToday'
+      totals:
+        $ref: '#/definitions/scripts_swagger.aiUsageTotals'
+    type: object
+  scripts_swagger.aiUsageDay:
+    properties:
+      by_status:
+        additionalProperties:
+          type: integer
+        type: object
+      by_vendor:
+        additionalProperties:
+          type: integer
+        type: object
+      date:
+        example: "2026-09-07"
+        type: string
+      errors:
+        example: 2
+        type: integer
+      input_tokens:
+        example: 56000
+        type: integer
+      output_tokens:
+        example: 12000
+        type: integer
+      requests:
+        example: 150
+        type: integer
+    type: object
+  scripts_swagger.aiUsageModel:
+    properties:
+      errors:
+        example: 5
+        type: integer
+      input_tokens:
+        example: 220000
+        type: integer
+      latency_avg_ms:
+        example: 820
+        type: integer
+      model:
+        example: gemini-2.5-flash
+        type: string
+      output_tokens:
+        example: 45000
+        type: integer
+      requests:
+        example: 600
+        type: integer
+      vendor:
+        example: google
+        type: string
+    type: object
+  scripts_swagger.aiUsageModelDaily:
+    properties:
+      daily:
+        items:
+          $ref: '#/definitions/scripts_swagger.aiUsageModelDay'
+        type: array
+      model:
+        example: gemini-2.5-flash
+        type: string
+      vendor:
+        example: google
+        type: string
+    type: object
+  scripts_swagger.aiUsageModelDay:
+    properties:
+      date:
+        example: "2026-09-07"
+        type: string
+      errors:
+        example: 1
+        type: integer
+      input_tokens:
+        example: 29000
+        type: integer
+      output_tokens:
+        example: 6000
+        type: integer
+      requests:
+        example: 80
+        type: integer
+    type: object
+  scripts_swagger.aiUsageRecentRow:
+    properties:
+      error:
+        example: ""
+        type: string
+      http_status:
+        example: 200
+        type: integer
+      input_tokens:
+        example: 512
+        type: integer
+      latency_ms:
+        example: 780
+        type: integer
+      model:
+        example: gemini-2.5-flash
+        type: string
+      op:
+        example: chat
+        type: string
+      output_tokens:
+        example: 128
+        type: integer
+      status:
+        example: ok
+        type: string
+      ts:
+        example: "2026-09-07T10:15:00Z"
+        type: string
+      vendor:
+        example: google
+        type: string
+    type: object
+  scripts_swagger.aiUsageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.aiUsageData'
+    type: object
+  scripts_swagger.aiUsageToday:
+    properties:
+      errors:
+        example: 1
+        type: integer
+      input_tokens:
+        example: 30000
+        type: integer
+      output_tokens:
+        example: 6200
+        type: integer
+      requests:
+        example: 80
+        type: integer
+    type: object
+  scripts_swagger.aiUsageTotals:
+    properties:
+      errors:
+        example: 14
+        type: integer
+      input_tokens:
+        example: 450000
+        type: integer
+      latency_avg_ms:
+        example: 850
+        type: integer
+      latency_p50_ms:
+        example: 700
+        type: integer
+      latency_p95_ms:
+        example: 2100
+        type: integer
+      output_tokens:
+        example: 98000
+        type: integer
+      requests:
+        example: 1200
+        type: integer
     type: object
   scripts_swagger.answerRateData:
     properties:
@@ -508,6 +753,29 @@ definitions:
         example: accepted
         type: string
     type: object
+  scripts_swagger.intakeAssessData:
+    properties:
+      conversation_id:
+        example: 501
+        type: integer
+      message_id:
+        example: 9021
+        type: integer
+      status:
+        example: queued
+        type: string
+    type: object
+  scripts_swagger.intakeAssessRequest:
+    properties:
+      conversation_id:
+        example: 501
+        type: integer
+    type: object
+  scripts_swagger.intakeAssessResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.intakeAssessData'
+    type: object
   scripts_swagger.knowledgeGapRow:
     properties:
       first_seen:
@@ -540,6 +808,117 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/scripts_swagger.knowledgeGapsData'
+    type: object
+  scripts_swagger.knowledgeGraphData:
+    properties:
+      available:
+        example: true
+        type: boolean
+      edges:
+        items:
+          $ref: '#/definitions/scripts_swagger.knowledgeGraphEdge'
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/scripts_swagger.knowledgeGraphNode'
+        type: array
+    type: object
+  scripts_swagger.knowledgeGraphEdge:
+    properties:
+      from:
+        example: symptom:123
+        type: string
+      to:
+        example: subject:45
+        type: string
+      type:
+        example: RELATES_TO
+        type: string
+    type: object
+  scripts_swagger.knowledgeGraphNode:
+    properties:
+      degree:
+        example: 6
+        type: integer
+      id:
+        example: symptom:123
+        type: string
+      label:
+        example: Slow internet
+        type: string
+      type:
+        example: Symptom
+        type: string
+    type: object
+  scripts_swagger.knowledgeGraphResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.knowledgeGraphData'
+    type: object
+  scripts_swagger.knowledgeStatsData:
+    properties:
+      memgraph:
+        $ref: '#/definitions/scripts_swagger.knowledgeStatsMemgraph'
+      qdrant:
+        $ref: '#/definitions/scripts_swagger.knowledgeStatsQdrant'
+    type: object
+  scripts_swagger.knowledgeStatsMemgraph:
+    properties:
+      available:
+        example: true
+        type: boolean
+      edge_types:
+        items:
+          $ref: '#/definitions/scripts_swagger.knowledgeStatsMemgraphEdgeType'
+        type: array
+      edges:
+        example: 340
+        type: integer
+      labels:
+        items:
+          $ref: '#/definitions/scripts_swagger.knowledgeStatsMemgraphLabel'
+        type: array
+      nodes:
+        example: 512
+        type: integer
+    type: object
+  scripts_swagger.knowledgeStatsMemgraphEdgeType:
+    properties:
+      count:
+        example: 64
+        type: integer
+      type:
+        example: RELATES_TO
+        type: string
+    type: object
+  scripts_swagger.knowledgeStatsMemgraphLabel:
+    properties:
+      count:
+        example: 128
+        type: integer
+      label:
+        example: symptom
+        type: string
+    type: object
+  scripts_swagger.knowledgeStatsQdrant:
+    properties:
+      available:
+        example: true
+        type: boolean
+      collection:
+        example: tenant_4_kb
+        type: string
+      dim:
+        example: 1536
+        type: integer
+      vectors:
+        example: 3400
+        type: integer
+    type: object
+  scripts_swagger.knowledgeStatsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.knowledgeStatsData'
     type: object
   scripts_swagger.lineInboundEvent:
     properties:
@@ -829,6 +1208,141 @@ paths:
       summary: Reject review queue item
       tags:
       - review-queue
+  /v1/ai/connections/{id}/models:
+    get:
+      description: Requires activity.view. Returns the cached model catalog for the
+        given AI connection.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: AI connection ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_infra_llm.CatalogSnapshot'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: List models for an AI connection
+      tags:
+      - ai-connections
+  /v1/ai/connections/{id}/models/refresh:
+    post:
+      description: Requires activity.view. Re-discovers the provider's available models
+        and replaces the cached catalog.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: AI connection ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_infra_llm.CatalogSnapshot'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Refresh models for an AI connection
+      tags:
+      - ai-connections
+  /v1/ai/usage:
+    get:
+      description: Requires ai:reports:read. Aggregates request counts, token usage,
+        and latency over the trailing window.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Window size in days, clamped 1-30, default 7
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.aiUsageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: AI usage report
+      tags:
+      - reports
   /v1/chat:
     post:
       consumes:
@@ -934,6 +1448,48 @@ paths:
           schema:
             $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
       summary: Confirm a pending chat action
+      tags:
+      - chat
+  /v1/chat/models:
+    get:
+      description: Requires ai:reply:create and feature.ai.enabled. Returns the models
+        configured for the tenant's "chat" AI route.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_my_app_internal_infra_llm.TaskModels'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: List chat task models
       tags:
       - chat
   /v1/chat/stream:
@@ -1045,6 +1601,137 @@ paths:
       summary: Receive LINE inbound webhook
       tags:
       - inbound
+  /v1/intake/assess:
+    post:
+      consumes:
+      - application/json
+      description: Requires ai:reply:create and feature.ai.enabled. Enqueues an AI
+        draft for a conversation's pending inbound message.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Manual intake assessment request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.intakeAssessRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/scripts_swagger.intakeAssessResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Manually trigger AI draft assessment
+      tags:
+      - reply
+  /v1/knowledge/graph:
+    get:
+      description: Requires ai:reports:read. Returns the tenant's top nodes by degree
+        and the edges between them, for graph visualization.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Max nodes, clamped 10-200, default 80
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.knowledgeGraphResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Knowledge graph snapshot
+      tags:
+      - reports
+  /v1/knowledge/stats:
+    get:
+      description: Requires ai:reports:read. Reports Memgraph node/edge counts and
+        Qdrant vector collection size for the tenant.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.knowledgeStatsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Knowledge base stats
+      tags:
+      - reports
   /v1/reply:
     post:
       consumes:
