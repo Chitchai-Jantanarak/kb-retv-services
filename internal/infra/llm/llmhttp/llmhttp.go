@@ -49,6 +49,14 @@ func DoJSON(client *http.Client, req *http.Request, vendor string) ([]byte, erro
 }
 
 func StreamLines(ctx context.Context, body io.ReadCloser, vendor, model string, handle func(line string) (string, bool)) <-chan ports.Completion {
+	return StreamLinesUsage(ctx, body, vendor, model, handle, nil)
+}
+
+// StreamLinesUsage is StreamLines plus a trailing usage chunk: once the body
+// is drained, usage() is asked for the token counts the handler collected and,
+// when non-zero, they go out as a final text-less Completion so recorders and
+// the chat stream can bill a streamed reply.
+func StreamLinesUsage(ctx context.Context, body io.ReadCloser, vendor, model string, handle func(line string) (string, bool), usage func() ports.TokenUsage) <-chan ports.Completion {
 	out := make(chan ports.Completion)
 	go func() {
 		defer close(out)
@@ -65,7 +73,16 @@ func StreamLines(ctx context.Context, body io.ReadCloser, vendor, model string, 
 				}
 			}
 			if done {
-				return
+				break
+			}
+		}
+		if usage == nil {
+			return
+		}
+		if u := usage(); u != (ports.TokenUsage{}) {
+			select {
+			case out <- ports.Completion{Usage: u, Vendor: vendor, Model: model}:
+			case <-ctx.Done():
 			}
 		}
 	}()
