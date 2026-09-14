@@ -1,0 +1,67 @@
+{
+  "id": "f3_employee_status",
+  "intent": "employee_status",
+  "kind": "read",
+  "description": "What a given employee is working on",
+  "anchors": [
+    "what is this employee working on",
+    "who handled this case",
+    "which cases belong to this person",
+    "which cases is this employee handling",
+    "cases assigned to this staff member",
+    "what is he handling today",
+    "กำลังทำอะไรอยู่",
+    "งานของพนักงานคนนี้",
+    "ใครเป็นคนดูแลเคสนี้",
+    "พนักงานคนนี้ดูแลเคสไหนอยู่",
+    "qué casos lleva este empleado",
+    "чем сейчас занят этот сотрудник"
+  ],
+  "params": [
+    {
+      "name": "employee",
+      "required": true,
+      "lookup": "employees.name"
+    }
+  ],
+  "resolve": [
+    {
+      "word": "name",
+      "to": "employee_id"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "employee.view",
+    "team_view": false
+  },
+  "handler": "employee.status",
+  "limit": 5,
+  "compose": {
+    "headline": "{employee} has {n} open cases",
+    "row": "{code}|{title}|{status}",
+    "cite": "code",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "code",
+        "type": "case_ref",
+        "primary": true
+      },
+      {
+        "key": "title",
+        "type": "text"
+      },
+      {
+        "key": "status",
+        "type": "status"
+      }
+    ],
+    "headline_i18n": {
+      "en": "{employee} has {n} open cases",
+      "th": "{employee} มีเคสที่เปิดอยู่ {n} เคส"
+    }
+  },
+  "audit": "ai.employee_status",
+  "enabled_by": "company"
+}

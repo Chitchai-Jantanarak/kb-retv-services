@@ -1,0 +1,53 @@
+{
+  "id": "f7_knowledge",
+  "intent": "kb_search",
+  "kind": "retrieval",
+  "description": "How a similar problem was fixed before",
+  "anchors": [
+    "how to fix",
+    "similar issue",
+    "how was this fixed before",
+    "troubleshooting steps for this problem",
+    "what is the solution for this fault",
+    "แก้ยังไง",
+    "เคยแก้แบบนี้ไหม",
+    "หาวิธีแก้ปัญหา",
+    "ช่วยหาวิธีการแก้ไขปัญหา",
+    "แก้ปัญหานี้ยังไง",
+    "วิธีซ่อมเครื่อง",
+    "เคยเจอปัญหาแบบนี้ไหม",
+    "อาการแบบนี้ต้องแก้ยังไง",
+    "เครื่องไม่ทำงาน ต้องแก้ยังไง",
+    "ปัญหาใกล้เคียง",
+    "ปัญหาที่คล้ายกัน",
+    "หาเคสที่คล้ายกับเคสนี้",
+    "เคสอื่นที่เจอปัญหาเดียวกัน"
+  ],
+  "resolve": [],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "kb.search",
+    "team_view": false
+  },
+  "handler": "knowledge",
+  "limit": 5,
+  "compose": {
+    "headline": "found {n} past cases",
+    "row": "{article}|{summary}",
+    "cite": "article_id",
+    "mode": "summary",
+    "columns": [
+      {
+        "key": "article",
+        "type": "text",
+        "primary": true
+      },
+      {
+        "key": "summary",
+        "type": "text"
+      }
+    ]
+  },
+  "audit": "ai.kb_search",
+  "enabled_by": "company"
+}

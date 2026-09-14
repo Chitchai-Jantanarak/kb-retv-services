@@ -1,0 +1,58 @@
+{
+  "id": "f8_update_case",
+  "intent": "update_case",
+  "kind": "write",
+  "description": "Change the status of a support case",
+  "anchors": [
+    "set case to in progress",
+    "move case back to waiting",
+    "put this case on hold",
+    "change which stage this case sits in",
+    "เปลี่ยนเคสเป็นกำลังดำเนินการ",
+    "ย้ายเคสกลับไปรอดำเนินการ",
+    "พักงานเคสนี้ไว้ก่อน",
+    "move this existing case to another stage"
+  ],
+  "params": [
+    {
+      "name": "code",
+      "required": true,
+      "pattern": "(?i)\\bREP-?\\d+\\b"
+    },
+    {
+      "name": "status",
+      "required": true,
+      "map": {
+        "waiting": "waiting",
+        "doing": "doing",
+        "done": "done",
+        "ปิด": "done",
+        "เสร็จ": "done"
+      }
+    }
+  ],
+  "resolve": [
+    {
+      "word": "code",
+      "to": "report_id"
+    },
+    {
+      "word": "status",
+      "to": "report_statuses.code"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.update",
+    "team_view": false
+  },
+  "handler": "reports.update",
+  "limit": 1,
+  "compose": {
+    "headline": "case {code} updated to {status}",
+    "row": "{code}|{status}",
+    "cite": "code"
+  },
+  "audit": "ai.update_case",
+  "enabled_by": "company"
+}

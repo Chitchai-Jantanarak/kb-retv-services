@@ -1,0 +1,44 @@
+{
+  "id": "f9_assign_case",
+  "intent": "assign_case",
+  "kind": "write",
+  "description": "Assign a support case to an employee",
+  "anchors": [
+    "assign case to",
+    "assign ticket",
+    "มอบหมายเคส",
+    "จ่ายงานเคสให้",
+    "hand this case over to a teammate"
+  ],
+  "params": [
+    {
+      "name": "code",
+      "required": true,
+      "pattern": "(?i)\\bREP-?\\d+\\b"
+    }
+  ],
+  "resolve": [
+    {
+      "word": "code",
+      "to": "report_id"
+    },
+    {
+      "word": "employee",
+      "to": "employee_id"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.assign",
+    "team_view": false
+  },
+  "handler": "reports.assign",
+  "limit": 1,
+  "compose": {
+    "headline": "case {code} assigned",
+    "row": "{code}|{employee_id}",
+    "cite": "code"
+  },
+  "audit": "ai.assign_case",
+  "enabled_by": "company"
+}

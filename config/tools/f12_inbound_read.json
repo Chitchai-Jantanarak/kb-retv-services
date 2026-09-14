@@ -1,0 +1,52 @@
+{
+  "id": "f12_inbound_read",
+  "intent": "inbound_read",
+  "kind": "read",
+  "description": "List received (unpromoted) inbound emails/conversations",
+  "anchors": [
+    "show my emails",
+    "received emails",
+    "list inbox",
+    "อีเมลที่ได้รับ",
+    "ขอดูเมลที่เข้ามา"
+  ],
+  "thresholds": {
+    "accept": 0.6,
+    "floor": 0.35
+  },
+  "resolve": [],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "portal.view",
+    "team_view": false
+  },
+  "handler": "inbound.read",
+  "limit": 10,
+  "compose": {
+    "headline": "{n} emails received, latest from {from}",
+    "row": "{subject}|{from}|{received}",
+    "cite": "id",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "subject",
+        "type": "text",
+        "primary": true
+      },
+      {
+        "key": "from",
+        "type": "text"
+      },
+      {
+        "key": "received",
+        "type": "date"
+      }
+    ],
+    "headline_i18n": {
+      "en": "{n} emails received, latest from {from}",
+      "th": "ได้รับอีเมล {n} ฉบับ ล่าสุดจาก {from}"
+    }
+  },
+  "audit": "ai.inbound_read",
+  "enabled_by": "company"
+}
