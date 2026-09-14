@@ -1,0 +1,59 @@
+{
+  "id": "f6_customer_service",
+  "intent": "customer_service",
+  "kind": "read",
+  "description": "Service profile for a customer",
+  "anchors": [
+    "customer contract",
+    "customer sites",
+    "บริการของลูกค้า",
+    "สัญญาลูกค้า"
+  ],
+  "params": [
+    {
+      "name": "customer",
+      "required": true,
+      "lookup": "customers.company_name"
+    }
+  ],
+  "resolve": [
+    {
+      "word": "email",
+      "to": "customer_id"
+    },
+    {
+      "word": "name",
+      "to": "customer_id"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "customer.view",
+    "team_view": false
+  },
+  "handler": "customer.profile",
+  "limit": 5,
+  "compose": {
+    "headline": "{customer}",
+    "row": "{section}|{detail}",
+    "cite": "none",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "section",
+        "type": "text",
+        "primary": true
+      },
+      {
+        "key": "detail",
+        "type": "text"
+      }
+    ],
+    "headline_i18n": {
+      "en": "{customer} — service profile",
+      "th": "โปรไฟล์บริการของ {customer}"
+    }
+  },
+  "audit": "ai.customer_service",
+  "enabled_by": "company"
+}

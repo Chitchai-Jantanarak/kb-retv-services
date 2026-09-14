@@ -1,0 +1,36 @@
+{
+  "id": "f13_promote_mail",
+  "intent": "promote_mail",
+  "kind": "write",
+  "description": "Create a support case from a received email/conversation",
+  "anchors": [
+    "create case from email",
+    "make a ticket from this email",
+    "promote this email",
+    "ทำเคสจากอีเมล",
+    "สร้างเคสจากเมลที่ได้รับ"
+  ],
+  "params": [
+    {
+      "name": "conversation_id",
+      "required": true,
+      "pattern": "\\b\\d+\\b"
+    }
+  ],
+  "resolve": [],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.create",
+    "team_view": false
+  },
+  "handler": "promote.mail",
+  "limit": 1,
+  "compose": {
+    "headline": "created case {code} from email",
+    "confirm": "promote conversation {conversation_id}",
+    "row": "{code}",
+    "cite": "code"
+  },
+  "audit": "ai.promote_mail",
+  "enabled_by": "company"
+}

@@ -1,0 +1,39 @@
+{
+  "id": "f10_close_case",
+  "intent": "close_case",
+  "kind": "write",
+  "description": "Close a support case",
+  "anchors": [
+    "close case",
+    "resolve ticket",
+    "ปิดเคส",
+    "ปิดงานนี้"
+  ],
+  "params": [
+    {
+      "name": "code",
+      "required": true,
+      "pattern": "(?i)\\bREP-?\\d+\\b"
+    }
+  ],
+  "resolve": [
+    {
+      "word": "code",
+      "to": "report_id"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.update",
+    "team_view": false
+  },
+  "handler": "reports.close",
+  "limit": 1,
+  "compose": {
+    "headline": "case {code} closed",
+    "row": "{code}|{status}",
+    "cite": "code"
+  },
+  "audit": "ai.close_case",
+  "enabled_by": "company"
+}

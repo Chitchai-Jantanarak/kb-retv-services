@@ -1,0 +1,42 @@
+{
+  "id": "open_case",
+  "intent": "open_case",
+  "kind": "write",
+  "description": "Open a new support case",
+  "anchors": [
+    "open a case",
+    "report a problem",
+    "log a repair request",
+    "raise a ticket for this machine",
+    "แจ้งปัญหาใหม่",
+    "เปิดเคสใหม่",
+    "แจ้งซ่อม",
+    "แจ้งซ่อมเครื่องนี้",
+    "ขอแจ้งซ่อมหน่อย",
+    "ตั้งเรื่องแจ้งซ่อมให้หน่อย",
+    "ロボットが故障したので新しいケースを作成",
+    "로봇이 고장나서 새 케이스 접수",
+    "เครื่องเสีย เปิดงานแจ้งซ่อมใหม่"
+  ],
+  "resolve": [
+    {
+      "word": "title",
+      "to": "title"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.create",
+    "team_view": false
+  },
+  "handler": "reports.create",
+  "limit": 0,
+  "compose": {
+    "headline": "case {code} opened",
+    "confirm": "open a new case",
+    "row": "{field}|{value}",
+    "cite": "code"
+  },
+  "audit": "ai.open_case",
+  "enabled_by": "company"
+}

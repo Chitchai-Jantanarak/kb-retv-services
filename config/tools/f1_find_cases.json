@@ -1,0 +1,117 @@
+{
+  "id": "f1_find_cases",
+  "intent": "find_cases",
+  "kind": "read",
+  "description": "Find or list support cases by status, product, date, or text. A report means a case in this product, so requests about reports use this tool",
+  "anchors": [
+    "find cases",
+    "show tickets",
+    "list recent reports",
+    "latest cases i should look at",
+    "reports i should concern",
+    "หาเคส",
+    "ดูเคสสถานะ waiting",
+    "รายงานล่าสุด",
+    "เคสล่าสุดที่ต้องดู",
+    "รายงานปัญหาที่ต้องสนใจ",
+    "ขอเคสล่าสุดที่ต้องจัดการ",
+    "show latest drafts",
+    "ขอดราฟล่าสุด"
+  ],
+  "params": [
+    {
+      "name": "status",
+      "required": false,
+      "map": {
+        "waiting": "waiting",
+        "doing": "doing",
+        "done": "done",
+        "ปิด": "done",
+        "เสร็จ": "done"
+      }
+    },
+    {
+      "name": "scope",
+      "required": false,
+      "map": {
+        "draft": "draft",
+        "ดราฟ": "draft",
+        "ร่าง": "draft",
+        "all": "all",
+        "ทั้งหมด": "all",
+        "ทุกอัน": "all",
+        "no draft": "cases",
+        "w/o draft": "cases",
+        "without drafts": "cases",
+        "without draft": "cases",
+        "ไม่เอาดราฟ": "cases",
+        "ไม่เอา draft": "cases",
+        "ไม่รวมดราฟ": "cases",
+        "ไม่รวม draft": "cases",
+        "ไม่เอาฉบับร่าง": "cases",
+        "ไม่เอาร่าง": "cases"
+      }
+    }
+  ],
+  "resolve": [
+    {
+      "word": "status",
+      "to": "report_statuses.code",
+      "map": {
+        "waiting": "waiting",
+        "doing": "doing",
+        "done": "done"
+      }
+    },
+    {
+      "word": "product",
+      "to": "node_id",
+      "via": "f5_product_cases"
+    },
+    {
+      "word": "date",
+      "to": "range"
+    }
+  ],
+  "defaults": {
+    "status": "open",
+    "range": "30d"
+  },
+  "rbac": {
+    "requires_permission": "report.view",
+    "team_view": false
+  },
+  "handler": "reports.find",
+  "limit": 10,
+  "compose": {
+    "headline": "{n} cases match, latest is {code}",
+    "row": "{code}|{title}|{status}|{assignee}",
+    "cite": "code",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "code",
+        "type": "case_ref",
+        "primary": true
+      },
+      {
+        "key": "title",
+        "type": "text"
+      },
+      {
+        "key": "status",
+        "type": "status"
+      },
+      {
+        "key": "assignee",
+        "type": "text"
+      }
+    ],
+    "headline_i18n": {
+      "en": "{n} cases match, latest is {code}",
+      "th": "พบ {n} เคส ล่าสุดคือ {code}"
+    }
+  },
+  "audit": "ai.find_cases",
+  "enabled_by": "company"
+}

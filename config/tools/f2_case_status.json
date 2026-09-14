@@ -1,0 +1,60 @@
+{
+  "id": "f2_case_status",
+  "intent": "case_status",
+  "kind": "read",
+  "description": "Track a single case, also called a report, by its code",
+  "anchors": [
+    "where is my ticket",
+    "ticket status",
+    "how far along is this case",
+    "case progress so far",
+    "is this case finished yet",
+    "ตรวจสอบสถานะเคส",
+    "เคสของฉันถึงไหนแล้ว",
+    "ความคืบหน้าของเคสนี้",
+    "เคสนี้เสร็จหรือยัง"
+  ],
+  "params": [
+    {
+      "name": "code",
+      "required": true,
+      "pattern": "(?i)\\bREP-?\\d+\\b"
+    }
+  ],
+  "resolve": [
+    {
+      "word": "code",
+      "to": "report_id"
+    }
+  ],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "report.view",
+    "team_view": false
+  },
+  "handler": "reports.track",
+  "limit": 5,
+  "compose": {
+    "headline": "case {code}",
+    "row": "{field}|{value}",
+    "cite": "code",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "field",
+        "type": "text",
+        "primary": true
+      },
+      {
+        "key": "value",
+        "type": "text"
+      }
+    ],
+    "headline_i18n": {
+      "en": "case {code}",
+      "th": "เคส {code}"
+    }
+  },
+  "audit": "ai.case_status",
+  "enabled_by": "company"
+}

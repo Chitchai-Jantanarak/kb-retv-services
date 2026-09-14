@@ -1,0 +1,49 @@
+{
+  "id": "f4_workload",
+  "intent": "workload",
+  "kind": "read",
+  "description": "Team workload distribution",
+  "anchors": [
+    "who is free",
+    "busiest",
+    "team workload",
+    "team availability right now",
+    "staff capacity today",
+    "how work is spread across the team",
+    "ภาระงานทีม",
+    "ตอนนี้ใครว่างบ้าง",
+    "ใครมีงานเยอะที่สุด",
+    "ดูการกระจายงานของทีม"
+  ],
+  "resolve": [],
+  "defaults": {},
+  "rbac": {
+    "requires_permission": "team.view",
+    "team_view": true
+  },
+  "handler": "workload",
+  "limit": 20,
+  "compose": {
+    "headline": "team workload",
+    "row": "{name}|{open}|{oldest}",
+    "cite": "name",
+    "mode": "template",
+    "columns": [
+      {
+        "key": "name",
+        "type": "employee_ref",
+        "primary": true
+      },
+      {
+        "key": "open",
+        "type": "number"
+      },
+      {
+        "key": "oldest",
+        "type": "date"
+      }
+    ]
+  },
+  "audit": "ai.workload",
+  "enabled_by": "company"
+}
