@@ -2,7 +2,7 @@ package rag
 
 import "strings"
 
-// extractJSONObject returns the first balanced JSON object in text.
+// ExtractJSONObject returns the first balanced JSON object in text.
 //
 // The three stages that ask a provider for JSON call GenerateJSON, which sets
 // the provider's structured-output mode. That mode is a request, not a
@@ -16,7 +16,7 @@ import "strings"
 // repair malformed JSON and it does not guess: if no balanced object is
 // present the original text is returned unchanged, so the caller's unmarshal
 // still fails and still reports what it received.
-func extractJSONObject(text string) string {
+func ExtractJSONObject(text string) string {
 	trimmed := strings.TrimSpace(text)
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		return trimmed
@@ -52,3 +52,7 @@ func extractJSONObject(text string) string {
 	}
 	return text
 }
+
+// extractJSONObject is a package-internal alias for ExtractJSONObject, kept
+// for existing in-package call sites and tests.
+func extractJSONObject(text string) string { return ExtractJSONObject(text) }

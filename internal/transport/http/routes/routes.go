@@ -26,6 +26,7 @@ type Options struct {
 	ChatConfirm    *handlers.ChatConfirmHandler
 	Search         *handlers.SearchHandler
 	Intake         *handlers.IntakeAssessHandler
+	Instructions   *handlers.InstructionsEnhanceHandler
 	AIUsage        *handlers.AIUsageHandler
 	AIModels       *handlers.AIModelsHandler
 	ChatModels     *handlers.ChatModelsHandler
@@ -70,6 +71,9 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 	protectedV1.POST("/reply", reply.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	if opts.Intake != nil {
 		protectedV1.POST("/intake/assess", opts.Intake.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
+	}
+	if opts.Instructions != nil {
+		protectedV1.POST("/instructions/enhance", opts.Instructions.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	}
 
 	if opts.Chat != nil {

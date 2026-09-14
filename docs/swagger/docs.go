@@ -856,6 +856,84 @@ const docTemplate = `{
                 }
             }
         },
+        "/v1/instructions/enhance": {
+            "post": {
+                "description": "Requires ai:reply:create and feature.ai.enabled. Rewrites a tenant admin's free-text assistant instructions into a fuller structured instruction, reports what changed, and asks up to three clarifying questions.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reply"
+                ],
+                "summary": "Rewrite operator instructions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer \u003cRS256 service JWT\u003e",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant ID",
+                        "name": "X-Tenant-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Instructions enhance request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.instructionsEnhanceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/scripts_swagger.instructionsEnhanceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_my_app_internal_transport_http_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/intake/assess": {
             "post": {
                 "description": "Requires ai:reply:create and feature.ai.enabled. Enqueues an AI draft for a conversation's pending inbound message.",
@@ -2589,6 +2667,87 @@ const docTemplate = `{
                         "escalated"
                     ],
                     "example": "accepted"
+                }
+            }
+        },
+        "scripts_swagger.instructionsEnhanceAnswer": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string",
+                    "example": "Monday to Friday, 9am to 6pm"
+                },
+                "question": {
+                    "type": "string",
+                    "example": "What hours are you open?"
+                }
+            }
+        },
+        "scripts_swagger.instructionsEnhanceChange": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "example": "removed"
+                },
+                "text": {
+                    "type": "string",
+                    "example": "promised a full refund"
+                },
+                "why": {
+                    "type": "string",
+                    "example": "pricing and refund commitments are not allowed"
+                }
+            }
+        },
+        "scripts_swagger.instructionsEnhanceData": {
+            "type": "object",
+            "properties": {
+                "changes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.instructionsEnhanceChange"
+                    }
+                },
+                "enhanced": {
+                    "type": "string",
+                    "example": "Role\nSupport agent for Acme."
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "What are your support hours?"
+                    ]
+                }
+            }
+        },
+        "scripts_swagger.instructionsEnhanceRequest": {
+            "type": "object",
+            "properties": {
+                "answers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/scripts_swagger.instructionsEnhanceAnswer"
+                    }
+                },
+                "locale": {
+                    "type": "string",
+                    "example": "th"
+                },
+                "text": {
+                    "type": "string",
+                    "example": "answer customers about our printers and be friendly"
+                }
+            }
+        },
+        "scripts_swagger.instructionsEnhanceResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/scripts_swagger.instructionsEnhanceData"
                 }
             }
         },

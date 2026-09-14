@@ -64,6 +64,7 @@ func run() {
 		ChatConfirm:    endpoints.chatConfirm,
 		Search:         endpoints.search,
 		Intake:         endpoints.intake,
+		Instructions:   endpoints.instructions,
 		AIUsage:        endpoints.aiUsage,
 		AIModels:       endpoints.aiModels,
 		ChatModels:     endpoints.chatModels,

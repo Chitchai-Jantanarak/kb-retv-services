@@ -72,7 +72,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, query Query, meta Meta, candid
 			Reason string  `json:"reason"`
 		} `json:"scores"`
 	}
-	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(ExtractJSONObject(completion.Text)), &parsed); err != nil {
 		return r.fallback.Rerank(ctx, query, meta, candidates)
 	}
 

@@ -79,7 +79,7 @@ func (c *LLMCritic) Critique(ctx context.Context, query Query, draft string, can
 		RefusalReason  string   `json:"refusal_reason"`
 		Send           bool     `json:"send"`
 	}
-	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(ExtractJSONObject(completion.Text)), &parsed); err != nil {
 		return CritiqueResult{}, fmt.Errorf("rag: llm critic: parse %q: %w", completion.Text, err)
 	}
 

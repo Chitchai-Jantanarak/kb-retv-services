@@ -68,7 +68,7 @@ func (c *LLMCRAG) Grade(ctx context.Context, query, content string) (CRAGResult,
 		Confidence float64 `json:"confidence"`
 		Missing    string  `json:"missing"`
 	}
-	if err := json.Unmarshal([]byte(extractJSONObject(completion.Text)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(ExtractJSONObject(completion.Text)), &parsed); err != nil {
 		return CRAGResult{}, fmt.Errorf("rag: llm crag: parse %q: %w", completion.Text, err)
 	}
 

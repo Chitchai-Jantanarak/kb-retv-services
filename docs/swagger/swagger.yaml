@@ -753,6 +753,63 @@ definitions:
         example: accepted
         type: string
     type: object
+  scripts_swagger.instructionsEnhanceAnswer:
+    properties:
+      answer:
+        example: Monday to Friday, 9am to 6pm
+        type: string
+      question:
+        example: What hours are you open?
+        type: string
+    type: object
+  scripts_swagger.instructionsEnhanceChange:
+    properties:
+      kind:
+        example: removed
+        type: string
+      text:
+        example: promised a full refund
+        type: string
+      why:
+        example: pricing and refund commitments are not allowed
+        type: string
+    type: object
+  scripts_swagger.instructionsEnhanceData:
+    properties:
+      changes:
+        items:
+          $ref: '#/definitions/scripts_swagger.instructionsEnhanceChange'
+        type: array
+      enhanced:
+        example: |-
+          Role
+          Support agent for Acme.
+        type: string
+      questions:
+        example:
+        - What are your support hours?
+        items:
+          type: string
+        type: array
+    type: object
+  scripts_swagger.instructionsEnhanceRequest:
+    properties:
+      answers:
+        items:
+          $ref: '#/definitions/scripts_swagger.instructionsEnhanceAnswer'
+        type: array
+      locale:
+        example: th
+        type: string
+      text:
+        example: answer customers about our printers and be friendly
+        type: string
+    type: object
+  scripts_swagger.instructionsEnhanceResponse:
+    properties:
+      data:
+        $ref: '#/definitions/scripts_swagger.instructionsEnhanceData'
+    type: object
   scripts_swagger.intakeAssessData:
     properties:
       conversation_id:
@@ -1601,6 +1658,60 @@ paths:
       summary: Receive LINE inbound webhook
       tags:
       - inbound
+  /v1/instructions/enhance:
+    post:
+      consumes:
+      - application/json
+      description: Requires ai:reply:create and feature.ai.enabled. Rewrites a tenant
+        admin's free-text assistant instructions into a fuller structured instruction,
+        reports what changed, and asks up to three clarifying questions.
+      parameters:
+      - description: Bearer <RS256 service JWT>
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Tenant ID
+        in: header
+        name: X-Tenant-Id
+        required: true
+        type: string
+      - description: Instructions enhance request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/scripts_swagger.instructionsEnhanceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/scripts_swagger.instructionsEnhanceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_my_app_internal_transport_http_response.Envelope'
+      summary: Rewrite operator instructions
+      tags:
+      - reply
   /v1/intake/assess:
     post:
       consumes:

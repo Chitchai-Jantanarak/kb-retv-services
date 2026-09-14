@@ -443,6 +443,33 @@ type intakeAssessResponse struct {
 	Data intakeAssessData `json:"data"`
 }
 
+type instructionsEnhanceAnswer struct {
+	Question string `json:"question" example:"What hours are you open?"`
+	Answer   string `json:"answer" example:"Monday to Friday, 9am to 6pm"`
+}
+
+type instructionsEnhanceRequest struct {
+	Text    string                      `json:"text" example:"answer customers about our printers and be friendly"`
+	Locale  string                      `json:"locale" example:"th"`
+	Answers []instructionsEnhanceAnswer `json:"answers"`
+}
+
+type instructionsEnhanceChange struct {
+	Kind string `json:"kind" example:"removed"`
+	Text string `json:"text" example:"promised a full refund"`
+	Why  string `json:"why" example:"pricing and refund commitments are not allowed"`
+}
+
+type instructionsEnhanceData struct {
+	Enhanced  string                      `json:"enhanced" example:"Role\nSupport agent for Acme."`
+	Changes   []instructionsEnhanceChange `json:"changes"`
+	Questions []string                    `json:"questions" example:"What are your support hours?"`
+}
+
+type instructionsEnhanceResponse struct {
+	Data instructionsEnhanceData `json:"data"`
+}
+
 type knowledgeStatsMemgraphLabel struct {
 	Label string `json:"label" example:"symptom"`
 	Count int    `json:"count" example:"128"`
@@ -571,6 +598,23 @@ func refreshAIConnectionModels() {}
 // @Failure 500 {object} response.Envelope
 // @Router /v1/intake/assess [post]
 func createIntakeAssess() {}
+
+// @Summary Rewrite operator instructions
+// @Description Requires ai:reply:create and feature.ai.enabled. Rewrites a tenant admin's free-text assistant instructions into a fuller structured instruction, reports what changed, and asks up to three clarifying questions.
+// @Tags reply
+// @Accept json
+// @Produce json
+// @Param Authorization header string true "Bearer <RS256 service JWT>"
+// @Param X-Tenant-Id header string true "Tenant ID"
+// @Param request body instructionsEnhanceRequest true "Instructions enhance request"
+// @Success 200 {object} instructionsEnhanceResponse
+// @Failure 400 {object} response.Envelope
+// @Failure 401 {object} response.Envelope
+// @Failure 403 {object} response.Envelope
+// @Failure 500 {object} response.Envelope
+// @Failure 502 {object} response.Envelope
+// @Router /v1/instructions/enhance [post]
+func enhanceInstructions() {}
 
 // @Summary Knowledge base stats
 // @Description Requires ai:reports:read. Reports Memgraph node/edge counts and Qdrant vector collection size for the tenant.
