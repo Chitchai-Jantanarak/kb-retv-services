@@ -3,23 +3,10 @@ package main
 import (
 	"context"
 
-	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 )
-
-type intakeProducts struct {
-	repo profile.Repository
-}
-
-func (p intakeProducts) Products(ctx context.Context, companyID int64) ([]string, error) {
-	data, err := p.repo.Load(ctx, companyID)
-	if err != nil {
-		return nil, err
-	}
-	return data.Products, nil
-}
 
 type intakeAssessor struct {
 	svc *intake.Service
@@ -42,15 +29,16 @@ func (a intakeAssessor) Assess(ctx context.Context, companyID, conversationID in
 		return omnichannel.Completeness{}, err
 	}
 	return omnichannel.Completeness{
-		Status:         res.Status,
-		Missing:        res.Missing,
-		Score:          res.Score,
-		Reasons:        res.Reasons,
-		Classification: res.Classification,
-		Reasoning:      res.Reasoning,
-		CatalogRelated:   res.CatalogRelated,
-		Confidence:       res.Confidence,
-		PromoteThreshold: res.PromoteThreshold,
+		Status:             res.Status,
+		Missing:            res.Missing,
+		Score:              res.Score,
+		Reasons:            res.Reasons,
+		Classification:     res.Classification,
+		Reasoning:          res.Reasoning,
+		CatalogRelated:     res.CatalogRelated,
+		Confidence:         res.Confidence,
+		PromoteThreshold:   res.PromoteThreshold,
+		AutoCreateDisabled: res.AutoCreateDisabled,
 	}, nil
 }
 

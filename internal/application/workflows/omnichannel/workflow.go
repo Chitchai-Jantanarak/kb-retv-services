@@ -131,15 +131,16 @@ type TicketEnqueuer interface {
 }
 
 type Completeness struct {
-	Status           string
-	Missing          []string
-	Score            int
-	Reasons          []string
-	Classification   string
-	Reasoning        string
-	CatalogRelated   *bool
-	Confidence       int
-	PromoteThreshold int
+	AutoCreateDisabled bool
+	Status             string
+	Missing            []string
+	Score              int
+	Reasons            []string
+	Classification     string
+	Reasoning          string
+	CatalogRelated     *bool
+	Confidence         int
+	PromoteThreshold   int
 }
 
 type IntakeSignals struct {
@@ -526,6 +527,9 @@ func (w *Workflow) assessIntake(ctx context.Context, companyID, convoID, msgID i
 
 func (w *Workflow) enqueueTicket(ctx context.Context, res *Result, companyID, convoID, msgID int64, customer string, req dto.InboundMessageRequest, assessed *Completeness, created bool) {
 	if w.tickets == nil || !created {
+		return
+	}
+	if req.Channel == ChannelEmail && assessed != nil && assessed.AutoCreateDisabled {
 		return
 	}
 	classification, confidence, threshold := "", 0, 0

@@ -21,7 +21,6 @@ import (
 	activitymysql "github.com/my/app/internal/repositories/activity/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
-	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/providercrypto"
@@ -178,7 +177,8 @@ func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.
 	}
 	extractor, err := intake.NewExtractor(registry, resolver.ForTask("intake_extract"),
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
-		intake.WithProducts(intakeProducts{repo: profilemysql.New(router)}),
+		intake.WithProducts(intakemysql.NewConfigurationRepository(router)),
+		intake.WithConfiguration(intakemysql.NewConfigurationRepository(router)),
 		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),
 	)
 	if err != nil {

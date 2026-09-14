@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/my/app/internal/ai/prompts"
-	"github.com/my/app/internal/application/profile"
 	"github.com/my/app/internal/application/services/intakeassess"
 	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/intake"
@@ -20,23 +19,10 @@ import (
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
-	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/llmboot"
 )
-
-type intakeAssessProducts struct {
-	repo profile.Repository
-}
-
-func (p intakeAssessProducts) Products(ctx context.Context, companyID int64) ([]string, error) {
-	data, err := p.repo.Load(ctx, companyID)
-	if err != nil {
-		return nil, err
-	}
-	return data.Products, nil
-}
 
 func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 	db, err := infra_mysql.Open(cfg.MySQL)
@@ -65,7 +51,8 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 	}
 	extractor, err := intake.NewExtractor(registry, resolver.ForTask("intake_extract"),
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
-		intake.WithProducts(intakeAssessProducts{repo: profilemysql.New(router)}),
+		intake.WithProducts(intakemysql.NewConfigurationRepository(router)),
+		intake.WithConfiguration(intakemysql.NewConfigurationRepository(router)),
 		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),
 	)
 	if err != nil {
@@ -129,7 +116,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 			return err
 		}
 
-		if ticketEnq != nil && intake.ConfidencePromotable(res.Classification, res.Confidence, res.PromoteThreshold) {
+		if ticketEnq != nil && !res.AutoCreateDisabled && intake.ConfidencePromotable(res.Classification, res.Confidence, res.PromoteThreshold) {
 			return ticketEnq.EnqueueTicket(ctx, job.CompanyID, p.ConversationID, p.MessageID, p.Customer, p.Request)
 		}
 		return nil

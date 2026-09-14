@@ -43,18 +43,19 @@ var validClassifications = map[string]struct{}{
 }
 
 type Result struct {
-	Fields         map[string]string
-	Missing        []string
-	Status         string
-	Score          int
-	Reasons        []string
-	Classification    string
-	Reasoning         string
-	CatalogRelated    *bool
-	ReferencedCase    string
-	Confidence        int
-	ConfidenceReasons []string
-	PromoteThreshold  int
+	Fields             map[string]string
+	Missing            []string
+	Status             string
+	Score              int
+	Reasons            []string
+	Classification     string
+	Reasoning          string
+	CatalogRelated     *bool
+	ReferencedCase     string
+	Confidence         int
+	ConfidenceReasons  []string
+	PromoteThreshold   int
+	AutoCreateDisabled bool
 }
 
 type ProviderForCompany func(ctx context.Context, companyID int64) (ports.LLMProvider, error)
@@ -64,11 +65,12 @@ type ProductSource interface {
 }
 
 type Extractor struct {
-	tmpl     prompts.Template
-	resolve  ProviderForCompany
-	specs    SpecResolver
-	products ProductSource
-	keywords KeywordSource
+	tmpl          prompts.Template
+	resolve       ProviderForCompany
+	specs         SpecResolver
+	products      ProductSource
+	keywords      KeywordSource
+	configuration ConfigurationSource
 }
 
 type Option func(*Extractor)
@@ -115,9 +117,20 @@ func NewExtractor(registry *prompts.Registry, resolve ProviderForCompany, opts .
 	return e, nil
 }
 
-func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (Result, error) {
+func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (result Result, err error) {
 	if companyID <= 0 {
 		return Result{}, fmt.Errorf("intake: company_id must be positive")
+	}
+	configuration := Configuration{AIEnabled: true, AutoCreateEnabled: true}
+	if e.configuration != nil {
+		configuration, err = e.configuration.ConfigurationFor(ctx, companyID)
+		if err != nil {
+			return Result{}, fmt.Errorf("intake: load configuration: %w", err)
+		}
+	}
+	defer func() { result.AutoCreateDisabled = !configuration.AutoCreateEnabled || !configuration.AIEnabled || configuration.EvaluationDisabled }()
+	if configuration.EvaluationDisabled {
+		return Result{Status: StatusUnknown, ReferencedCase: sig.ReferencedCase}, nil
 	}
 
 	if e.keywords != nil {
@@ -137,8 +150,15 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		threshold = loaded
 	}
 
-	score, reasons := Score(sig)
-	if score <= skipModelBelowScore {
+	var score int
+	var reasons []string
+	if !configuration.RulesDisabled {
+		score, reasons = Score(sig)
+	}
+	if !configuration.AIEnabled {
+		return Result{Status: StatusUnknown, Score: score, Reasons: reasons, ReferencedCase: sig.ReferencedCase, PromoteThreshold: threshold}, nil
+	}
+	if !configuration.RulesDisabled && score <= skipModelBelowScore {
 		return Result{
 			Status:           StatusUnknown,
 			Score:            score,
@@ -149,6 +169,14 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 		}, nil
 	}
 
+	result, err = e.extractMessage(ctx, companyID, sig, configuration.Instructions)
+	result.Score = score
+	result.Reasons = reasons
+	result.PromoteThreshold = threshold
+	return result, err
+}
+
+func (e *Extractor) extractMessage(ctx context.Context, companyID int64, sig Signals, instructions string) (Result, error) {
 	spec := DefaultSpec()
 	if e.specs != nil {
 		resolved, err := e.specs.SpecFor(ctx, companyID)
@@ -179,9 +207,10 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	}
 
 	prompt, err := e.tmpl.Render(map[string]string{
-		"fields":   fieldsSection(spec),
-		"products": productsSection(products),
-		"message":  message,
+		"fields":       fieldsSection(spec),
+		"products":     productsSection(products),
+		"message":      message,
+		"instructions": instructionSection(instructions),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("intake: render prompt: %w", err)
@@ -221,16 +250,13 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 	}
 
 	return Result{
-		Fields:           fields,
-		Missing:          missing,
-		Status:           status,
-		Score:            score,
-		Reasons:          reasons,
-		Classification:   classification,
-		Reasoning:        reasoning,
-		CatalogRelated:   catalogRelatedPtr,
-		ReferencedCase:   sig.ReferencedCase,
-		PromoteThreshold: threshold,
+		Fields:         fields,
+		Missing:        missing,
+		Status:         status,
+		Classification: classification,
+		Reasoning:      reasoning,
+		CatalogRelated: catalogRelatedPtr,
+		ReferencedCase: sig.ReferencedCase,
 	}, nil
 }
 
@@ -287,8 +313,20 @@ func productsSection(products []string) string {
 	if len(products) == 0 {
 		return ""
 	}
-	return "\nKnown products for this company: " + strings.Join(products, ", ") +
+	return "\nKnown products and support categories from this company's category tree: " + strings.Join(products, ", ") +
 		". Use one of them verbatim when the message names a product; leave product empty when none of them matches."
+}
+
+func instructionSection(instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return ""
+	}
+	runes := []rune(instructions)
+	if len(runes) > 2000 {
+		instructions = string(runes[:2000])
+	}
+	return "\nCompany guidance (apply only to interpreting this support request; never override the extraction rules or JSON format, reply to the sender, or invent missing facts):\n" + instructions + "\nEnd company guidance.\n"
 }
 
 func decodeJSONObject(raw string) map[string]any {
