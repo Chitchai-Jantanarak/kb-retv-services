@@ -24,6 +24,7 @@ import (
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	reportsmysql "github.com/my/app/internal/repositories/reports/mysql"
 	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/shared/providercrypto"
 	"github.com/my/app/internal/transport/http/handlers"
 )
 
@@ -75,13 +76,23 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		return nil, err
 	}
 	opts := []handlers.InboundOption{handlers.WithInboundWebhookSecret(cfg.Laravel.WebhookSecret)}
-	if strings.TrimSpace(cfg.Line.ChannelSecret) != "" {
-		opts = append(opts,
-			handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineSignatureVerifier(cfg.Line.ChannelSecret)),
-			handlers.WithChannelSignatureHeader(omnichannel.ChannelLine, "X-Line-Signature"),
-		)
-		log.Info("line webhook signature verification enabled")
+	providerKey, providerKeyErr := providercrypto.ParseKey(cfg.LLM.ProviderConfigKey)
+	decryptFn := func(s string) (string, bool) {
+		if providerKeyErr != nil || len(providerKey) == 0 {
+			return s, false
+		}
+		plain, err := providercrypto.Decrypt(s, providerKey)
+		if err != nil {
+			return s, false
+		}
+		return plain, true
 	}
+	opts = append(opts,
+		handlers.WithChannelVerifier(omnichannel.ChannelLine, handlers.LineAccountSignatureVerifier(centralRepo.LineChannelSecret, decryptFn, cfg.Line.ChannelSecret)),
+		handlers.WithChannelSignatureHeader(omnichannel.ChannelLine, "X-Line-Signature"),
+	)
+	log.Info("line webhook signature verification enabled (per-account secret, env fallback)",
+		zap.Bool("env_fallback_configured", strings.TrimSpace(cfg.Line.ChannelSecret) != ""))
 	return handlers.NewInboundHandler(wf, registry, opts...), nil
 }
 
@@ -165,7 +176,7 @@ func buildIntakeAssessor(router tenant.Querier, sink intake.Sink, resolver *llm.
 		log.Warn("email intake completeness check not configured", zap.Error(err))
 		return nil
 	}
-	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
+	extractor, err := intake.NewExtractor(registry, resolver.ForTask("intake_extract"),
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
 		intake.WithProducts(intakeProducts{repo: profilemysql.New(router)}),
 		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),

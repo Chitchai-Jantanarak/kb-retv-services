@@ -99,6 +99,33 @@ LIMIT 1`, address).Scan(&acc.ID, &acc.CompanyID, &acc.Channel, &acc.ExternalID)
 	return acc, nil
 }
 
+// LineChannelSecret returns the raw (possibly encrypted) channel_secret
+// stored on the active LINE channel account matching destination (the LINE
+// bot user id, delivered as the webhook body's "destination" field). Returns
+// "" with a nil error when no matching account exists or the account has no
+// secret configured; the caller decides whether to fall back to an env
+// secret. Never decrypts here — that's the caller's job, since decryption
+// needs the provider key.
+func (r *Repository) LineChannelSecret(ctx context.Context, destination string) (string, error) {
+	destination = strings.TrimSpace(destination)
+	if destination == "" {
+		return "", nil
+	}
+	var secret string
+	err := r.db.QueryRowContext(ctx, `
+SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(credentials, '$.channel_secret')), '')
+FROM channel_accounts
+WHERE channel = 'line' AND external_id = ? AND is_active = 1
+LIMIT 1`, destination).Scan(&secret)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("channel_accounts: line channel secret: %w", err)
+	}
+	return secret, nil
+}
+
 // MarkVerified confirms the channel account that owns code, the 8-character
 // value from the SJT-VERIFY-<CODE> mail Laravel sent to prove the tenant's
 // forwarder is wired up. verification_code is unique per pending account, so
