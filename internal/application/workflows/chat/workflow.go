@@ -14,24 +14,23 @@ import (
 )
 
 type Workflow struct {
-	tmpl              prompts.Template
-	streamTmpl        prompts.Template
-	summaryTmpl       prompts.Template
-	clarifyTmpl       prompts.Template
-	contextualizeTmpl prompts.Template
-	resolve           rag.ProviderForCompany
-	fts               rag.FTSSource
-	profile           ProfileSource
-	instructions      InstructionSource
-	cases             CaseSource
-	router            *intent.Router
-	orch              toolRunner
-	cache             ports.Cache
-	cacheTTL          time.Duration
-	fetcher           ports.AttachmentFetcher
-	transcriber       ports.Transcriber
-	sessions          SessionStore
-	turns             TurnRecorder
+	tmpl         prompts.Template
+	streamTmpl   prompts.Template
+	summaryTmpl  prompts.Template
+	clarifyTmpl  prompts.Template
+	resolve      rag.ProviderForCompany
+	fts          rag.FTSSource
+	profile      ProfileSource
+	instructions InstructionSource
+	cases        CaseSource
+	router       *intent.Router
+	orch         toolRunner
+	cache        ports.Cache
+	cacheTTL     time.Duration
+	fetcher      ports.AttachmentFetcher
+	transcriber  ports.Transcriber
+	sessions     SessionStore
+	turns        TurnRecorder
 
 	knowledgeReranker Embedder
 
@@ -62,11 +61,7 @@ func New(registry *prompts.Registry, resolve rag.ProviderForCompany, fts rag.FTS
 	if err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
-	contextualizeTmpl, err := registry.Get(prompts.NameContextualize)
-	if err != nil {
-		return nil, fmt.Errorf("chat: %w", err)
-	}
-	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, summaryTmpl: summaryTmpl, clarifyTmpl: clarifyTmpl, contextualizeTmpl: contextualizeTmpl, resolve: resolve, fts: fts}
+	w := &Workflow{tmpl: tmpl, streamTmpl: streamTmpl, summaryTmpl: summaryTmpl, clarifyTmpl: clarifyTmpl, resolve: resolve, fts: fts}
 	for _, opt := range opts {
 		opt(w)
 	}

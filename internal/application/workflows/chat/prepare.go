@@ -67,15 +67,11 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 	}
 	candidates := w.citeCandidates(ctx, companyID, req)
 
-	routed := lastUser
-	timedChat(timings, "contextualize", func() {
-		routed, _ = w.contextualize(decideCtx, req.Locale, req, lastUser, candidates, companyID)
-	})
-	decideCtx = ctxkey.WithTranscript(decideCtx, contextualizeTranscript(req.Messages))
+	decideCtx = ctxkey.WithTranscript(decideCtx, transcriptWindow(req.Messages))
 
 	outcome, err := decider.Decide(decideCtx, decide.Input{
 		Actor:          toolActor(ctx, companyID),
-		Text:           routed,
+		Text:           lastUser,
 		CiteCandidates: candidates,
 	}, func(stage string, fn func() error) error {
 		return timedChatErr(timings, stage, fn)
@@ -112,13 +108,13 @@ func (w *Workflow) prepare(ctx context.Context, req dto.ChatRequest, timings map
 
 	switch outcome.Kind {
 	case decide.KindClarify:
-		return w.prepareClarify(ctx, req, base, outcome, routed, companyID), nil
+		return w.prepareClarify(ctx, req, base, outcome, lastUser, companyID), nil
 	case decide.KindToolFailed:
 		return handledPreamble(base, statusResponse(req.Locale, toolFailedReply(req.Locale), dto.ChatStatusToolFailed)), nil
 	case decide.KindPermissionDenied:
 		return handledPreamble(base, statusResponse(req.Locale, permissionDeniedReply(req.Locale), dto.ChatStatusPermissionDenied)), nil
 	case decide.KindTool:
-		return w.prepareTool(ctx, req, base, outcome, candidates, routed, companyID, timings), nil
+		return w.prepareTool(ctx, req, base, outcome, candidates, lastUser, companyID, timings), nil
 	case decide.KindHandoff, decide.KindSocial, decide.KindOffTopic:
 		seed := replySeed(companyID, lastUser, len(req.Messages))
 		if resp, handled := w.shortCircuit(req.Locale, decision, outcome.Kind, seed); handled {

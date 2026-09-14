@@ -222,3 +222,12 @@ func TestProbeAcceptBar(t *testing.T) {
 	t.Logf("  wrong: %v", sWrongList)
 	t.Logf("  falsefire: %v", sFalseList)
 }
+
+// contextFuzzBound is the handler set production binds; probes filter the
+// catalog to it so unbound tools never win a selection.
+var contextFuzzBound = map[string]bool{
+	"knowledge": true, "reports.update": true, "reports.close": true,
+	"reports.assign": true, "reports.find": true, "reports.track": true,
+	"reports.byProduct": true, "employee.status": true, "workload": true,
+	"customer.profile": true, "inbound.read": true, "promote.mail": true,
+}

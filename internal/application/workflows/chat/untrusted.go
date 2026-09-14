@@ -7,7 +7,7 @@ import (
 
 var (
 	untrustedControl = regexp.MustCompile(`[\x00-\x1f\x7f\p{Cf}]`)
-	untrustedMarkers = regexp.MustCompile(`(?i)<\|+|\|+>|#{2,}|@(?:system|user|assistant)|(?:system|user|assistant)\s*:|\[/?inst\]|<<\s*/?sys\s*>>`)
+	untrustedMarkers = regexp.MustCompile(`(?i)<\|+|\|+>|#{2,}|@(?:system|user|assistant)|(?:system|user|assistant)\s*:|\[/?inst\]|<<\s*/?sys\s*>>|\[/?(?:begin|end)\b[^\]]*\]`)
 )
 
 func sanitizeUntrusted(s string) string {
