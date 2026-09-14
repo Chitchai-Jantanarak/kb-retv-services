@@ -7,6 +7,7 @@ import (
 
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm"
 )
 
 func (w *Workflow) generateTurn(
@@ -38,7 +39,7 @@ func (w *Workflow) generateTurn(
 	var provider ports.LLMProvider
 	err = timedChatErr(timings, "resolve", func() error {
 		var err error
-		provider, err = w.resolve(ctx, companyID)
+		provider, err = w.resolve(llm.WithModelSelection(ctx, llm.ModelSelection{Model: req.Model, ConnectionID: req.ConnectionID}), companyID)
 		return err
 	})
 	if err != nil {

@@ -20,6 +20,8 @@ func cacheKey(companyID int64, principal ctxkey.Principal, req dto.ChatRequest) 
 		strconv.FormatInt(principal.UserID, 10),
 		principal.Role,
 		req.Locale,
+		req.Model,
+		strconv.FormatInt(req.ConnectionID, 10),
 		permsKey(principal.Perms),
 		coverageKey(principal.Coverage),
 	)
@@ -52,7 +54,7 @@ func coverageKey(coverage []int64) string {
 }
 
 func (w *Workflow) cachedResponse(ctx context.Context, key string) (dto.ChatResponse, bool) {
-	if w.cache == nil {
+	if w.cache == nil || key == "" {
 		return dto.ChatResponse{}, false
 	}
 	raw, err := w.cache.Get(ctx, key)
@@ -76,7 +78,7 @@ func cacheable(resp dto.ChatResponse) bool {
 }
 
 func (w *Workflow) storeResponse(ctx context.Context, key string, resp dto.ChatResponse) {
-	if w.cache == nil || strings.TrimSpace(resp.Reply) == "" || !cacheable(resp) {
+	if w.cache == nil || key == "" || strings.TrimSpace(resp.Reply) == "" || !cacheable(resp) {
 		return
 	}
 	resp.StageTimingsMS = nil
@@ -86,4 +88,8 @@ func (w *Workflow) storeResponse(ctx context.Context, key string, resp dto.ChatR
 		return
 	}
 	_ = w.cache.Set(ctx, key, raw, w.cacheTTL)
+}
+
+func WithCacheEligibility(check func(context.Context, int64) bool) Option {
+	return func(w *Workflow) { w.cacheAllowed = check }
 }

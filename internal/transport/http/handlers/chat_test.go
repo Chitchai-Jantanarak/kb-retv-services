@@ -55,7 +55,7 @@ func TestChatHandlerPassesRequestAndReturnsResponse(t *testing.T) {
 	h := NewChatHandler(wf)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat",
-		strings.NewReader(`{"messages":[{"role":"user","content":"hello"}],"locale":"en"}`))
+		strings.NewReader(`{"messages":[{"role":"user","content":"hello"}],"locale":"en","model":"discovered-model","connection_id":12}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req = req.WithContext(ctxkey.WithCompanyID(req.Context(), 42))
 	c := e.NewContext(req, rec)
@@ -68,6 +68,9 @@ func TestChatHandlerPassesRequestAndReturnsResponse(t *testing.T) {
 	}
 	if wf.req.LastUserMessage() != "hello" {
 		t.Fatalf("workflow received last user %q, want hello", wf.req.LastUserMessage())
+	}
+	if wf.req.Model != "discovered-model" || wf.req.ConnectionID != 12 {
+		t.Fatal("handler dropped model selection")
 	}
 	body := rec.Body.String()
 	for _, want := range []string{"hi", "Printer offline", "search_results"} {

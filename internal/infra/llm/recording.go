@@ -67,13 +67,25 @@ func (r *recording) Stream(ctx context.Context, p ports.Prompt) (<-chan ports.Co
 	go func() {
 		defer close(out)
 		var last ports.Completion
-		for chunk := range ch {
-			if chunk.Vendor != "" || chunk.Model != "" || chunk.Usage != (ports.TokenUsage{}) {
-				last = chunk
+		defer func() { r.record(ctx, "stream", start, last, ctx.Err()) }()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok := <-ch:
+				if !ok {
+					return
+				}
+				if chunk.Vendor != "" || chunk.Model != "" || chunk.Usage != (ports.TokenUsage{}) {
+					last = chunk
+				}
+				select {
+				case out <- chunk:
+				case <-ctx.Done():
+					return
+				}
 			}
-			out <- chunk
 		}
-		r.record(ctx, "stream", start, last, nil)
 	}()
 	return out, nil
 }

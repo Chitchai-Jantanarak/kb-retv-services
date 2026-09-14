@@ -30,6 +30,8 @@ type apiHandlers struct {
 	search      *handlers.SearchHandler
 	intake      *handlers.IntakeAssessHandler
 	aiUsage     *handlers.AIUsageHandler
+	aiModels    *handlers.AIModelsHandler
+	chatModels  *handlers.ChatModelsHandler
 	knowledge   *handlers.KnowledgeStatsHandler
 }
 
@@ -59,6 +61,10 @@ func buildAPIHandlers(
 	log.Info("reports endpoints configured")
 
 	endpoints.aiUsage = handlers.NewAIUsageHandler(mysqlai.NewRequestLogRepo(qdb))
+	endpoints.aiModels = handlers.NewAIModelsHandler(llm.NewModelCatalog(mysqlai.NewRoutingRepository(qdb, cfg.LLM.ProviderConfigKey), cfg.LLM.LocalURL))
+	if resolver != nil {
+		endpoints.chatModels = handlers.NewChatModelsHandler(resolver)
+	}
 	log.Info("ai usage endpoint configured")
 
 	endpoints.knowledge = buildKnowledgeStatsHandler(cfg, log)

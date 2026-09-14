@@ -85,13 +85,13 @@ func buildWorkflowOptions(cfg config.Config, db tenant.Querier, log *zap.Logger,
 
 func llmStages(registry *prompts.Registry, resolver *llm.CompanyResolver, log *zap.Logger) []reply.Option {
 	opts := make([]reply.Option, 0, 4)
-	if crag, err := rag.NewLLMCRAG(registry, resolver.ResolveFor); err != nil {
+	if crag, err := rag.NewLLMCRAG(registry, resolver.ForTask("support_reply")); err != nil {
 		log.Warn("crag not configured", zap.Error(err))
 	} else {
 		opts = append(opts, reply.WithCRAG(crag))
 		log.Info("llm-backed CRAG configured")
 	}
-	if reranker, err := rag.NewLLMReranker(registry, resolver.ResolveFor, rag.LexicalReranker{}); err != nil {
+	if reranker, err := rag.NewLLMReranker(registry, resolver.ForTask("support_reply"), rag.LexicalReranker{}); err != nil {
 		log.Warn("llm reranker not configured", zap.Error(err))
 	} else {
 		opts = append(opts, reply.WithReranker(reranker))
@@ -99,14 +99,14 @@ func llmStages(registry *prompts.Registry, resolver *llm.CompanyResolver, log *z
 	}
 	if generator, err := rag.NewLLMGenerator(rag.LLMGeneratorConfig{
 		Registry: registry,
-		Resolve:  resolver.ResolveFor,
+		Resolve:  resolver.ForTask("support_reply"),
 	}); err != nil {
 		log.Warn("llm generator not configured", zap.Error(err))
 	} else {
 		opts = append(opts, reply.WithGenerator(generator))
 		log.Info("llm-backed generator configured")
 	}
-	if critic, err := rag.NewLLMCritic(registry, resolver.ResolveFor); err != nil {
+	if critic, err := rag.NewLLMCritic(registry, resolver.ForTask("support_reply")); err != nil {
 		log.Warn("llm critic not configured", zap.Error(err))
 	} else {
 		opts = append(opts, reply.WithCritic(critic))

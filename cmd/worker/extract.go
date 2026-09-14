@@ -37,7 +37,7 @@ func buildExtractHandler(cfg config.Config) taskHandler {
 		Source:   repository,
 		Lookup:   repository,
 		Sink:     repository,
-		Resolve:  resolver.ResolveFor,
+		Resolve:  resolver.ForTask("classify"),
 		Review:   reviewmysql.NewOutboxWriter(db),
 		Model:    cfg.LLM.DefaultModel,
 	})

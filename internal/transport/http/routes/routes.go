@@ -27,6 +27,8 @@ type Options struct {
 	Search         *handlers.SearchHandler
 	Intake         *handlers.IntakeAssessHandler
 	AIUsage        *handlers.AIUsageHandler
+	AIModels       *handlers.AIModelsHandler
+	ChatModels     *handlers.ChatModelsHandler
 	Knowledge      *handlers.KnowledgeStatsHandler
 	Budget         appmiddleware.BudgetPolicy
 	Features       appmiddleware.FeatureReader
@@ -73,6 +75,9 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 	if opts.Chat != nil {
 		protectedV1.POST("/chat", opts.Chat.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
 	}
+	if opts.ChatModels != nil {
+		protectedV1.GET("/chat/models", opts.ChatModels.List, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
+	}
 
 	if opts.ChatStream != nil {
 		protectedV1.POST("/chat/stream", opts.ChatStream.Create, appmiddleware.RequirePermission("ai:reply:create"), appmiddleware.RequireFeature(opts.Features, "feature.ai.enabled"))
@@ -103,6 +108,10 @@ func Register(e *echo.Echo, reply *handlers.ReplyHandler, opts Options) {
 
 	if opts.AIUsage != nil {
 		protectedV1.GET("/ai/usage", opts.AIUsage.Usage, appmiddleware.RequirePermission("ai:reports:read"))
+	}
+	if opts.AIModels != nil {
+		protectedV1.GET("/ai/connections/:id/models", opts.AIModels.List, appmiddleware.RequirePermission("activity.view"))
+		protectedV1.POST("/ai/connections/:id/models/refresh", opts.AIModels.Refresh, appmiddleware.RequirePermission("activity.view"))
 	}
 
 	if opts.Knowledge != nil {

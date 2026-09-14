@@ -63,6 +63,8 @@ func Resolver(cfg config.Config, db tenant.Querier) (*llm.CompanyResolver, error
 		WithCacheTTL(time.Duration(cfg.LLM.ResolverCacheTTLSeconds) * time.Second)
 	if db != nil {
 		resolver.WithRequestSink(mysqlai.NewRequestLogRepo(db))
+		routes := mysqlai.NewRoutingRepository(db, cfg.LLM.ProviderConfigKey)
+		resolver.WithRoutes(routes, routes)
 	}
 	return resolver, nil
 }

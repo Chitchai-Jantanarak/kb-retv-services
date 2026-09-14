@@ -7,6 +7,7 @@ import (
 
 	"github.com/my/app/internal/application/dto"
 	"github.com/my/app/internal/domain/ports"
+	"github.com/my/app/internal/infra/llm"
 	"github.com/my/app/internal/shared/ctxkey"
 	apperr "github.com/my/app/internal/shared/errors"
 )
@@ -76,7 +77,7 @@ func (w *Workflow) RunStream(ctx context.Context, req dto.ChatRequest, emit func
 	var provider ports.LLMProvider
 	err = timedChatErr(timings, "resolve", func() error {
 		var resolveErr error
-		provider, resolveErr = w.resolve(ctx, companyID)
+		provider, resolveErr = w.resolve(llm.WithModelSelection(ctx, llm.ModelSelection{Model: req.Model, ConnectionID: req.ConnectionID}), companyID)
 		return resolveErr
 	})
 	if err != nil {

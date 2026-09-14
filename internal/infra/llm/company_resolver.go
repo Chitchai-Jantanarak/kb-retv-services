@@ -49,6 +49,8 @@ type CompanyResolver struct {
 	mu            sync.Mutex
 	cache         map[int64]cacheEntry
 	sink          RequestSink
+	routes        RouteLookup
+	attemptSink   RouteAttemptSink
 }
 
 type cacheEntry struct {
@@ -165,6 +167,8 @@ func (r *CompanyResolver) lookupAgent(ctx context.Context, companyID int64) (Age
 	}
 	cfg.APIKey = agent.APIKey
 	cfg.BaseURL = agent.BaseURL
+	cfg.Backup = agent.Backup
+	cfg.Failover = agent.Failover
 
 	return cfg, nil
 }
