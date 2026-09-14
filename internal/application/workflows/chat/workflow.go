@@ -27,6 +27,7 @@ type Workflow struct {
 	orch         toolRunner
 	cache        ports.Cache
 	cacheTTL     time.Duration
+	cacheAllowed func(context.Context, int64) bool
 	fetcher      ports.AttachmentFetcher
 	transcriber  ports.Transcriber
 	sessions     SessionStore
@@ -93,6 +94,9 @@ func (w *Workflow) Run(ctx context.Context, req dto.ChatRequest) (dto.ChatRespon
 	companyID, lastUser := pre.companyID, pre.lastUser
 
 	key := cacheKey(companyID, principal, req)
+	if req.Model != "" || req.ConnectionID != 0 || (w.cacheAllowed != nil && !w.cacheAllowed(ctx, companyID)) {
+		key = ""
+	}
 	var (
 		cachedResp dto.ChatResponse
 		cachedOK   bool

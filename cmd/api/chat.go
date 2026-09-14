@@ -68,6 +68,9 @@ func buildChatEndpoints(
 	}
 
 	chatOpts := make([]chatwf.Option, 0, 1)
+	chatOpts = append(chatOpts, chatwf.WithCacheEligibility(func(ctx context.Context, companyID int64) bool {
+		return resolver.LegacyCacheAllowed(ctx, companyID, "chat")
+	}))
 
 	if cfg.Chat.CacheTTLSeconds > 0 {
 		chatOpts = append(chatOpts, chatwf.WithCache(
@@ -121,7 +124,7 @@ func buildChatEndpoints(
 		}
 	}
 
-	if workflow, workflowErr := chatwf.New(chatRegistry, resolver.ResolveFor, ftsSource, chatOpts...); workflowErr != nil {
+	if workflow, workflowErr := chatwf.New(chatRegistry, resolver.ForTask("chat"), ftsSource, chatOpts...); workflowErr != nil {
 		log.Warn("chat endpoint not configured", zap.Error(workflowErr))
 	} else {
 		endpoints.chat = handlers.NewChatHandler(workflow)

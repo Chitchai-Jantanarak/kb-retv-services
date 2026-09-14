@@ -34,6 +34,8 @@ type ChatRequest struct {
 	Debug          bool          `json:"debug,omitempty"`
 	ConversationID int64         `json:"conversation_id,omitempty"`
 	Mode           string        `json:"mode,omitempty"`
+	Model          string        `json:"model,omitempty"`
+	ConnectionID   int64         `json:"connection_id,omitempty"`
 }
 
 func (r *ChatRequest) Normalize() {
@@ -51,6 +53,9 @@ func (r *ChatRequest) Normalize() {
 
 func (r *ChatRequest) Validate() error {
 	r.Normalize()
+	if len(r.Model) > 190 || r.ConnectionID < 0 {
+		return apperr.New(apperr.CodeInvalidInput, "invalid model selection")
+	}
 	if len(r.Messages) == 0 {
 		return apperr.New(apperr.CodeInvalidInput, "messages is required")
 	}

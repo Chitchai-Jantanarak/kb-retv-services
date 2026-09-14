@@ -16,13 +16,13 @@ import (
 	"github.com/my/app/internal/application/services/tickets"
 	"github.com/my/app/internal/application/workflows/intake"
 	"github.com/my/app/internal/domain/ports"
-	"github.com/my/app/internal/shared/ctxkey"
 	infraasynq "github.com/my/app/internal/infra/asynq"
 	infra_mysql "github.com/my/app/internal/infra/mysql"
 	channelsmysql "github.com/my/app/internal/repositories/channels/mysql"
 	intakemysql "github.com/my/app/internal/repositories/intake/mysql"
 	profilemysql "github.com/my/app/internal/repositories/profile/mysql"
 	"github.com/my/app/internal/shared/config"
+	"github.com/my/app/internal/shared/ctxkey"
 	"github.com/my/app/internal/shared/llmboot"
 )
 
@@ -63,7 +63,7 @@ func buildIntakeAssessHandler(cfg config.Config) taskHandler {
 		log.Printf("intake:assess disabled: prompt registry unavailable: %v", err)
 		return unavailable("intake:assess", "prompt registry not configured")
 	}
-	extractor, err := intake.NewExtractor(registry, resolver.ResolveFor,
+	extractor, err := intake.NewExtractor(registry, resolver.ForTask("intake_extract"),
 		intake.WithSpecResolver(intakemysql.NewSpecRepository(router)),
 		intake.WithProducts(intakeAssessProducts{repo: profilemysql.New(router)}),
 		intake.WithIntentKeywords(intakemysql.NewKeywordRepository(router)),

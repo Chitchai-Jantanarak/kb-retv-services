@@ -65,6 +65,8 @@ func run() {
 		Search:         endpoints.search,
 		Intake:         endpoints.intake,
 		AIUsage:        endpoints.aiUsage,
+		AIModels:       endpoints.aiModels,
+		ChatModels:     endpoints.chatModels,
 		Knowledge:      endpoints.knowledge,
 		Features:       features,
 		Budget: appmiddleware.BudgetPolicy{
