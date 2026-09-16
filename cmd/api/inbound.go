@@ -25,9 +25,10 @@ import (
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/providercrypto"
 	"github.com/my/app/internal/transport/http/handlers"
+	appmiddleware "github.com/my/app/internal/transport/http/middleware"
 )
 
-func buildInboundHandler(cfg config.Config, central, router tenant.Querier, resolver *llm.CompanyResolver, log *zap.Logger) (*handlers.InboundHandler, error) {
+func buildInboundHandler(cfg config.Config, central, router tenant.Querier, resolver *llm.CompanyResolver, features appmiddleware.FeatureReader, log *zap.Logger) (*handlers.InboundHandler, error) {
 	if cfg.App.IsProduction() && strings.TrimSpace(cfg.Laravel.WebhookSecret) == "" {
 		return nil, errors.New("inbound webhook secret is required in production")
 	}
@@ -44,6 +45,7 @@ func buildInboundHandler(cfg config.Config, central, router tenant.Querier, reso
 		AppKey:         cfg.App.Key,
 		Backfill:       siloRepo,
 		Activity:       activitymysql.New(router),
+		Features:       features,
 		Log:            log,
 	}
 	if assessor := buildIntakeAssessor(router, siloRepo, resolver, log); assessor != nil {

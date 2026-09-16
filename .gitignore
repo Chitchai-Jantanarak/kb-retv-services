@@ -30,7 +30,11 @@ Thumbs.db
 
 /plan.md
 *.md
-docs/
+# docs/* not docs/ - git cannot re-include a path whose parent directory is
+# excluded, and docs/swagger is a real Go package imported by
+# internal/transport/http/routes/apidocs.go:8.
+docs/*
+!docs/swagger/
 README.md
 
 # Local definitions, examples may be committed as .json.example.
@@ -38,6 +42,22 @@ README.md
 
 # Intent router anchors: committed single source, embedded by Go and read by verify.py.
 !internal/application/intent/anchors.json
+
+# Embedded by //go:embed in internal/application/intent/router.go - a missing file
+# is a compile error, not a runtime one. Tracked by force-add until now.
+!internal/application/intent/social_sub.json
+
+# Tool catalog loaded by internal/application/tools/loader.go via fs.Glob.
+!config/tools/*.json
+
+# Generated swagger spec, served by echo-swagger alongside docs/swagger/docs.go.
+!docs/swagger/*.json
+
+# Postman collection + environment. scripts/swagger/postman_test.go asserts
+# against these three files, so an untracked copy means five tests fail on any
+# clean checkout. Every credential field in the environment is an empty string.
+!docs/api-collection/
+!docs/api-collection/*.json
 
 # Confidential: service keys and local secrets - never commit.
 secrets/
@@ -58,8 +78,11 @@ __pycache__/
 *.pyc
 
 train/*
-migrator
+# Leading slash: this is the compiled binary at the repo root. Without it the
+# pattern also matches the cmd/migrator/ source directory.
+/migrator
 scripts/*.sh
+!scripts/check_context.sh
 internal/**/probe_*_test.go
 internal/**/*_live_test.go
 .gocache

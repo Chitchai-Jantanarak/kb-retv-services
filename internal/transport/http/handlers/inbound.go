@@ -11,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+	"go.uber.org/zap"
 
 	"github.com/my/app/internal/application/workflows/omnichannel"
 	apperr "github.com/my/app/internal/shared/errors"
+	"github.com/my/app/internal/shared/logger"
 	"github.com/my/app/internal/transport/http/response"
 )
 
@@ -122,21 +124,41 @@ func (h *InboundHandler) Receive(c *echo.Context) error {
 		return response.WriteError(c, apperr.Wrap(apperr.CodeInvalidInput, "normalize payload", err))
 	}
 
-	result, err := h.workflow.Run(c.Request().Context(), normalized, raw)
-	if err != nil {
-		if errors.Is(err, omnichannel.ErrAccountNotFound) {
-			return response.WriteError(c, apperr.Wrap(apperr.CodeNotFound, "unknown receiver", err))
+	var (
+		result            omnichannel.Result
+		processed         int
+		failed            int
+		lastErr           error
+		onlyNotFoundSoFar = true
+	)
+	for _, n := range normalized {
+		res, rerr := h.workflow.Run(c.Request().Context(), n, raw)
+		if rerr != nil {
+			failed++
+			lastErr = rerr
+			if !errors.Is(rerr, omnichannel.ErrAccountNotFound) {
+				onlyNotFoundSoFar = false
+			}
+			logger.Get().Warn("inbound: event processing failed", zap.String("channel", channel), zap.Error(rerr))
+			continue
 		}
-		return response.WriteError(c, err)
+		processed++
+		onlyNotFoundSoFar = false
+		result = res
+	}
+	if processed == 0 && failed > 0 && onlyNotFoundSoFar {
+		return response.WriteError(c, apperr.Wrap(apperr.CodeNotFound, "unknown receiver", lastErr))
 	}
 	return c.JSON(http.StatusOK, response.OK(map[string]any{
-		"company_id":      result.CompanyID,
-		"conversation_id": result.ConversationID,
-		"message_id":      result.MessageID,
-		"ticket_enqueued": result.TicketEnqueued,
-		"verified":        result.Verified,
-		"matched_via":     result.MatchedVia,
-		"matched_address": result.MatchedAddress,
+		"company_id":       result.CompanyID,
+		"conversation_id":  result.ConversationID,
+		"message_id":       result.MessageID,
+		"ticket_enqueued":  result.TicketEnqueued,
+		"verified":         result.Verified,
+		"matched_via":      result.MatchedVia,
+		"matched_address":  result.MatchedAddress,
+		"events_processed": processed,
+		"events_failed":    failed,
 	}))
 }
 

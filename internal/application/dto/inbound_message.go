@@ -23,6 +23,14 @@ func (r *InboundMessageRequest) Validate() error {
 	return validateStruct(r)
 }
 
+func (r InboundMessageRequest) ValidateEvent() error {
+	r.Normalize()
+	if err := validateAttachmentRefs(r.Attachments); err != nil {
+		return err
+	}
+	return validateStruct(r)
+}
+
 func (r *InboundMessageRequest) Normalize() {
 	r.Channel = normalizeText(r.Channel)
 	r.ExternalMessageID = normalizeText(r.ExternalMessageID)

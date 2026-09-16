@@ -15,7 +15,7 @@ func TestLineNormalizerFailureCases(t *testing.T) {
 		{name: "bad_json", raw: "not-json", wantSub: "parse"},
 		{name: "no_events", raw: `{"destination":"x","events":[]}`, wantSub: "no events"},
 		{name: "no_source", raw: `{"destination":"x","events":[{"message":{"id":"m1","text":"hi"}}]}`, wantSub: "no source"},
-		{name: "no_message_id", raw: `{"destination":"x","events":[{"source":{"type":"user","userId":"u1"},"message":{"text":"hi"}}]}`, wantSub: "no message id"},
+		{name: "no_message_id", raw: `{"destination":"x","events":[{"type":"message","source":{"type":"user","userId":"u1"},"message":{"text":"hi"}}]}`, wantSub: "no message id"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,10 +37,11 @@ func TestLineNormalizerHappyPath(t *testing.T) {
 			{"type":"message","timestamp":1718000000,"source":{"type":"user","userId":"Uabc"},"message":{"id":"msg-1","type":"text","text":"พิมพ์ไม่ออก"}}
 		]
 	}`
-	got, err := LineNormalizer{}.Normalize([]byte(raw))
+	results, err := LineNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.Request.Channel != ChannelLine {
 		t.Fatalf("channel = %q", got.Request.Channel)
 	}
@@ -59,10 +60,11 @@ func TestLineNormalizerImageMessageProducesAttachment(t *testing.T) {
 			{"type":"message","timestamp":1718000000,"source":{"type":"user","userId":"Uabc"},"message":{"id":"line-msg-img-1","type":"image"}}
 		]
 	}`
-	got, err := LineNormalizer{}.Normalize([]byte(raw))
+	results, err := LineNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.Request.Body != "" {
 		t.Fatalf("body = %q, want empty for image message", got.Request.Body)
 	}
@@ -88,10 +90,11 @@ func TestLineNormalizerAudioMessageProducesAttachment(t *testing.T) {
 			{"type":"message","timestamp":1718000000,"source":{"type":"user","userId":"Uabc"},"message":{"id":"line-msg-audio-1","type":"audio"}}
 		]
 	}`
-	got, err := LineNormalizer{}.Normalize([]byte(raw))
+	results, err := LineNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if len(got.Request.Attachments) != 1 {
 		t.Fatalf("attachments = %+v, want 1", got.Request.Attachments)
 	}
@@ -132,10 +135,11 @@ func TestEmailNormalizerFailureCases(t *testing.T) {
 
 func TestEmailNormalizerExtractsAddress(t *testing.T) {
 	raw := `{"message_id":"<m-1@mail>","from":"Alice <alice@example.com>","subject":"help","body":"can't print"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.ExternalSender != "alice@example.com" {
 		t.Fatalf("sender = %q", got.ExternalSender)
 	}
@@ -146,10 +150,11 @@ func TestEmailNormalizerExtractsAddress(t *testing.T) {
 
 func TestEmailNormalizerCarriesThreadAndRecipients(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","in_reply_to":" <m-1@mail> ","from":"alice@example.com","to":"Alice <alice@example.com>","recipients":["Support <SUPPORT@site.com>","alice@example.com"],"subject":"re: help","body":"any progress?"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.InReplyTo != "<m-1@mail>" {
 		t.Fatalf("in_reply_to = %q", got.InReplyTo)
 	}
@@ -161,10 +166,11 @@ func TestEmailNormalizerCarriesThreadAndRecipients(t *testing.T) {
 
 func TestEmailNormalizerCarriesExtendedSignals(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","in_reply_to":"<m-1@mail>","references":["<m-0@mail>"," <m-1@mail> "],"from":"alice@example.com","from_name":" Alice A. ","to":"support@site.com","subject":"re: help","body":"any progress?","auto_submitted":"no","list_unsubscribe":true,"precedence":"bulk"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	wantRefs := []string{"<m-0@mail>", "<m-1@mail>"}
 	if !reflect.DeepEqual(got.References, wantRefs) {
 		t.Fatalf("references = %v, want %v", got.References, wantRefs)
@@ -185,10 +191,11 @@ func TestEmailNormalizerCarriesExtendedSignals(t *testing.T) {
 
 func TestEmailNormalizerCarriesAttachmentSignals(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"a.jpg","mime_type":"image/jpeg","size_bytes":100,"content_b64":"aGVsbG8="},{"filename":"b.png","mime_type":"image/png","size_bytes":200,"content_b64":"d29ybGQ="}]}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.AttachmentCount != 2 {
 		t.Fatalf("AttachmentCount = %d, want 2", got.AttachmentCount)
 	}
@@ -200,10 +207,11 @@ func TestEmailNormalizerCarriesAttachmentSignals(t *testing.T) {
 
 func TestEmailNormalizerExtractsRoutingKeysFromToCcAndDeliveredTo(t *testing.T) {
 	raw := `{"message_id":"<m-3@mail>","from":"alice@example.com","to":"Name <chitchai5757+SJT-8f31a2@gmail.com>","recipients":["chitchai5757+sjt-8f31a2@gmail.com","cc-tag+sjt-b91cde@gmail.com"],"delivered_to":["chitchai5757+sjt-99z9z9@gmail.com","Fwd <SJT-o7lp8lkx@grubgrob.xyz>","notsjt-abcdef@grubgrob.xyz"],"subject":"help","body":"hi"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	want := []string{"8f31a2", "b91cde", "99z9z9", "o7lp8lkx"}
 	if !reflect.DeepEqual(got.RoutingKeys, want) {
 		t.Fatalf("RoutingKeys = %v, want %v", got.RoutingKeys, want)
@@ -212,10 +220,11 @@ func TestEmailNormalizerExtractsRoutingKeysFromToCcAndDeliveredTo(t *testing.T) 
 
 func TestEmailNormalizerCandidatesIncludeDeliveredTo(t *testing.T) {
 	raw := `{"message_id":"<m-4@mail>","from":"alice@example.com","to":"alice@example.com","recipients":["alice@example.com"],"delivered_to":["Support <support-smartjob@idio-tech.com>"],"subject":"help","body":"hi"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	want := []string{"alice@example.com", "support-smartjob@idio-tech.com"}
 	if !reflect.DeepEqual(got.AccountCandidates, want) {
 		t.Fatalf("candidates = %v, want %v", got.AccountCandidates, want)
@@ -224,10 +233,11 @@ func TestEmailNormalizerCandidatesIncludeDeliveredTo(t *testing.T) {
 
 func TestEmailNormalizerDecodesAttachmentBytes(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"a.jpg","mime_type":"image/jpeg","size_bytes":5,"content_b64":"aGVsbG8="},{"filename":"b.png","mime_type":"image/png","size_bytes":5,"content_b64":"d29ybGQ="}]}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if len(got.Attachments) != 2 {
 		t.Fatalf("Attachments = %+v, want 2", got.Attachments)
 	}
@@ -241,10 +251,11 @@ func TestEmailNormalizerDecodesAttachmentBytes(t *testing.T) {
 
 func TestEmailNormalizerSkipsMalformedAttachmentButKeepsRest(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"see attached","attachments":[{"filename":"bad.jpg","mime_type":"image/jpeg","size_bytes":5,"content_b64":"not-valid-base64!!"},{"filename":"good.png","mime_type":"image/png","size_bytes":5,"content_b64":"d29ybGQ="}]}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if len(got.Attachments) != 1 {
 		t.Fatalf("Attachments = %+v, want 1 (malformed skipped)", got.Attachments)
 	}
@@ -258,10 +269,11 @@ func TestEmailNormalizerSkipsMalformedAttachmentButKeepsRest(t *testing.T) {
 
 func TestEmailNormalizerNoAttachmentsLeavesSignalsZero(t *testing.T) {
 	raw := `{"message_id":"<m-2@mail>","from":"alice@example.com","subject":"help","body":"any progress?"}`
-	got, err := EmailNormalizer{}.Normalize([]byte(raw))
+	results, err := EmailNormalizer{}.Normalize([]byte(raw))
 	if err != nil {
 		t.Fatalf("Normalize: %v", err)
 	}
+	got := results[0]
 	if got.AttachmentCount != 0 {
 		t.Fatalf("AttachmentCount = %d, want 0", got.AttachmentCount)
 	}

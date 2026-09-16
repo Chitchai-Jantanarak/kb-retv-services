@@ -12,11 +12,16 @@ import (
 )
 
 type Recorder struct {
-	db tenant.Querier
+	db      tenant.Querier
+	central tenant.Querier
 }
 
 func New(db tenant.Querier) *Recorder {
-	return &Recorder{db: db}
+	central := db
+	if routed, ok := db.(interface{ Central() tenant.Querier }); ok {
+		central = routed.Central()
+	}
+	return &Recorder{db: db, central: central}
 }
 
 func (r *Recorder) RecordActivity(ctx context.Context, e ports.ActivityEntry) error {
@@ -28,6 +33,11 @@ func (r *Recorder) RecordActivity(ctx context.Context, e ports.ActivityEntry) er
 	}
 	if strings.TrimSpace(e.Action) == "" {
 		return errors.New("activity_log: action is required")
+	}
+	var enabled string
+	// Preserve logging on missing configuration or transient policy-read failures.
+	if err := r.central.QueryRowContext(ctx, "SELECT value FROM system_configuration WHERE `key` = ?", "audit.enabled").Scan(&enabled); err == nil && enabled == "false" {
+		return nil
 	}
 
 	contextJSON, err := encodeContext(e.Context)

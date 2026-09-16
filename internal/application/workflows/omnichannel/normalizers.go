@@ -1,6 +1,7 @@
 package omnichannel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +15,16 @@ const (
 	ChannelWeb   = "web"
 	ChannelAPI   = "api"
 )
+
+const FeatureLineBot = "feature.channels.line_bot"
+
+// FeatureReader is declared locally rather than imported from
+// transport/http/middleware to keep the application layer independent of
+// transport; the entitlements reader used at wiring time satisfies both
+// interfaces structurally.
+type FeatureReader interface {
+	Enabled(ctx context.Context, companyID int64, key string) bool
+}
 
 const ActionIntakeAssessed = "ai_intake_assessed"
 const ActionTicketEnqueueFailed = "ai_ticket_enqueue_failed"
@@ -43,11 +54,15 @@ type Normalized struct {
 	AttachmentCount     int
 	AttachmentMIMETypes []string
 	Attachments         []InboundAttachment
+	EventType           string
+	ReplyToken          string
+	PostbackData        string
+	IsRedelivery        bool
 }
 
 type Normalizer interface {
 	Channel() string
-	Normalize(raw []byte) (Normalized, error)
+	Normalize(raw []byte) ([]Normalized, error)
 }
 
 type NormalizerRegistry struct {

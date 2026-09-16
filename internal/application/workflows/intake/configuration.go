@@ -6,9 +6,9 @@ import "context"
 type Configuration struct {
 	EvaluationDisabled bool
 	RulesDisabled      bool
-	AIEnabled         bool
-	AutoCreateEnabled bool
-	Instructions      string
+	AIEnabled          bool
+	AutoCreateEnabled  bool
+	Instructions       string
 }
 
 // ConfigurationSource resolves policy and shared tenant instructions.

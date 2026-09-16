@@ -1,0 +1,1861 @@
+{
+  "info": {
+    "_postman_id": "3d1f7b90-5a42-4c18-9e77-2b6c0a4e91d5",
+    "name": "onlinesupport-go-ai / tests",
+    "description": "Assertion collection: negative cases, timing probes, signature checks, coverage smoke.\n\nFor a plain fire-and-read route list, use `onlinesupport-go-ai / api`. Both share one environment.\n\nEvery `/v1` response uses the envelope `{\"success\":bool,\"data\":...,\"error\":{\"code\",\"message\"}}` (internal/transport/http/response/envelope.go), so test scripts read `data.*`. `GET /healthz` is the one exception.\n\nFolder and request names here are asserted by `scripts/swagger/postman_test.go` — rename in both places or the Go test fails.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{service_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Shared helpers available to every request in this collection.",
+          "pm.collectionVariables.set(\"iso_now\", new Date().toISOString());"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "iso_now",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health + Auth",
+      "item": [
+        {
+          "name": "healthz",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"status ok\", function () {",
+                  "    pm.expect(pm.response.json().status).to.eql(\"ok\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthz",
+              "host": ["{{base_url}}"],
+              "path": ["healthz"]
+            },
+            "description": "Liveness probe. Returns a bare `{\"status\":\"ok\"}` body, not the `/v1` envelope."
+          }
+        },
+        {
+          "name": "swagger index",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"swagger reachable when SWAGGER_ENABLED and APP_ENV is not production\", function () {",
+                  "    pm.expect([200, 301, 302, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/swagger/index.html",
+              "host": ["{{base_url}}"],
+              "path": ["swagger", "index.html"]
+            },
+            "description": "Swagger UI is registered only when `SWAGGER_ENABLED=true` AND `APP_ENV` is not production."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reply Draft",
+      "item": [
+        {
+          "name": "reply",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "pm.test(\"envelope success\", function () { pm.expect(json.success).to.be.true; });",
+                  "pm.test(\"decision is a known value\", function () {",
+                  "    pm.expect([\"auto\", \"draft\", \"escalate\"]).to.include(json.data.decision);",
+                  "});",
+                  "if (json.data && json.data.ai_action_id) {",
+                  "    pm.environment.set(\"ai_action_id\", json.data.ai_action_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"site_id\": \"site_42\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"conversation_id\": \"conv_8f21\",\n  \"message_id\": \"msg_1001\",\n  \"metadata\": {\n    \"source\": \"postman\"\n  },\n  \"mode\": \"full_review\",\n  \"debug\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Permission `ai:reply:create`. Captures `data.ai_action_id` into the environment for the Feedback folder."
+          }
+        },
+        {
+          "name": "reply: fast_draft timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"fast_draft skips the critique stage\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.not.have.property(\"critique\");",
+                  "});",
+                  "console.log(\"fast_draft timings\", JSON.stringify(data.stage_timings_ms));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"mode\": \"fast_draft\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "`fast_draft` runs cheap retrieval first. `retrieve_cheap` in the timings means the FTS path answered; `retrieve_expensive` means it fell through to vector retrieval."
+          }
+        },
+        {
+          "name": "reply: full_review timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "console.log(\"full_review timings\", JSON.stringify(data.stage_timings_ms));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"mode\": \"full_review\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Full pipeline: retrieve, rerank, crag, generate, critique. Compare the timings against `fast_draft`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat Debug Timing",
+      "item": [
+        {
+          "name": "chat: fast guard timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"fast_guard stage ran\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.have.property(\"fast_guard\");",
+                  "});",
+                  "pm.test(\"off-domain probe short circuits before generate\", function () {",
+                  "    if (data.status === \"off_domain\") {",
+                  "        pm.expect(data.stage_timings_ms).to.not.have.property(\"generate\");",
+                  "    } else {",
+                  "        pm.expect(data.stage_timings_ms).to.have.property(\"generate\");",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_off_domain_probe}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "The local off-domain guard runs before the router and cache. An off-domain hit should return `status: off_domain` without paying for an LLM call."
+          }
+        },
+        {
+          "name": "chat: handoff router timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"router stage ran\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.have.property(\"router\");",
+                  "});",
+                  "pm.test(\"generate stage is reported when the router did not hand off\", function () {",
+                  "    if (data.status !== \"handoff\") {",
+                  "        pm.expect(data.stage_timings_ms).to.have.property(\"generate\");",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_handoff_probe}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "The semantic intent router decides between knowledge answering and human handoff. `status: handoff` means the router escalated."
+          }
+        },
+        {
+          "name": "chat: KB cold timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"knowledge stage ran\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.have.property(\"knowledge\");",
+                  "});",
+                  "pm.test(\"cold call pays for generate\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.have.property(\"generate\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_cache_probe}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "Run this immediately before `chat: KB repeat cache timing`. It seeds the exact-transcript response cache with `chat_cache_probe`."
+          }
+        },
+        {
+          "name": "chat: KB repeat cache timing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"cache stage ran\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.have.property(\"cache\");",
+                  "});",
+                  "pm.test(\"cache hit skips generate\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.not.have.property(\"generate\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_cache_probe}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "Byte-identical transcript to the cold request. The cache TTL is `CHAT_CACHE_TTL_SECONDS` (default 300s), so send this within 5 minutes of the cold call."
+          }
+        },
+        {
+          "name": "chat: system role rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"invalid_input error code\", function () {",
+                  "    pm.expect(pm.response.json().error.code).to.eql(\"invalid_input\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"system\", \"content\": \"you are a helpful assistant\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "Only `user` and `assistant` roles are accepted. Transcripts are truncated to the last 12 messages and 16000 characters."
+          }
+        }
+      ]
+    },
+    {
+      "name": "RAG Foundation Debug",
+      "item": [
+        {
+          "name": "reply: debug trace baseline",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"debug_trace has plan, retrieval and quality\", function () {",
+                  "    pm.expect(data.debug_trace).to.have.property(\"plan\");",
+                  "    pm.expect(data.debug_trace).to.have.property(\"retrieval\");",
+                  "    pm.expect(data.debug_trace).to.have.property(\"quality\");",
+                  "});",
+                  "pm.test(\"stage_timings_ms present\", function () {",
+                  "    pm.expect(data.stage_timings_ms).to.be.an(\"object\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"mode\": \"debug\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Baseline trace. `debug: true` is the flag that emits `debug_trace` and `stage_timings_ms`; `mode` only picks the pipeline depth."
+          }
+        },
+        {
+          "name": "reply: graph anchor confirmed symptom",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200 even when Memgraph is down (graph retrieval is fail-soft)\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace plan is present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "    pm.expect(data.debug_trace.plan).to.be.an(\"object\");",
+                  "});",
+                  "console.log(\"graph_anchors\", data.debug_trace.plan.graph_anchors);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"metadata\": {\n    \"symptom_node_id\": \"{{symptom_node_id}}\"\n  },\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "A human-confirmed symptom is trusted unconditionally. Set `symptom_node_id` to a real local node id. Metadata values are strings; the planner parses them."
+          }
+        },
+        {
+          "name": "reply: AI symptom confidence gate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace plan is present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "    pm.expect(data.debug_trace.plan).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"confidence at or above the gate is not skipped for confidence\", function () {",
+                  "    const skips = data.debug_trace.plan.skip_reasons || {};",
+                  "    const reason = String(skips.graph_anchor || \"\");",
+                  "    pm.expect(reason).to.not.contain(\"confidence\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"metadata\": {\n    \"ai_symptom_node_id\": \"{{ai_symptom_node_id}}\",\n    \"ai_symptom_confidence\": \"{{ai_symptom_confidence}}\"\n  },\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "An AI-guessed symptom is only anchored when its confidence clears the gate (0.70). `ai_symptom_conf` is accepted as an alias."
+          }
+        },
+        {
+          "name": "reply: low confidence graph skipped",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace plan is present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "    pm.expect(data.debug_trace.plan).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"graph anchor skipped for low confidence\", function () {",
+                  "    const skips = data.debug_trace.plan.skip_reasons || {};",
+                  "    pm.expect(String(skips.graph_anchor || \"\")).to.contain(\"confidence\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"metadata\": {\n    \"ai_symptom_node_id\": \"{{ai_symptom_node_id}}\",\n    \"ai_symptom_confidence\": \"{{ai_symptom_low_confidence}}\"\n  },\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Confidence 0.25 is below the gate, so the planner records a skip reason instead of anchoring the graph."
+          }
+        },
+        {
+          "name": "reply: parent context expansion smoke",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace retrieval is present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "    pm.expect(data.debug_trace.retrieval).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"retrieval exposes context_assembled\", function () {",
+                  "    pm.expect(data.debug_trace.retrieval).to.have.property(\"context_assembled\");",
+                  "});",
+                  "console.log(\"candidates\", data.debug_trace.retrieval.candidates, \"top_source\", data.debug_trace.retrieval.top_source);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"{{parent_context_issue}}\",\n  \"channel\": \"web\",\n  \"mode\": \"full_review\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Most useful when the tenant has `kb_chunks` child rows with a `parent_chunk_id`, so parent context can be expanded around a child hit."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reply Edge Cases",
+      "item": [
+        {
+          "name": "reply: missing message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "const json = pm.response.json();",
+                  "pm.test(\"invalid_input error code\", function () {",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error.code).to.eql(\"invalid_input\");",
+                  "});",
+                  "pm.test(\"message is required\", function () {",
+                  "    pm.expect(json.error.message).to.contain(\"message\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "`message` is required. `query` is accepted as an alias and is copied into `message` during normalization."
+          }
+        },
+        {
+          "name": "reply: query alias accepted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{{tenant_known_issue}}\",\n  \"channel\": \"in_app\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            }
+          }
+        },
+        {
+          "name": "reply: invalid channel rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"invalid_input error code\", function () {",
+                  "    pm.expect(pm.response.json().error.code).to.eql(\"invalid_input\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"hi\",\n  \"channel\": \"fax\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Allowed channels: line, email, web, voice, api, in_app."
+          }
+        },
+        {
+          "name": "reply: data URL attachment rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"data URLs are refused\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.error.code).to.eql(\"invalid_input\");",
+                  "    pm.expect(json.error.message).to.contain(\"stored media\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"see the photo\",\n  \"attachments\": [\n    { \"url\": \"data:image/png;base64,AAAA\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Go must receive references to media Laravel already stored, never raw bytes or `data:` URLs."
+          }
+        },
+        {
+          "name": "reply: stored media reference accepted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"envelope success\", function () {",
+                  "    pm.expect(pm.response.json().success).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"message\": \"the packaging arrived like this\",\n  \"channel\": \"web\",\n  \"attachments\": [\n    {\n      \"storage_key\": \"{{stored_media_key}}\",\n      \"mime_type\": \"image/png\",\n      \"size_bytes\": 123456\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "An attachment needs at least one of `id`, `url` or `storage_key`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "search: kb query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"results is an array\", function () {",
+                  "    pm.expect(data.results).to.be.an(\"array\");",
+                  "});",
+                  "pm.test(\"echoes the query\", function () {",
+                  "    pm.expect(data.query).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{{search_query}}\",\n  \"types\": [\"kb\"],\n  \"limit\": 10\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/search",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "search"]
+            },
+            "description": "Permission `ai:search:read`. `types` defaults to `[\"kb\"]` and `limit` defaults to 10."
+          }
+        },
+        {
+          "name": "search: unsupported type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"unsupported type message\", function () {",
+                  "    pm.expect(pm.response.json().error.message).to.contain(\"unsupported type\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{{search_query}}\",\n  \"types\": [\"web\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/search",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "search"]
+            },
+            "description": "`kb` is currently the only supported search type."
+          }
+        },
+        {
+          "name": "search: limit out of range",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"invalid_input error code\", function () {",
+                  "    pm.expect(pm.response.json().error.code).to.eql(\"invalid_input\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{{search_query}}\",\n  \"limit\": 51\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/search",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "search"]
+            },
+            "description": "Valid range is 1 to 50."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Feedback",
+      "item": [
+        {
+          "name": "feedback: accepted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"accepted scores 2\", function () {",
+                  "    pm.expect(data.verdict).to.eql(\"accepted\");",
+                  "    pm.expect(data.score).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ai_action_id\": {{ai_action_id}},\n  \"verdict\": \"accepted\",\n  \"note\": \"draft sent as-is\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply", "feedback"]
+            },
+            "description": "Run `Reply Draft > reply` first so `ai_action_id` is populated. Scores: accepted 2, edited 1, escalated 0, rejected -1."
+          }
+        },
+        {
+          "name": "feedback: invalid verdict",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"verdict enum reported\", function () {",
+                  "    pm.expect(pm.response.json().error.message).to.contain(\"verdict must be\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ai_action_id\": {{ai_action_id}},\n  \"verdict\": \"nonsense\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply", "feedback"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "reports: ai accuracy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"accuracy counters present\", function () {",
+                  "    pm.expect(data).to.have.property(\"total_classified\");",
+                  "    pm.expect(data).to.have.property(\"problem_type_hits\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/ai-accuracy?since=7",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "ai-accuracy"],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "7",
+                  "description": "RFC3339 timestamp, or an integer meaning 'days ago'. Omit for no time filter."
+                }
+              ]
+            },
+            "description": "Permission `ai:reports:read`."
+          }
+        },
+        {
+          "name": "reports: answer rate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"threshold echoed back\", function () {",
+                  "    pm.expect(data).to.have.property(\"threshold\");",
+                  "    pm.expect(data).to.have.property(\"total_actions\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/answer-rate?since=7&threshold=0.85",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "answer-rate"],
+              "query": [
+                { "key": "since", "value": "7" },
+                {
+                  "key": "threshold",
+                  "value": "0.85",
+                  "description": "Confidence cut-off. Invalid or non-positive values fall back to 0.85."
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "reports: knowledge gaps",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"gaps is an array\", function () {",
+                  "    pm.expect(data.gaps).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/knowledge-gaps?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "knowledge-gaps"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Defaults to 20 when omitted or non-positive."
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Review",
+      "item": [
+        {
+          "name": "review queue: approve",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"promotion kind is known\", function () {",
+                  "    pm.expect([\"symptom_proposed\", \"subject_proposed\"]).to.include(data.kind);",
+                  "});",
+                  "console.log(\"promotion_ref\", data.promotion_ref);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/review-queue/{{review_item_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "admin", "review-queue", "{{review_item_id}}", "approve"]
+            },
+            "description": "Permission `ai:review:approve`. No request body. Approving promotes the proposed node into the tenant graph."
+          }
+        },
+        {
+          "name": "review queue: reject",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"status is rejected\", function () {",
+                  "    pm.expect(pm.response.json().data.status).to.eql(\"rejected\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"duplicate of an existing symptom\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/admin/review-queue/{{review_item_id}}/reject",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "admin", "review-queue", "{{review_item_id}}", "reject"]
+            },
+            "description": "Permission `ai:review:reject`. The body is optional; a malformed body is ignored rather than rejected."
+          }
+        },
+        {
+          "name": "review queue: bad id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"invalid id path param\", function () {",
+                  "    pm.expect(pm.response.json().error.message).to.contain(\"invalid id\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/review-queue/abc/approve",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "admin", "review-queue", "abc", "approve"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Laravel Callback",
+      "item": [
+        {
+          "name": "review callback: valid signed",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"ai_webhook_secret\") || \"\";",
+                  "const raw = JSON.stringify({",
+                  "    company_id: Number(pm.environment.get(\"callback_company_id\")),",
+                  "    kind: pm.environment.get(\"review_callback_kind\") || \"symptom_proposed\",",
+                  "    payload: {",
+                  "        name: pm.environment.get(\"review_callback_name\"),",
+                  "        symptom_node_id: 0",
+                  "    },",
+                  "    payload_hash: pm.environment.get(\"review_payload_hash\")",
+                  "});",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + raw, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.variables.set(\"callback_raw_body\", raw);",
+                  "pm.variables.set(\"callback_timestamp\", timestamp);",
+                  "pm.variables.set(\"callback_signature\", signature);",
+                  "pm.request.headers.upsert({ key: \"X-AI-Timestamp\", value: timestamp });",
+                  "pm.request.headers.upsert({ key: \"X-AI-Signature\", value: signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted\", function () {",
+                  "    pm.expect([200, 201]).to.include(pm.response.code);",
+                  "});",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"laravel returns the review item id\", function () {",
+                  "    pm.expect(data.id).to.be.a(\"number\");",
+                  "});",
+                  "pm.environment.set(\"review_callback_item_id\", data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-AI-Timestamp", "value": "{{callback_timestamp}}" },
+              { "key": "X-AI-Signature", "value": "{{callback_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{callback_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/internal/review-queue",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["internal", "review-queue"]
+            },
+            "description": "Mirrors what `internal/application/services/reviewoutbox/deliverer.go` sends. Laravel's `VerifyAiWebhook` middleware recomputes `HMAC-SHA256(timestamp + \".\" + body)` with `GO_AI_WEBHOOK_SECRET`. First send creates the item and returns 201."
+          }
+        },
+        {
+          "name": "review callback: idempotent replay",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"ai_webhook_secret\") || \"\";",
+                  "const raw = JSON.stringify({",
+                  "    company_id: Number(pm.environment.get(\"callback_company_id\")),",
+                  "    kind: pm.environment.get(\"review_callback_kind\") || \"symptom_proposed\",",
+                  "    payload: {",
+                  "        name: pm.environment.get(\"review_callback_name\"),",
+                  "        symptom_node_id: 0",
+                  "    },",
+                  "    payload_hash: pm.environment.get(\"review_payload_hash\")",
+                  "});",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + raw, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.variables.set(\"callback_raw_body\", raw);",
+                  "pm.variables.set(\"callback_timestamp\", timestamp);",
+                  "pm.variables.set(\"callback_signature\", signature);",
+                  "pm.request.headers.upsert({ key: \"X-AI-Timestamp\", value: timestamp });",
+                  "pm.request.headers.upsert({ key: \"X-AI-Signature\", value: signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"replay returns 200, not a second insert\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"same review item id as the first send\", function () {",
+                  "    const expected = Number(pm.environment.get(\"review_callback_item_id\"));",
+                  "    pm.expect(pm.response.json().data.id).to.eql(expected);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-AI-Timestamp", "value": "{{callback_timestamp}}" },
+              { "key": "X-AI-Signature", "value": "{{callback_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{callback_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/internal/review-queue",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["internal", "review-queue"]
+            },
+            "description": "Identical body and `payload_hash` as the valid send, fresh timestamp and signature. Laravel dedupes on `source_refs->go_payload_hash` and returns the existing row with 200."
+          }
+        },
+        {
+          "name": "review callback: stale signature rejected",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"ai_webhook_secret\") || \"\";",
+                  "const tolerance = Number(pm.environment.get(\"ai_webhook_tolerance_seconds\") || 300);",
+                  "const raw = JSON.stringify({",
+                  "    company_id: Number(pm.environment.get(\"callback_company_id\")),",
+                  "    kind: pm.environment.get(\"review_callback_kind\") || \"symptom_proposed\",",
+                  "    payload: {",
+                  "        name: pm.environment.get(\"review_callback_name\"),",
+                  "        symptom_node_id: 0",
+                  "    },",
+                  "    payload_hash: pm.environment.get(\"review_payload_hash\")",
+                  "});",
+                  "const timestamp = (Math.floor(Date.now() / 1000) - (tolerance * 2) - 60).toString();",
+                  "const signature = CryptoJS.HmacSHA256(timestamp + \".\" + raw, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.variables.set(\"callback_raw_body\", raw);",
+                  "pm.variables.set(\"callback_timestamp\", timestamp);",
+                  "pm.variables.set(\"callback_signature\", signature);",
+                  "pm.request.headers.upsert({ key: \"X-AI-Timestamp\", value: timestamp });",
+                  "pm.request.headers.upsert({ key: \"X-AI-Signature\", value: signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"signature outside the tolerance window is refused even though the HMAC is correct\", function () {",
+                  "    pm.expect(pm.response.text()).to.contain(\"invalid signature\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-AI-Timestamp", "value": "{{callback_timestamp}}" },
+              { "key": "X-AI-Signature", "value": "{{callback_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{callback_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/internal/review-queue",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["internal", "review-queue"]
+            },
+            "description": "The timestamp is pushed well outside `GO_AI_WEBHOOK_TOLERANCE` (default 300s) so the replay window check fires before the HMAC comparison."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inbound Webhooks",
+      "item": [
+        {
+          "name": "inbound line: signed text event",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"line_channel_secret\") || \"\";",
+                  "const messageId = \"pm-\" + Date.now();",
+                  "pm.environment.set(\"inbound_external_message_id\", messageId);",
+                  "const raw = JSON.stringify({",
+                  "    destination: pm.environment.get(\"line_destination_id\"),",
+                  "    events: [",
+                  "        {",
+                  "            type: \"message\",",
+                  "            timestamp: Date.now(),",
+                  "            source: { type: \"user\", userId: pm.environment.get(\"line_user_id\") },",
+                  "            message: { id: messageId, type: \"text\", text: pm.environment.get(\"tenant_known_issue\") },",
+                  "            replyToken: \"pm-reply-token\"",
+                  "        }",
+                  "    ]",
+                  "});",
+                  "const signature = CryptoJS.HmacSHA256(raw, secret).toString(CryptoJS.enc.Base64);",
+                  "pm.variables.set(\"line_raw_body\", raw);",
+                  "pm.variables.set(\"line_signature\", signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"conversation and message were persisted\", function () {",
+                  "    pm.expect(data.conversation_id).to.be.a(\"number\");",
+                  "    pm.expect(data.message_id).to.be.a(\"number\");",
+                  "});",
+                  "console.log(\"ticket_enqueued\", data.ticket_enqueued);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Line-Signature", "value": "{{line_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{line_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/line",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "line"]
+            },
+            "description": "Public route: no JWT and no `X-Tenant-Id`. The tenant is resolved from the receiving channel account. Signature is base64 `HMAC-SHA256(raw_body)` keyed with `LINE_CHANNEL_SECRET`.\n\nOnly `events[0]` is read. An `image` event becomes a synthetic `image/jpeg` attachment with an empty body; `audio` becomes `audio/m4a`."
+          }
+        },
+        {
+          "name": "inbound line: invalid signature rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"unauthorized error code\", function () {",
+                  "    pm.expect(pm.response.json().error.code).to.eql(\"unauthorized\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Line-Signature", "value": "bm90LWEtcmVhbC1zaWduYXR1cmU=" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination\": \"{{line_destination_id}}\",\n  \"events\": [\n    {\n      \"type\": \"message\",\n      \"timestamp\": 1718000000,\n      \"source\": { \"type\": \"user\", \"userId\": \"{{line_user_id}}\" },\n      \"message\": { \"id\": \"pm-forged-1\", \"type\": \"text\", \"text\": \"forged event\" }\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/line",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "line"]
+            },
+            "description": "When a channel-specific verifier is registered it runs exclusively. A generic `X-AI-Signature` header will not rescue a LINE request."
+          }
+        },
+        {
+          "name": "inbound email: signed",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"ai_webhook_secret\") || \"\";",
+                  "const messageId = \"<pm-\" + Date.now() + \"@mail.local>\";",
+                  "pm.environment.set(\"inbound_external_message_id\", messageId);",
+                  "const raw = JSON.stringify({",
+                  "    message_id: messageId,",
+                  "    from: pm.environment.get(\"inbound_email_from\"),",
+                  "    to: pm.environment.get(\"inbound_email_to\"),",
+                  "    subject: \"Damaged packaging on my last order\",",
+                  "    body: pm.environment.get(\"tenant_known_issue\"),",
+                  "    body_html: \"\"",
+                  "});",
+                  "const signature = CryptoJS.HmacSHA256(raw, secret).toString(CryptoJS.enc.Hex);",
+                  "pm.variables.set(\"email_raw_body\", raw);",
+                  "pm.variables.set(\"email_signature\", \"sha256=\" + signature);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"accepted or receiver unknown\", function () {",
+                  "    pm.expect([200, 404]).to.include(pm.response.code);",
+                  "});",
+                  "if (pm.response.code === 404) {",
+                  "    console.log(\"no channel_accounts row matches\", pm.environment.get(\"inbound_email_to\"));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-AI-Signature", "value": "{{email_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{email_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/email",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "email"]
+            },
+            "description": "Email has no dedicated verifier, so it falls back to the generic `X-AI-Signature: sha256=<hex>` check keyed with `LARAVEL_WEBHOOK_SECRET`.\n\nRouting is by receiver: `to` must match a `channel_accounts` row, otherwise the response is 404 `not_found` \"unknown receiver\"."
+          }
+        },
+        {
+          "name": "inbound: unknown channel",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"unknown channel\", function () {",
+                  "    pm.expect(pm.response.json().error.message).to.contain(\"unknown channel\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/telegram",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "telegram"]
+            },
+            "description": "Only `line` and `email` normalizers are registered in `cmd/api`. Bodies over 1 MiB return 413 `payload_too_large`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth/RBAC Negative Cases",
+      "item": [
+        {
+          "name": "reply: missing token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", function () { pm.response.to.have.status(401); });",
+                  "pm.test(\"unauthorized or missing_tenant\", function () {",
+                  "    pm.expect([\"unauthorized\", \"missing_tenant\"]).to.include(pm.response.json().error.code);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"{{tenant_known_issue}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "No bearer token and no `X-Tenant-Id`. In dev mode (no key material configured) this fails with `missing_tenant`; with JWT verification on it fails with `unauthorized`."
+          }
+        },
+        {
+          "name": "reply: tenant header mismatch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403 when a service token is configured\", function () {",
+                  "    if (!pm.environment.get(\"service_token\")) {",
+                  "        pm.expect.fail(\"set service_token first, this case only applies with JWT verification on\");",
+                  "    }",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "999999" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"{{tenant_known_issue}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "When both are present, `X-Tenant-Id` must equal the token's `cid` claim or the request is forbidden."
+          }
+        },
+        {
+          "name": "reply: missing permission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", function () { pm.response.to.have.status(403); });",
+                  "pm.test(\"forbidden error code\", function () {",
+                  "    pm.expect(pm.response.json().error.code).to.eql(\"forbidden\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{rbac_no_permission_token}}", "type": "string" }
+              ]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"{{tenant_known_issue}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "Mint `rbac_no_permission_token` with role `customer`, which only carries `ai:feedback:create`. `/v1/reply` needs `ai:reply:create`."
+          }
+        },
+        {
+          "name": "reports: missing permission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", function () { pm.response.to.have.status(403); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                { "key": "token", "value": "{{rbac_no_permission_token}}", "type": "string" }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/ai-accuracy",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "ai-accuracy"]
+            },
+            "description": "`ai:reports:read` is held by tenant_admin, agent_lead and agent, but not by customer."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Embedding / Tenant Coverage",
+      "item": [
+        {
+          "name": "qdrant: collection info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const result = pm.response.json().result;",
+                  "pm.test(\"collection has points\", function () {",
+                  "    pm.expect(result.points_count, \"points_count\").to.be.above(0);",
+                  "});",
+                  "console.log(\"points_count\", result.points_count);",
+                  "console.log(\"vector params\", JSON.stringify(result.config.params.vectors));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "api-key", "value": "{{qdrant_api_key}}" }],
+            "url": {
+              "raw": "{{qdrant_url}}/collections/{{qdrant_collection_prefix}}__{{tenant_id}}",
+              "host": ["{{qdrant_url}}"],
+              "path": ["collections", "{{qdrant_collection_prefix}}__{{tenant_id}}"]
+            },
+            "description": "Collection naming is `<QDRANT_COLLECTIONPREFIX>__<company_id>`. A green collection with only a couple of points still retrieves badly, so read `points_count`, not just the status."
+          }
+        },
+        {
+          "name": "reply: vector candidates smoke",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json().data;",
+                  "pm.test(\"debug_trace present\", function () {",
+                  "    pm.expect(data.debug_trace).to.be.an(\"object\");",
+                  "});",
+                  "pm.test(\"retrieval found candidates\", function () {",
+                  "    pm.expect(data.debug_trace.retrieval.candidates, \"candidates\").to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"coverage-probe\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"mode\": \"full_review\",\n  \"debug\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "`candidates: 0` with a healthy Qdrant collection usually means the tenant DB `kb_chunks` table is empty, not that tenancy routing is broken."
+          }
+        }
+      ]
+    }
+  ]
+}

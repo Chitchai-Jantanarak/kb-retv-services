@@ -20,9 +20,11 @@ const (
 	maxReasoningRunes = 600
 )
 
-const FieldClassification = "classification"
-const FieldCatalogRelated = "catalog_related"
-const FieldReasoning = "reasoning"
+const (
+	FieldClassification = "classification"
+	FieldCatalogRelated = "catalog_related"
+	FieldReasoning      = "reasoning"
+)
 
 var skipModelBelowScore = 20
 
@@ -128,7 +130,9 @@ func (e *Extractor) Extract(ctx context.Context, companyID int64, sig Signals) (
 			return Result{}, fmt.Errorf("intake: load configuration: %w", err)
 		}
 	}
-	defer func() { result.AutoCreateDisabled = !configuration.AutoCreateEnabled || !configuration.AIEnabled || configuration.EvaluationDisabled }()
+	defer func() {
+		result.AutoCreateDisabled = !configuration.AutoCreateEnabled || !configuration.AIEnabled || configuration.EvaluationDisabled
+	}()
 	if configuration.EvaluationDisabled {
 		return Result{Status: StatusUnknown, ReferencedCase: sig.ReferencedCase}, nil
 	}

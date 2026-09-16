@@ -19,6 +19,7 @@ import (
 	"github.com/my/app/internal/shared/config"
 	"github.com/my/app/internal/shared/llmboot"
 	"github.com/my/app/internal/transport/http/handlers"
+	appmiddleware "github.com/my/app/internal/transport/http/middleware"
 )
 
 type apiHandlers struct {
@@ -43,6 +44,7 @@ func buildAPIHandlers(
 	central *sql.DB,
 	qdb tenant.Querier,
 	resolver *llm.CompanyResolver,
+	features appmiddleware.FeatureReader,
 	log *zap.Logger,
 ) apiHandlers {
 	var endpoints apiHandlers
@@ -96,7 +98,7 @@ func buildAPIHandlers(
 		}
 	}
 
-	inbound, err := buildInboundHandler(cfg, central, qdb, resolver, log)
+	inbound, err := buildInboundHandler(cfg, central, qdb, resolver, features, log)
 	if err != nil {
 		log.Warn("inbound webhooks not configured", zap.Error(err))
 	} else {

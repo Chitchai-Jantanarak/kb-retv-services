@@ -134,6 +134,127 @@ func TestRunInjectsCompanyIntoContextForSiloWrite(t *testing.T) {
 	}
 }
 
+type stubFeatures struct{ on bool }
+
+func (s stubFeatures) Enabled(_ context.Context, _ int64, key string) bool {
+	return s.on && key == FeatureLineBot
+}
+
+type countingTickets struct{ n int }
+
+func (c *countingTickets) EnqueueTicket(_ context.Context, _, _, _ int64, _ string, _ dto.InboundMessageRequest) error {
+	c.n++
+	return nil
+}
+
+func TestLineBotGateSkipsTicketWhenOn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		on   bool
+		want int
+	}{{"off enqueues", false, 1}, {"on skips", true, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tk := &countingTickets{}
+			wf, err := New(Config{
+				Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7, Channel: ChannelLine}},
+				Conversations: &stubConvos{id: 100, created: true},
+				Messages:      &attachmentCapturingMessages{id: 200},
+				Tickets:       tk,
+				Features:      stubFeatures{on: tc.on},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := wf.Run(context.Background(), validNorm("Uabc"), []byte(`{}`)); err != nil {
+				t.Fatal(err)
+			}
+			if tk.n != tc.want {
+				t.Fatalf("tickets enqueued = %d, want %d", tk.n, tc.want)
+			}
+		})
+	}
+}
+
+type failingConvos struct{ t *testing.T }
+
+func (s *failingConvos) UpsertConversation(context.Context, Conversation) (int64, bool, error) {
+	s.t.Fatal("UpsertConversation must not be called for a LINE follow/unfollow/postback event")
+	return 0, false, nil
+}
+
+type failingMessages struct{ t *testing.T }
+
+func (s *failingMessages) InsertMessage(context.Context, StoredMessage) (int64, error) {
+	s.t.Fatal("InsertMessage must not be called for a LINE follow/unfollow/postback event")
+	return 0, nil
+}
+
+func (s *failingMessages) FindByExternalID(context.Context, string) (int64, int64, bool, error) {
+	return 0, 0, false, nil
+}
+
+func TestRunLineEventReturnsWithoutMessage(t *testing.T) {
+	for _, eventType := range []string{"follow", "unfollow", "postback"} {
+		t.Run(eventType, func(t *testing.T) {
+			tickets := &countingTickets{}
+			wf, err := New(Config{
+				Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7, Channel: ChannelLine}},
+				Conversations: &failingConvos{t: t},
+				Messages:      &failingMessages{t: t},
+				Tickets:       tickets,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			n := Normalized{
+				EventType:         eventType,
+				ExternalSender:    "U1",
+				AccountExternalID: "Ubot-dest",
+				Request: dto.InboundMessageRequest{
+					Channel:            ChannelLine,
+					ExternalMessageID:  "e2",
+					CustomerID:         "U1",
+				},
+			}
+			if eventType == "postback" {
+				n.PostbackData = `{"intent":"open_case"}`
+			}
+			res, err := wf.Run(context.Background(), n, []byte(`{}`))
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if res.CompanyID != 7 {
+				t.Fatalf("CompanyID = %d, want 7", res.CompanyID)
+			}
+			if tickets.n != 0 {
+				t.Fatalf("tickets enqueued = %d, want 0", tickets.n)
+			}
+		})
+	}
+
+	wf, err := New(Config{
+		Accounts:      &stubAccounts{acc: ChannelAccount{ID: 11, CompanyID: 7, Channel: ChannelLine}},
+		Conversations: &stubConvos{id: 100, created: true},
+		Messages:      &stubMessages{id: 200},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	n := Normalized{
+		EventType:         "message",
+		ExternalSender:    "U1",
+		AccountExternalID: "Ubot-dest",
+		Request: dto.InboundMessageRequest{
+			Channel:            ChannelLine,
+			ExternalMessageID:  "e1",
+			CustomerID:         "U1",
+		},
+	}
+	if _, err := wf.Run(context.Background(), n, []byte(`{}`)); err == nil {
+		t.Fatal("Run error = nil, want validation failure for a message event with no body or attachment")
+	}
+}
+
 type stubAccounts struct {
 	acc ChannelAccount
 	err error

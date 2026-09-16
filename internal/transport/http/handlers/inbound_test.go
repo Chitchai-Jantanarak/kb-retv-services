@@ -5,10 +5,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -254,6 +256,49 @@ type recordingInboundWorkflow struct {
 func (w *recordingInboundWorkflow) Run(context.Context, omnichannel.Normalized, []byte) (omnichannel.Result, error) {
 	w.calls++
 	return omnichannel.Result{CompanyID: 1, ConversationID: 2, MessageID: 3, TicketEnqueued: true}, nil
+}
+
+type orderRecordingInboundWorkflow struct {
+	externalIDs []string
+	failFirst   bool
+}
+
+func (w *orderRecordingInboundWorkflow) Run(_ context.Context, n omnichannel.Normalized, _ []byte) (omnichannel.Result, error) {
+	w.externalIDs = append(w.externalIDs, n.Request.ExternalMessageID)
+	if w.failFirst && len(w.externalIDs) == 1 {
+		return omnichannel.Result{}, errors.New("boom")
+	}
+	return omnichannel.Result{CompanyID: 1, ConversationID: 2, MessageID: int64(len(w.externalIDs))}, nil
+}
+
+func TestInboundHandlerProcessesEveryEventInOrder(t *testing.T) {
+	registry, err := omnichannel.NewNormalizerRegistry(omnichannel.LineNormalizer{})
+	if err != nil {
+		t.Fatalf("NewNormalizerRegistry: %v", err)
+	}
+	body := `{"destination":"bot-1","events":[
+		{"type":"message","source":{"userId":"user-1"},"message":{"id":"msg-1","type":"text","text":"hello"}},
+		{"type":"message","source":{"userId":"user-1"},"message":{"id":"msg-2","type":"text","text":"world"}}
+	]}`
+	workflow := &orderRecordingInboundWorkflow{failFirst: true}
+	handler := NewInboundHandler(workflow, registry)
+	e := echo.New()
+	e.POST("/v1/inbound/:channel", handler.Receive)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/inbound/line", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if want := []string{"msg-1", "msg-2"}; !reflect.DeepEqual(workflow.externalIDs, want) {
+		t.Fatalf("call order = %v, want %v", workflow.externalIDs, want)
+	}
+	if !strings.Contains(rec.Body.String(), `"events_processed":1`) || !strings.Contains(rec.Body.String(), `"events_failed":1`) {
+		t.Fatalf("response body = %s, want events_processed:1 and events_failed:1", rec.Body.String())
+	}
 }
 
 func signInboundTestBody(secret string, body []byte) string {

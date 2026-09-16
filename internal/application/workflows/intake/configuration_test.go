@@ -65,3 +65,35 @@ func TestMailConfigurationFailureDoesNotCallVendor(t *testing.T) {
 		t.Fatalf("err=%v calls=%d", err, provider.calls)
 	}
 }
+
+func TestRuleEvaluationIndependentOfAI(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		config    intake.Configuration
+		wantScore bool
+		calls     int
+	}{
+		{"rules without AI", intake.Configuration{AutoCreateEnabled: true}, true, 0},
+		{"evaluation off", intake.Configuration{AIEnabled: true, AutoCreateEnabled: true, EvaluationDisabled: true}, false, 0},
+		{"all engines off", intake.Configuration{RulesDisabled: true}, false, 0},
+		{"AI without rule gate", intake.Configuration{AIEnabled: true, RulesDisabled: true}, false, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &fakeProvider{json: `{"classification":"unclear"}`}
+			extractor := newExtractor(t, provider, intake.WithConfiguration(&fakeConfiguration{value: tt.config}))
+			result, err := extractor.Extract(context.Background(), 7, intake.Signals{Sender: "customer@example.com", Subject: "Printer broken", Body: "Printer is broken and needs service."})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (result.Score > 0) != tt.wantScore {
+				t.Fatalf("score = %d", result.Score)
+			}
+			if provider.calls != tt.calls {
+				t.Fatalf("calls = %d", provider.calls)
+			}
+			if !result.AutoCreateDisabled {
+				t.Fatal("incomplete or disabled evaluation must not create a Ticket")
+			}
+		})
+	}
+}

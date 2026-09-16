@@ -40,14 +40,15 @@ func run() {
 
 	e := echo.New()
 
-	endpoints := buildAPIHandlers(cfg, platform.central, platform.router, platform.resolver, log)
-	keyMaterial := serviceJWTKeyMaterial(cfg, log)
-	if cfg.App.IsProduction() && keyMaterial == "" {
-		log.Fatal("service JWT key material is required in production; set the Laravel public key path or PEM")
-	}
 	var features appmiddleware.FeatureReader
 	if platform.central != nil {
 		features = entitlements.New(entitlements.SQLDB{DB: platform.central}, time.Duration(cfg.Entitlements.CacheTTLSeconds)*time.Second)
+	}
+
+	endpoints := buildAPIHandlers(cfg, platform.central, platform.router, platform.resolver, features, log)
+	keyMaterial := serviceJWTKeyMaterial(cfg, log)
+	if cfg.App.IsProduction() && keyMaterial == "" {
+		log.Fatal("service JWT key material is required in production; set the Laravel public key path or PEM")
 	}
 
 	routes.Register(e, handlers.NewReplyHandler(workflow), routes.Options{

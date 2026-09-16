@@ -146,6 +146,9 @@ type Router struct {
 	pool *Pool
 }
 
+// Central returns the system database for repositories with explicit global policy.
+func (r *Router) Central() Querier { return r.pool.manager }
+
 func (r *Router) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	db, err := r.pool.connFor(ctx)
 	if err != nil {

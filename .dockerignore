@@ -27,6 +27,9 @@ coverage.out
 *.coverprofile
 
 docs/
+# Exception: docs/swagger is a real Go package, imported by
+# internal/transport/http/routes/apidocs.go:8. Excluding it breaks the build.
+!docs/swagger/
 deployments/
 *.md
 
@@ -35,3 +38,6 @@ embedder
 mailpoll
 migrator
 scheduler
+
+# Generated guard embedder asset (109 MB, gitignored) - mount it, never bake it.
+assets/guard-embedder/

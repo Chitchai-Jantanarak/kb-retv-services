@@ -48,23 +48,23 @@ type EmailNormalizer struct{}
 
 func (EmailNormalizer) Channel() string { return ChannelEmail }
 
-func (n EmailNormalizer) Normalize(raw []byte) (Normalized, error) {
+func (n EmailNormalizer) Normalize(raw []byte) ([]Normalized, error) {
 	var p emailPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Normalized{}, fmt.Errorf("email: parse payload: %w", err)
+		return nil, fmt.Errorf("email: parse payload: %w", err)
 	}
 	sender := extractEmailAddress(p.From)
 	if sender == "" {
-		return Normalized{}, errors.New("email: payload has no From address")
+		return nil, errors.New("email: payload has no From address")
 	}
 	if strings.TrimSpace(p.MessageID) == "" {
-		return Normalized{}, errors.New("email: payload has no message_id")
+		return nil, errors.New("email: payload has no message_id")
 	}
 	body := strings.TrimSpace(p.Body)
 	if body == "" {
 		body = strings.TrimSpace(p.BodyHTML)
 	}
-	return Normalized{
+	return []Normalized{{
 		Request: dto.InboundMessageRequest{
 			Channel:           ChannelEmail,
 			ExternalMessageID: p.MessageID,
@@ -85,7 +85,7 @@ func (n EmailNormalizer) Normalize(raw []byte) (Normalized, error) {
 		AttachmentCount:     len(p.Attachments),
 		AttachmentMIMETypes: attachmentMIMETypes(p.Attachments),
 		Attachments:         decodeAttachments(p.Attachments),
-	}, nil
+	}}, nil
 }
 
 func decodeAttachments(attachments []emailAttachment) []InboundAttachment {

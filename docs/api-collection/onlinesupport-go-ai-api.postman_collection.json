@@ -1,0 +1,579 @@
+{
+  "info": {
+    "_postman_id": "b2c9e6f4-71a8-4d3e-8c05-9a1f4d7b6e22",
+    "name": "onlinesupport-go-ai / api",
+    "description": "Ready-to-use route list. Fire any request, read the response. No assertions.\n\nFor negative cases, timing probes and signature checks, use the `onlinesupport-go-ai / tests` collection. Both share one environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{service_token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Go service",
+      "description": "Echo v5 service in `go/`. All `/v1` responses are wrapped in `{success, data, error}`.",
+      "item": [
+        {
+          "name": "healthz",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/healthz",
+              "host": ["{{base_url}}"],
+              "path": ["healthz"]
+            },
+            "description": "Liveness. Bare body, not the envelope."
+          }
+        },
+        {
+          "name": "swagger index",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/swagger/index.html",
+              "host": ["{{base_url}}"],
+              "path": ["swagger", "index.html"]
+            },
+            "description": "Only mounted when `SWAGGER_ENABLED=true` and `APP_ENV` is not production."
+          }
+        },
+        {
+          "name": "reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"cust_10293\",\n  \"site_id\": \"site_42\",\n  \"message\": \"{{tenant_known_issue}}\",\n  \"channel\": \"web\",\n  \"conversation_id\": \"conv_8f21\",\n  \"message_id\": \"msg_1001\",\n  \"metadata\": {\n    \"source\": \"postman\"\n  },\n  \"mode\": \"full_review\",\n  \"debug\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply"]
+            },
+            "description": "`ai:reply:create`. `mode`: fast_draft | full_review | debug. `debug: true` adds `stage_timings_ms` and `debug_trace`."
+          }
+        },
+        {
+          "name": "chat",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_known_issue}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat"]
+            },
+            "description": "`ai:reply:create`. Roles: user | assistant. Locale other than `en` becomes `th`."
+          }
+        },
+        {
+          "name": "chat: stream",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_known_issue}}\" }\n  ],\n  \"locale\": \"en\",\n  \"debug\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat/stream",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat", "stream"]
+            },
+            "description": "`ai:reply:create`. Same body as `chat`. Server-Sent Events: each frame is `event: <type>\\ndata: <json>`, types start | token | tool | pending_action | done | error."
+          }
+        },
+        {
+          "name": "chat: confirm action",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_id\": \"{{pending_action_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/chat/confirm-action",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "chat", "confirm-action"]
+            },
+            "description": "`ai:reply:create`. `action_id` is the 32-char id from a prior `chat`/`chat: stream` response's `pending_action.id`."
+          }
+        },
+        {
+          "name": "search",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" },
+              { "key": "X-Timeout-Ms", "value": "{{request_timeout_ms}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"{{search_query}}\",\n  \"types\": [\"kb\"],\n  \"limit\": 10\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/search",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "search"]
+            },
+            "description": "`ai:search:read`. Only type `kb`. Limit 1 to 50, default 10."
+          }
+        },
+        {
+          "name": "reply: feedback",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ai_action_id\": {{ai_action_id}},\n  \"verdict\": \"accepted\",\n  \"note\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/reply/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reply", "feedback"]
+            },
+            "description": "`ai:feedback:create`. Verdict: accepted | edited | rejected | escalated."
+          }
+        },
+        {
+          "name": "review queue: approve",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/review-queue/{{review_item_id}}/approve",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "admin", "review-queue", "{{review_item_id}}", "approve"]
+            },
+            "description": "`ai:review:approve`. No body."
+          }
+        },
+        {
+          "name": "review queue: reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Tenant-Id", "value": "{{tenant_id}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"duplicate\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/admin/review-queue/{{review_item_id}}/reject",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "admin", "review-queue", "{{review_item_id}}", "reject"]
+            },
+            "description": "`ai:review:reject`. Body optional."
+          }
+        },
+        {
+          "name": "reports: ai accuracy",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/ai-accuracy?since=7",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "ai-accuracy"],
+              "query": [{ "key": "since", "value": "7" }]
+            },
+            "description": "`ai:reports:read`. `since` takes RFC3339 or an integer meaning days ago."
+          }
+        },
+        {
+          "name": "reports: answer rate",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/answer-rate?since=7&threshold=0.85",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "answer-rate"],
+              "query": [
+                { "key": "since", "value": "7" },
+                { "key": "threshold", "value": "0.85" }
+              ]
+            },
+            "description": "`ai:reports:read`. Threshold defaults to 0.85."
+          }
+        },
+        {
+          "name": "reports: knowledge gaps",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Id", "value": "{{tenant_id}}" }],
+            "url": {
+              "raw": "{{base_url}}/v1/reports/knowledge-gaps?limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "reports", "knowledge-gaps"],
+              "query": [{ "key": "limit", "value": "20" }]
+            },
+            "description": "`ai:reports:read`. Limit defaults to 20."
+          }
+        },
+        {
+          "name": "inbound: line",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"line_channel_secret\") || \"\";",
+                  "const messageId = \"pm-\" + Date.now();",
+                  "pm.environment.set(\"inbound_external_message_id\", messageId);",
+                  "const raw = JSON.stringify({",
+                  "    destination: pm.environment.get(\"line_destination_id\"),",
+                  "    events: [",
+                  "        {",
+                  "            type: \"message\",",
+                  "            timestamp: Date.now(),",
+                  "            source: { type: \"user\", userId: pm.environment.get(\"line_user_id\") },",
+                  "            message: { id: messageId, type: \"text\", text: pm.environment.get(\"tenant_known_issue\") },",
+                  "            replyToken: \"pm-reply-token\"",
+                  "        }",
+                  "    ]",
+                  "});",
+                  "pm.variables.set(\"line_raw_body\", raw);",
+                  "pm.variables.set(\"line_signature\", CryptoJS.HmacSHA256(raw, secret).toString(CryptoJS.enc.Base64));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Line-Signature", "value": "{{line_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{line_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/line",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "line"]
+            },
+            "description": "Public, signature-gated. The pre-request script signs the body with `line_channel_secret` (base64 HMAC-SHA256)."
+          }
+        },
+        {
+          "name": "inbound: email",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const secret = pm.environment.get(\"ai_webhook_secret\") || \"\";",
+                  "const messageId = \"<pm-\" + Date.now() + \"@mail.local>\";",
+                  "pm.environment.set(\"inbound_external_message_id\", messageId);",
+                  "const raw = JSON.stringify({",
+                  "    message_id: messageId,",
+                  "    from: pm.environment.get(\"inbound_email_from\"),",
+                  "    to: pm.environment.get(\"inbound_email_to\"),",
+                  "    subject: \"Damaged packaging on my last order\",",
+                  "    body: pm.environment.get(\"tenant_known_issue\"),",
+                  "    body_html: \"\"",
+                  "});",
+                  "pm.variables.set(\"email_raw_body\", raw);",
+                  "pm.variables.set(\"email_signature\", \"sha256=\" + CryptoJS.HmacSHA256(raw, secret).toString(CryptoJS.enc.Hex));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-AI-Signature", "value": "{{email_signature}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{email_raw_body}}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/inbound/email",
+              "host": ["{{base_url}}"],
+              "path": ["v1", "inbound", "email"]
+            },
+            "description": "Public, signature-gated with `ai_webhook_secret` (hex HMAC-SHA256). `to` must match a `channel_accounts` row."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Laravel ai",
+      "description": "The `/api/ai` section behind `auth:api` + `coverage`. Passport bearer, not the service JWT — set `passport_token`.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [{ "key": "token", "value": "{{passport_token}}", "type": "string" }]
+      },
+      "item": [
+        {
+          "name": "attachments: upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const json = pm.response.json();",
+                  "    pm.environment.set(\"stored_media_key\", json.storage_key);",
+                  "    pm.environment.set(\"attachment_signed_url\", json.url);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Max 10 MB. png, jpeg, webp, gif, audio/webm, audio/ogg, audio/mpeg, audio/wav."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/attachments",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "attachments"]
+            },
+            "description": "Stores the file under `attachments/{company_id}/{uuid}.{ext}` and returns `{id, storage_key, mime_type, size_bytes, url}`. The `url` is a 1-hour signed relative link. Captures `storage_key` into the environment so the Go reply requests can reference it."
+          }
+        },
+        {
+          "name": "chat: send",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_known_issue}}\" }\n  ],\n  \"locale\": \"en\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/chat",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "chat"]
+            },
+            "description": "SPA-facing chat. Laravel proxies to the Go `/v1/chat`."
+          }
+        },
+        {
+          "name": "chat: stream",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "text/event-stream" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"{{chat_known_issue}}\" }\n  ],\n  \"locale\": \"en\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/chat/stream",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "chat", "stream"]
+            },
+            "description": "SSE. Postman buffers the stream rather than rendering it live."
+          }
+        },
+        {
+          "name": "chat: open case",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"problem\": \"{{tenant_known_issue}}\",\n  \"detail\": \"\",\n  \"product\": \"\",\n  \"severity\": \"\",\n  \"contact\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/chat/open-case",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "chat", "open-case"]
+            },
+            "description": "Promotes a chat case draft into a report. Confirm the field names against `Api\\ChatController@openCase` before relying on this body."
+          }
+        },
+        {
+          "name": "reports: suggest",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/reports/{{report_id}}/suggest",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "reports", "{{report_id}}", "suggest"]
+            },
+            "description": "Asks the AI for a draft reply on an existing report."
+          }
+        },
+        {
+          "name": "feedback",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ai_action_id\": {{ai_action_id}},\n  \"verdict\": \"accepted\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/feedback",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "feedback"]
+            },
+            "description": "SPA-facing mirror of the Go `/v1/reply/feedback`."
+          }
+        },
+        {
+          "name": "dashboard: accuracy",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/dashboard/accuracy",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "dashboard", "accuracy"]
+            }
+          }
+        },
+        {
+          "name": "dashboard: answer rate",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/dashboard/answer-rate",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "dashboard", "answer-rate"]
+            }
+          }
+        },
+        {
+          "name": "dashboard: knowledge gaps",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/dashboard/knowledge-gaps",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "dashboard", "knowledge-gaps"]
+            }
+          }
+        },
+        {
+          "name": "review queue: list",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/review-queue",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "review-queue"]
+            },
+            "description": "Read the pending queue here, then approve or reject through Go or Laravel."
+          }
+        },
+        {
+          "name": "review queue: approve",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/review-queue/{{review_item_id}}/approve",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "review-queue", "{{review_item_id}}", "approve"]
+            }
+          }
+        },
+        {
+          "name": "review queue: reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"duplicate\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{laravel_base_url}}/api/ai/review-queue/{{review_item_id}}/reject",
+              "host": ["{{laravel_base_url}}"],
+              "path": ["api", "ai", "review-queue", "{{review_item_id}}", "reject"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

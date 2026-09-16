@@ -197,6 +197,7 @@ type Workflow struct {
 	appKey         string
 	backfill       BackfillWriter
 	activity       ports.ActivityRecorder
+	features       FeatureReader
 	log            *zap.Logger
 }
 
@@ -215,6 +216,7 @@ type Config struct {
 	AppKey         string
 	Backfill       BackfillWriter
 	Activity       ports.ActivityRecorder
+	Features       FeatureReader
 	Log            *zap.Logger
 }
 
@@ -247,6 +249,7 @@ func New(cfg Config) (*Workflow, error) {
 		appKey:         cfg.AppKey,
 		backfill:       cfg.Backfill,
 		activity:       cfg.Activity,
+		features:       cfg.Features,
 		log:            log,
 	}, nil
 }
@@ -280,10 +283,24 @@ func (w *Workflow) warn(msg string, companyID, convoID int64, err error, extra .
 	w.log.Warn(msg, append(fields, zap.Error(err))...)
 }
 
+func isLineEvent(n Normalized) bool {
+	switch n.EventType {
+	case "follow", "unfollow", "postback":
+		return true
+	default:
+		return false
+	}
+}
+
 func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, error) {
 	req := n.Request
 	req.Normalize()
-	if err := req.Validate(); err != nil {
+	lineEvent := isLineEvent(n)
+	if lineEvent {
+		if err := req.ValidateEvent(); err != nil {
+			return Result{}, fmt.Errorf("omnichannel: invalid request: %w", err)
+		}
+	} else if err := req.Validate(); err != nil {
 		return Result{}, fmt.Errorf("omnichannel: invalid request: %w", err)
 	}
 
@@ -317,6 +334,10 @@ func (w *Workflow) Run(ctx context.Context, n Normalized, raw []byte) (Result, e
 	}
 
 	ctx = ctxkey.WithCompanyID(ctx, account.CompanyID)
+
+	if lineEvent {
+		return Result{CompanyID: account.CompanyID, MatchedVia: matchedVia, MatchedAddress: matchedAddress}, nil
+	}
 
 	mu := conversationLock(account.CompanyID, account.ID, customer)
 	mu.Lock()
@@ -537,6 +558,10 @@ func (w *Workflow) enqueueTicket(ctx context.Context, res *Result, companyID, co
 		classification, confidence, threshold = assessed.Classification, assessed.Confidence, assessed.PromoteThreshold
 	}
 	promotableTicket := intake.ConfidencePromotable(classification, confidence, threshold)
+	lineBotOn := req.Channel == ChannelLine && w.lineBotEnabled(ctx, companyID)
+	if lineBotOn {
+		return
+	}
 	if req.Channel != ChannelLine && !(req.Channel == ChannelEmail && promotableTicket) {
 		return
 	}
@@ -547,6 +572,10 @@ func (w *Workflow) enqueueTicket(ctx context.Context, res *Result, companyID, co
 		return
 	}
 	res.TicketEnqueued = true
+}
+
+func (w *Workflow) lineBotEnabled(ctx context.Context, companyID int64) bool {
+	return w.features != nil && w.features.Enabled(ctx, companyID, FeatureLineBot)
 }
 
 func (w *Workflow) backfillReferencedCase(ctx context.Context, companyID, convoID int64, code string) bool {
